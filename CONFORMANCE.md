@@ -38,7 +38,8 @@ Status is `done` when code and tests exist in this repository. External-only ite
 
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
-| Assess → plan/explore → execute → validate → review → repair/replan → integrate → complete | `internal/orchestrator/machine.go` | `TestFullSyntheticRunArtifactOnly`, `TestFakeACPIntakeToCompleteArtifactOnly` | done |
+| Assess → plan → execute (fake ACP writes run workspace) → validate → review → READY_TO_INTEGRATE → three-way integrate → COMPLETE | `internal/orchestrator/machine.go`, `internal/harness/exec.go`, `cmd/wayshard-fake-acp` | `TestSourceChangingOrchestrationThroughIntegrate` (`internal/app/source_e2e_test.go`); asserts source unchanged until integrate, dirty `user.txt` stays user-owned, RunDelta is agent-only, journal present, complete only after publish | done |
+| Integration conflict through orchestrator (not integration package alone) | `conflictBefore` wrapping `IntegrateAdapter` | `TestOrchestratorIntegrationConflictBlocks` | done |
 | Append-only attempts | `AppendAttempt` | `TestFailedAttemptNotRewritten` | done |
 | NO_VIABLE_ROUTE | `internal/routing` | `TestHardFilterImpossible`, `TestNoViableRouteWithoutHarness` | done |
 | Jev DecisionEngine + deterministic fallback | `internal/jev` | routing tests with DeterministicEngine | done |
@@ -61,7 +62,11 @@ Status is `done` when code and tests exist in this repository. External-only ite
 
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
-| Sandbox backends, required isolation never silent unrestricted | `internal/sandbox` linux namespaces | `policy_test.go` | done |
+| Linux sandbox: user/net/mount/pid/uts namespaces + uid/gid map + process group + pdeathsig; constrain-or-fail if namespaces missing | `internal/sandbox/linux.go` | `TestNativeCompileAndConstrain`, `TestProcessTreeKill`, `TestCompileRequiresWritableRoots` (linux CI) | done |
+| macOS sandbox: `sandbox-exec` seatbelt profile compiled from SandboxPolicy (FS roots, network deny/allow); process group; fail if `sandbox-exec` missing when Required | `internal/sandbox/seatbelt.go`, `darwin.go`, `darwin_stub.go` | `TestSeatbeltProfileCompilation` (all OS); `TestNativeCompileAndConstrain` / `TestProcessTreeKill` on darwin CI; `TestForeignBackendsAreUnavailableHere` | done |
+| Windows sandbox: Job Objects (kill-on-close, active-process, job memory) + new process group; AppContainer **not claimed**; fail closed if CreateJobObject/assign fails when Required | `internal/sandbox/windows.go`, `windows_stub.go` | compiled `GOOS=windows go build ./...`; `TestNativeCompileAndConstrain` / `TestProcessTreeKill` on windows CI; `TestForeignBackendsAreUnavailableHere` | done |
+| Required isolation never silently unrestricted; unsupported backends error even if Required=false | `Manager.Start`, `AsConstrainer`, `UnsupportedBackend` | `TestRequiredIsolationNeverSilent`, `TestReducedSecurityStillDoesNotSilentlyUnrestrict`, `TestUnsupportedConstrainFailsClosed`, `TestProbeNeverClaimsUnrestricted` | done |
+| Harness launch applies compiled policy (`SetupCmd`/`AfterStart`) instead of policy types only | `internal/acp.Spec`, `internal/harness/exec.go` | fake-ACP e2e under constrained launch | done |
 | Object GC, workspace retention, disk pressure | `internal/storage/gc.go` | `gc_test.go` | done |
 | Backup excludes repos; optional secrets | `internal/backup` | `backup_test.go` | done |
 | Startup reconciliation | `internal/recovery` | used in `app.Open` | done |
@@ -87,7 +92,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Checksums, notices, Go SBOM | release job | workflow | done |
 | Web embedded in server | `internal/webembed` | embed dist | done |
 
-## External / manual only
+## External / manual only (not implementation failures)
 
 | Item | Why it cannot be closed in-repo |
 |---|---|

@@ -78,10 +78,12 @@ func (l Limits) withDefaults() Limits {
 
 // Spec launches one ACP process. Stdout is protocol-only; stderr is diagnostic.
 type Spec struct {
-	Command string
-	Args    []string
-	Env     []string
-	Dir     string
+	Command    string
+	Args       []string
+	Env        []string
+	Dir        string
+	SetupCmd   func(*exec.Cmd) error
+	AfterStart func(*exec.Cmd) (func(), error)
 }
 
 // Hooks are agent→client callbacks. Nil handlers deny or ignore.
@@ -150,12 +152,13 @@ type Driver struct {
 	pending  map[string]*pendingCall
 	inflight atomic.Int32
 
-	init     *InitializeResponse
-	closed   atomic.Bool
-	exitErr  error
-	dead     chan struct{}
-	lifetime context.Context
-	cancel   context.CancelFunc
+	init       *InitializeResponse
+	closed     atomic.Bool
+	exitErr    error
+	dead       chan struct{}
+	lifetime   context.Context
+	cancel     context.CancelFunc
+	extraClean func()
 
 	diagMu       sync.Mutex
 	diagnostics  []Diagnostic
@@ -181,6 +184,12 @@ func Launch(parent context.Context, spec Spec, client ClientConfig, hooks Hooks,
 		cmd.Env = sanitizeEnv(os.Environ())
 	}
 	setProcAttr(cmd)
+	if spec.SetupCmd != nil {
+		if err := spec.SetupCmd(cmd); err != nil {
+			cancel()
+			return nil, err
+		}
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -204,19 +213,30 @@ func Launch(parent context.Context, spec Spec, client ClientConfig, hooks Hooks,
 		cancel()
 		return nil, fmt.Errorf("launch %s: %w", spec.Command, err)
 	}
+	var extraClean func()
+	if spec.AfterStart != nil {
+		cfn, err := spec.AfterStart(cmd)
+		if err != nil {
+			_ = cmd.Process.Kill()
+			cancel()
+			return nil, err
+		}
+		extraClean = cfn
+	}
 	d := &Driver{
-		spec:     spec,
-		limits:   limits,
-		hooks:    hooks,
-		client:   client,
-		cmd:      cmd,
-		stdin:    stdin,
-		stdout:   stdout,
-		stderr:   stderr,
-		pending:  make(map[string]*pendingCall),
-		dead:     make(chan struct{}),
-		lifetime: ctx,
-		cancel:   cancel,
+		spec:       spec,
+		limits:     limits,
+		hooks:      hooks,
+		client:     client,
+		cmd:        cmd,
+		stdin:      stdin,
+		stdout:     stdout,
+		stderr:     stderr,
+		pending:    make(map[string]*pendingCall),
+		dead:       make(chan struct{}),
+		lifetime:   ctx,
+		cancel:     cancel,
+		extraClean: extraClean,
 	}
 	go d.readStdout()
 	go d.readStderr()
@@ -384,6 +404,9 @@ func (d *Driver) shutdown() {
 		_ = signalTerm(pid)
 		select {
 		case <-d.dead:
+			if d.extraClean != nil {
+				d.extraClean()
+			}
 			return
 		case <-time.After(d.limits.ShutdownWait):
 			select {
@@ -392,6 +415,9 @@ func (d *Driver) shutdown() {
 				_ = killTree(pid)
 			}
 		}
+	}
+	if d.extraClean != nil {
+		d.extraClean()
 	}
 }
 

@@ -45,22 +45,12 @@ type Backend interface {
 
 // IsolationReport is honest capability reporting for UI/routing.
 type IsolationReport struct {
-	Backend   string `json:"backend"`
-	Available bool   `json:"available"`
-	Mode      string `json:"mode"`
-	Detail    string `json:"detail"`
-}
-
-func Probe() IsolationReport {
-	b := DefaultBackend()
-	r := IsolationReport{Backend: b.Name(), Available: b.Available(), Mode: "outer_only"}
-	if !b.Available() {
-		r.Detail = "required isolation cannot be established; refusing silent unrestricted execution"
-		return r
-	}
-	r.Mode = "namespaces"
-	r.Detail = "platform backend available"
-	return r
+	Backend   string   `json:"backend"`
+	Available bool     `json:"available"`
+	Mode      string   `json:"mode"`
+	Features  []string `json:"features,omitempty"`
+	Missing   []string `json:"missing,omitempty"`
+	Detail    string   `json:"detail"`
 }
 
 type Cleanup func()
@@ -87,10 +77,8 @@ type UnsupportedBackend struct{ OS string }
 func (u UnsupportedBackend) Name() string    { return "unsupported" }
 func (u UnsupportedBackend) Available() bool { return false }
 func (u UnsupportedBackend) Apply(ctx context.Context, p Policy) (Cleanup, error) {
-	if p.Required {
-		return nil, fmt.Errorf("%w on %s", ErrRequiredIsolation, u.OS)
-	}
-	return func() {}, fmt.Errorf("%w on %s", ErrRequiredIsolation, u.OS)
+	_ = ctx
+	return nil, fmt.Errorf("%w on %s", ErrRequiredIsolation, u.OS)
 }
 
 func (m *Manager) Start(ctx context.Context, p Policy) (Cleanup, error) {
@@ -111,37 +99,20 @@ func (m *Manager) Start(ctx context.Context, p Policy) (Cleanup, error) {
 	return clean, nil
 }
 
-// LinuxBackend uses the best available primitives; it never silently becomes unsandboxed if Required.
 type LinuxBackend struct{}
 
 func (LinuxBackend) Name() string    { return "linux" }
 func (LinuxBackend) Available() bool { return runtime.GOOS == "linux" }
 
-// Linux Apply is implemented in linux.go (build-tagged) so containment is real.
-
 type DarwinBackend struct{}
 
 func (DarwinBackend) Name() string    { return "darwin" }
 func (DarwinBackend) Available() bool { return runtime.GOOS == "darwin" }
-func (DarwinBackend) Apply(ctx context.Context, p Policy) (Cleanup, error) {
-	_ = ctx
-	if p.Required && len(p.ReadWriteRoots) == 0 {
-		return nil, fmt.Errorf("%w: no writable roots in policy", ErrRequiredIsolation)
-	}
-	return func() {}, nil
-}
 
 type WindowsBackend struct{}
 
 func (WindowsBackend) Name() string    { return "windows" }
 func (WindowsBackend) Available() bool { return runtime.GOOS == "windows" }
-func (WindowsBackend) Apply(ctx context.Context, p Policy) (Cleanup, error) {
-	_ = ctx
-	if p.Required && len(p.ReadWriteRoots) == 0 {
-		return nil, fmt.Errorf("%w: no writable roots in policy", ErrRequiredIsolation)
-	}
-	return func() {}, nil
-}
 
 func ToolPolicy(runWorkspace, syntheticHome string, net NetworkMode) Policy {
 	return Policy{
@@ -160,7 +131,7 @@ func ToolPolicy(runWorkspace, syntheticHome string, net NetworkMode) Policy {
 func HarnessPolicy(runWorkspace, configDir string) Policy {
 	return Policy{
 		ReadWriteRoots: []string{runWorkspace, configDir},
-		Network:        NetUnrestricted, // provider control plane, distinct from tool network
+		Network:        NetUnrestricted,
 		Required:       true,
 	}
 }

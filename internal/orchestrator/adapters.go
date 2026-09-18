@@ -9,7 +9,6 @@ import (
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/id"
 	"github.com/Wayshard/wayshard/internal/integration"
-	"github.com/Wayshard/wayshard/internal/paths"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
 )
@@ -82,7 +81,7 @@ func (a *IntegrateAdapter) Integrate(ctx context.Context, run domain.Run, ws *do
 		Snapshot:     snap,
 		RunWorkspace: ws.RunPath,
 		WorkDir:      filepath.Join(os.TempDir(), "wayshard-integrate-"+run.ID),
-		JournalDir:   filepath.Join(paths.DataDir(), "runtime", "journals", run.ID),
+		JournalDir:   filepath.Join(a.Store.Root, "runtime", "journals", run.ID),
 	})
 	in := &domain.Integration{RunID: run.ID, ProjectID: run.ProjectID, BaseSnapshot: ws.SnapshotID}
 	if res != nil {

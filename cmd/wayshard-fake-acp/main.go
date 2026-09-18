@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -296,6 +297,10 @@ func (a *agent) onPrompt(req request) {
 	a.notifyUpdate(p.SessionID, "agent_thought_chunk", "considering the task")
 	if a.effectiveStage() == "execute" || a.effectiveStage() == "repair" {
 		a.notifyTool(p.SessionID, "call_1", "apply patch", "edit", "completed")
+		if rel := os.Getenv("WAYSHARD_FAKE_WRITE_FILE"); rel != "" {
+			cwd, _ := os.Getwd()
+			_ = os.WriteFile(filepath.Join(cwd, rel), []byte("package agent\n// wayshard fake ACP change\n"), 0o644)
+		}
 	}
 	if path := os.Getenv("WAYSHARD_FAKE_READ_FILE"); path != "" {
 		_, _ = a.callClient("fs/read_text_file", map[string]any{
@@ -452,7 +457,7 @@ func getenv(k, def string) string {
 func artifactJSON(stage string, ok bool) string {
 	switch stage {
 	case "execute", "repair":
-		return `{"kind":"implementation_report","summary":"applied the requested change","filesChanged":[],"deviations":[],"expectedValidation":["go test ./..."]}`
+		return `{"kind":"implementation_report","summary":"applied the requested change","filesChanged":["agent.go"],"deviations":[],"expectedValidation":["true"]}`
 	case "review":
 		if !ok {
 			return `{"kind":"review","verdict":"fail","criteria":[{"id":"c1","status":"fail","evidence":"acceptance criterion not met"}],"findings":[{"severity":"blocking","path":"main.go","explanation":"behavior mismatch","requiredFix":"implement the missing branch"}]}`
@@ -461,6 +466,6 @@ func artifactJSON(stage string, ok bool) string {
 	case "explore":
 		return `{"kind":"investigation","question":"how does this work","findings":["deterministic fake finding"],"openQuestions":[]}`
 	default:
-		return `{"kind":"plan","objective":"implement the requested change","constraints":[],"acceptanceCriteria":["behavior matches the request"],"expectedPaths":[],"validationPlan":["go test ./..."],"risks":[]}`
+		return `{"kind":"plan","objective":"implement the requested change","constraints":[],"acceptanceCriteria":["behavior matches the request"],"expectedPaths":["agent.go"],"validationPlan":["true"],"risks":[]}`
 	}
 }

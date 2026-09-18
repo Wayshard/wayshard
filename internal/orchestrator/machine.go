@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/artifacts"
@@ -15,6 +16,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/routing"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/validation"
+	"github.com/Wayshard/wayshard/internal/workspace"
 )
 
 // StageExec executes a semantic stage against a harness or server-owned subsystem.
@@ -328,7 +330,27 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 	if err := e.Store.InsertArtifact(ctx, art); err != nil {
 		return err
 	}
+	if kind.WritesWorkspace() {
+		e.recordDelta(ctx, run.ID)
+	}
 	return e.advance(ctx, run, task, kind, parsed)
+}
+
+func (e *Engine) recordDelta(ctx context.Context, runID string) {
+	ws, err := e.Store.GetWorkspaceByRun(ctx, runID)
+	if err != nil {
+		return
+	}
+	snap, err := workspace.LoadSnapshot(filepath.Join(filepath.Dir(ws.RunPath), "snapshot"))
+	if err != nil {
+		return
+	}
+	d, err := workspace.ComputeDelta(snap, ws.RunPath)
+	if err != nil {
+		return
+	}
+	b, _ := json.Marshal(d)
+	_ = e.Store.InsertRunDelta(ctx, runID, string(b), "")
 }
 
 func (e *Engine) advance(ctx context.Context, run *domain.Run, task *domain.Task, finished domain.StageKind, parsed any) error {

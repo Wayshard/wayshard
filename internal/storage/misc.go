@@ -285,6 +285,21 @@ func (s *Store) GetWorkspaceByRun(ctx context.Context, runID string) (*domain.Wo
 	return &w, nil
 }
 
+func (s *Store) InsertRunDelta(ctx context.Context, runID, summaryJSON, objectHash string) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO run_deltas(id, run_id, summary_json, object_hash, created_at) VALUES (?,?,?,?,?)`,
+		id.New(), runID, summaryJSON, objectHash, nowRFC3339())
+	return err
+}
+
+func (s *Store) LatestRunDelta(ctx context.Context, runID string) (string, error) {
+	var js string
+	err := s.DB.QueryRowContext(ctx, `SELECT summary_json FROM run_deltas WHERE run_id = ? ORDER BY created_at DESC LIMIT 1`, runID).Scan(&js)
+	if err == sql.ErrNoRows {
+		return "", ErrNotFound
+	}
+	return js, err
+}
+
 func (s *Store) InsertSnapshot(ctx context.Context, snap *domain.Snapshot) error {
 	if snap.ID == "" {
 		snap.ID = id.New()

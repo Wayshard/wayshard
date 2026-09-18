@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/Wayshard/wayshard/internal/acp"
@@ -47,9 +48,19 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	spec.Env = append(os.Environ(), inst.Env...)
 	if e.Sandbox != nil {
 		pol := sandbox.HarnessPolicy(cwd, os.TempDir())
-		if _, err := e.Sandbox.Start(ctx, pol); err != nil && pol.Required {
+		if cwd != "" {
+			pol.ReadWriteRoots = []string{cwd}
+		}
+		b := e.Sandbox.Backend
+		if b == nil {
+			b = sandbox.DefaultBackend()
+		}
+		con := sandbox.AsConstrainer(b)
+		if _, err := con.Compile(pol); err != nil {
 			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
 		}
+		spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, pol) }
+		spec.AfterStart = func(cmd *exec.Cmd) (func(), error) { return con.Attach(cmd, pol) }
 	}
 	drv, err := acp.Launch(ctx, spec, acp.DefaultClientConfig(), acp.Hooks{}, acp.Limits{})
 	if err != nil {
