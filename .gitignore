@@ -1,0 +1,70 @@
+# Binaries
+/bin/
+/dist/
+/out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/wayshard
+/wayshard-server
+/wayshard-fake-acp
+
+# Test / coverage
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go
+vendor/
+
+# Node / bun
+node_modules/
+.turbo/
+.vite/
+*.tsbuildinfo
+.bun/
+
+# Embedded / client build output (generated)
+/internal/webembed/dist/
+/clients/web/dist/
+/clients/**/dist/
+
+# Desktop / Android (Tauri 2)
+/clients/desktop/src-tauri/target/
+/clients/desktop/src-tauri/gen/
+**/*.apk
+**/*.aab
+**/*.ipa
+.gradle/
+local.properties
+
+# Data / secrets
+.data/
+*.db
+*.db-wal
+*.db-shm
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Release scratch
+/release/
+/sbom/
+
+# Local scratch (never an OpenCode upstream remote)
+/tmp/

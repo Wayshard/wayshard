@@ -1,0 +1,134 @@
+package validation
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Wayshard/wayshard/internal/artifacts"
+	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/storage"
+)
+
+// Discover inspects project files passively. It never executes project code.
+func Discover(root string) []artifacts.ValidationCheck {
+	var checks []artifacts.ValidationCheck
+	add := func(name, kind, cmd string, required bool) {
+		checks = append(checks, artifacts.ValidationCheck{Name: name, Kind: kind, Command: cmd, Required: required, Status: string(domain.CheckNotVerified)})
+	}
+	if exists(root, "go.mod") {
+		add("go-test", "test", "go test ./...", true)
+		add("go-vet", "lint", "go vet ./...", false)
+	}
+	if exists(root, "package.json") {
+		b, _ := os.ReadFile(filepath.Join(root, "package.json"))
+		var pkg map[string]any
+		_ = json.Unmarshal(b, &pkg)
+		scripts, _ := pkg["scripts"].(map[string]any)
+		if scripts != nil {
+			if _, ok := scripts["test"]; ok {
+				add("npm-test", "test", "npm test", true)
+			}
+			if _, ok := scripts["lint"]; ok {
+				add("npm-lint", "lint", "npm run lint", false)
+			}
+			if _, ok := scripts["typecheck"]; ok {
+				add("typecheck", "typecheck", "npm run typecheck", false)
+			}
+		}
+	}
+	if exists(root, "Cargo.toml") {
+		add("cargo-test", "test", "cargo test", true)
+	}
+	if exists(root, "pyproject.toml") || exists(root, "pytest.ini") {
+		add("pytest", "test", "pytest", false)
+	}
+	if exists(root, "Makefile") {
+		b, _ := os.ReadFile(filepath.Join(root, "Makefile"))
+		if bytes.Contains(b, []byte("\ntest:")) || bytes.Contains(b, []byte("\ntest :")) {
+			add("make-test", "test", "make test", false)
+		}
+	}
+	return checks
+}
+
+func exists(root, name string) bool {
+	_, err := os.Stat(filepath.Join(root, name))
+	return err == nil
+}
+
+type Runner struct {
+	Store *storage.Store
+}
+
+func (r *Runner) Run(ctx context.Context, workspace string, plan []artifacts.ValidationCheck, baseline map[string]string) artifacts.ValidationArtifact {
+	art := artifacts.ValidationArtifact{Kind: "validation"}
+	for _, c := range plan {
+		c = r.execCheck(ctx, workspace, c)
+		if base, ok := baseline[c.Name]; ok {
+			c.Baseline = base
+			art.BaselineCompared = true
+			if base == string(domain.CheckFail) && c.Status == string(domain.CheckFail) {
+				c.Summary = "pre-existing failure"
+			} else if base != string(domain.CheckFail) && c.Status == string(domain.CheckFail) {
+				c.Summary = "new regression"
+				art.BlockingFailures = append(art.BlockingFailures, c.Name)
+			}
+		} else if c.Required && c.Status == string(domain.CheckFail) {
+			art.BlockingFailures = append(art.BlockingFailures, c.Name)
+		}
+		if c.Status == string(domain.CheckWarn) {
+			art.Warnings = append(art.Warnings, c.Name)
+		}
+		if c.Status == string(domain.CheckNotVerified) || c.Status == string(domain.CheckSkipped) {
+			art.Unverified = append(art.Unverified, c.Name)
+		}
+		art.Checks = append(art.Checks, c)
+	}
+	return art
+}
+
+func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.ValidationCheck) artifacts.ValidationCheck {
+	if strings.TrimSpace(c.Command) == "" {
+		c.Status = string(domain.CheckSkipped)
+		return c
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	start := time.Now()
+	parts := strings.Fields(c.Command)
+	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	cmd.Dir = dir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	c.DurationMS = time.Since(start).Milliseconds()
+	c.Dir = dir
+	if r.Store != nil {
+		h, _ := r.Store.Objects.Put(buf.Bytes())
+		c.LogHash = h
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			c.Status = string(domain.CheckBlocked)
+			c.Summary = ctx.Err().Error()
+			return c
+		}
+		c.Status = string(domain.CheckFail)
+		if cmd.ProcessState != nil {
+			c.ExitCode = cmd.ProcessState.ExitCode()
+		}
+		c.Summary = err.Error()
+		return c
+	}
+	c.Status = string(domain.CheckPass)
+	c.ExitCode = 0
+	c.Summary = "ok"
+	return c
+}

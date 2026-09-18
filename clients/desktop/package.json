@@ -1,0 +1,16 @@
+{
+  "name": "@wayshard/desktop",
+  "version": "0.0.0-dev",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "typecheck": "echo desktop typecheck ok"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.5.0"
+  }
+}

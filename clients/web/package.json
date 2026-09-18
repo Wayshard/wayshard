@@ -1,0 +1,22 @@
+{
+  "name": "@wayshard/web",
+  "version": "0.0.0-dev",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.app.json",
+    "test": "bun test src/wayshard"
+  },
+  "dependencies": {
+    "@wayshard/sdk": "workspace:*",
+    "solid-js": "1.9.10"
+  },
+  "devDependencies": {
+    "typescript": "5.8.2",
+    "vite": "7.1.4",
+    "vite-plugin-solid": "2.11.10"
+  }
+}

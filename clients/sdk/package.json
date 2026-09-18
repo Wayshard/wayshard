@@ -1,0 +1,12 @@
+{
+  "name": "@wayshard/sdk",
+  "version": "0.0.0-dev",
+  "type": "module",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
+  }
+}

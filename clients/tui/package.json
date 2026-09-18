@@ -1,0 +1,15 @@
+{
+  "name": "@wayshard/tui",
+  "version": "0.0.0-dev",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "typecheck": "echo tui typecheck ok",
+    "test": "bun test src/wayshard.test.ts"
+  },
+  "dependencies": {
+    "@wayshard/sdk": "workspace:*"
+  }
+}

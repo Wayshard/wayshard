@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Build server, CLI, fake ACP
+        run: |
+          go build -o wayshard-server ./cmd/wayshard-server
+          go build -o wayshard ./cmd/wayshard
+          go build -o wayshard-fake-acp ./cmd/wayshard-fake-acp
+
+  clients:
+    name: Clients
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.21"
+      - name: Install client workspace
+        run: bun install
+        working-directory: clients
+      - name: Typecheck SDK
+        run: bun run typecheck
+        working-directory: clients/sdk
+      - name: Typecheck web
+        run: bun run typecheck
+        working-directory: clients/web
+      - name: Tests
+        run: |
+          bun run test
+        working-directory: clients/sdk
+      - name: Web tests
+        run: bun run test
+        working-directory: clients/web
+      - name: TUI tests
+        run: bun run test
+        working-directory: clients/tui
+      - name: Build web
+        run: bun run build
+        working-directory: clients/web
+
+  canonicals:
+    name: Canonicals present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require six canonical documents
+        run: |
+          for f in AGENTS.md DESIGN.md SPEC.md ARCHITECTURE.md MEMORY.md README.md LICENSE NOTICE; do
+            test -s "$f" || { echo "missing $f"; exit 1; }
+          done
