@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/artifacts"
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/testutil"
 )
 
 var fakeACP string
@@ -23,7 +24,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	fakeACP = filepath.Join(dir, "wayshard-fake-acp")
+	fakeACP = filepath.Join(dir, testutil.ExeName("wayshard-fake-acp"))
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	cmd := exec.Command("go", "build", "-o", fakeACP, "./cmd/wayshard-fake-acp")
@@ -418,14 +419,19 @@ func TestRedactSecrets(t *testing.T) {
 
 func TestOversizedFrame(t *testing.T) {
 	dir := t.TempDir()
-	script := filepath.Join(dir, "big.sh")
-	body := "#!/bin/sh\nread _\nprintf '%s' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"'\ndd if=/dev/zero bs=1024 count=8 2>/dev/null | tr '\\0' 'a'\nprintf '\"}'\nprintf '\\n'\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+	src := filepath.Join(dir, "main.go")
+	body := "package main\nimport (\n\t\"bufio\"\n\t\"os\"\n\t\"strings\"\n)\nfunc main() {\n\tbufio.NewReader(os.Stdin).ReadBytes('\\n')\n\tos.Stdout.WriteString(`{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"` + strings.Repeat(\"a\", 8192) + `\"}` + \"\\n\")\n}\n"
+	if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, testutil.ExeName("big"))
+	build := exec.Command("go", "build", "-o", bin, src)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build oversized helper: %v\n%s", err, out)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	d, err := Launch(ctx, Spec{Command: script}, DefaultClientConfig(), Hooks{}, Limits{MaxFrameBytes: 1024, HandshakeTimeout: 2 * time.Second})
+	d, err := Launch(ctx, Spec{Command: bin}, DefaultClientConfig(), Hooks{}, Limits{MaxFrameBytes: 1024, HandshakeTimeout: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

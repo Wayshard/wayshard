@@ -252,7 +252,15 @@ func initRepo(t *testing.T, dir string, files map[string]string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t",
+			"GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t",
+			"GIT_COMMITTER_EMAIL=t@t",
+			"GIT_CONFIG_NOSYSTEM=1",
+			"GIT_CONFIG_GLOBAL="+os.DevNull,
+			"GIT_CONFIG_SYSTEM="+os.DevNull,
+		)
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, b)
 		}
@@ -260,6 +268,8 @@ func initRepo(t *testing.T, dir string, files map[string]string) {
 	run("init", "-b", "main")
 	run("config", "user.email", "t@t")
 	run("config", "user.name", "t")
+	run("config", "commit.gpgsign", "false")
+	run("config", "core.autocrlf", "false")
 	for p, body := range files {
 		fp := filepath.Join(dir, p)
 		if err := os.WriteFile(fp, []byte(body), 0o644); err != nil {

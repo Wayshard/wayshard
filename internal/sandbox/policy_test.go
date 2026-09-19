@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,8 +60,12 @@ func TestSeatbeltProfileCompilation(t *testing.T) {
 	if !strings.Contains(prof, "(deny network*)") {
 		t.Fatal("network none must deny network")
 	}
-	if !strings.Contains(prof, ws) {
-		t.Fatal("writable root missing")
+	if !strings.Contains(prof, "(allow file-map-executable)") {
+		t.Fatal("profile must allow mapping the dynamic linker")
+	}
+	quoted := strconv.Quote(filepath.ToSlash(filepath.Clean(ws)))
+	if !strings.Contains(prof, quoted) {
+		t.Fatalf("writable root %s missing from profile:\n%s", quoted, prof)
 	}
 }
 

@@ -3,6 +3,7 @@ package sandbox
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -20,33 +21,64 @@ func SeatbeltProfile(p Policy) (string, error) {
 	b.WriteString("(allow sysctl-read)\n")
 	b.WriteString("(allow mach-lookup)\n")
 	b.WriteString("(allow file-read-metadata)\n")
-	b.WriteString("(allow file-read* (subpath \"/usr\") (subpath \"/bin\") (subpath \"/sbin\") (subpath \"/opt\") (subpath \"/private/etc\") (subpath \"/dev\"))\n")
+	b.WriteString("(allow file-map-executable)\n")
+	b.WriteString("(allow file-ioctl)\n")
+	// Host paths required to exec a signed system binary (dyld shared cache).
+	b.WriteString("(allow file-read* (subpath \"/usr\") (subpath \"/bin\") (subpath \"/sbin\") (subpath \"/opt\") (subpath \"/System\") (subpath \"/Library\") (subpath \"/private/etc\") (subpath \"/private/var/db\") (subpath \"/dev\") (subpath \"/private/tmp\") (subpath \"/tmp\"))\n")
 	for _, root := range p.ReadOnlyRoots {
-		if root == "" {
-			continue
-		}
-		fmt.Fprintf(&b, "(allow file-read* (subpath %q))\n", filepath.Clean(root))
+		writeSeatbeltRoots(&b, root, false)
 	}
 	for _, root := range p.ReadWriteRoots {
-		if root == "" {
-			continue
-		}
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", filepath.Clean(root))
+		writeSeatbeltRoots(&b, root, true)
 	}
 	if p.SyntheticHome != "" {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", filepath.Clean(p.SyntheticHome))
+		writeSeatbeltRoots(&b, p.SyntheticHome, true)
 	}
 	if p.SyntheticTemp != "" {
-		fmt.Fprintf(&b, "(allow file-read* file-write* (subpath %q))\n", filepath.Clean(p.SyntheticTemp))
+		writeSeatbeltRoots(&b, p.SyntheticTemp, true)
 	}
 	switch p.Network {
 	case NetNone, "":
 		b.WriteString("(deny network*)\n")
 	case NetAllowlist, NetBrokered:
 		b.WriteString("(deny network*)\n")
-		// allowlist destinations are brokered outside the profile
 	case NetUnrestricted:
 		b.WriteString("(allow network*)\n")
 	}
 	return b.String(), nil
+}
+
+func writeSeatbeltRoots(b *strings.Builder, root string, write bool) {
+	for _, p := range seatbeltPaths(root) {
+		if write {
+			fmt.Fprintf(b, "(allow file-read* file-write* (subpath %s))\n", strconv.Quote(p))
+		} else {
+			fmt.Fprintf(b, "(allow file-read* (subpath %s))\n", strconv.Quote(p))
+		}
+	}
+}
+
+func seatbeltPaths(root string) []string {
+	if root == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(p string) {
+		p = filepath.Clean(p)
+		if p == "" || p == "." || p == string(filepath.Separator) {
+			return
+		}
+		p = filepath.ToSlash(p)
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	add(root)
+	if rp, err := filepath.EvalSymlinks(root); err == nil {
+		add(rp)
+	}
+	return out
 }

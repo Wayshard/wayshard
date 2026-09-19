@@ -90,10 +90,27 @@ func DiscoverContext(ctx context.Context, path string) (*Repo, error) {
 		common = gitDir
 	}
 	return &Repo{
-		WorkTree:  strings.TrimSpace(string(top)),
-		GitDir:    strings.TrimSpace(string(gitDir)),
-		CommonDir: strings.TrimSpace(string(common)),
+		WorkTree:  CanonicalPath(strings.TrimSpace(string(top))),
+		GitDir:    CanonicalPath(strings.TrimSpace(string(gitDir))),
+		CommonDir: CanonicalPath(strings.TrimSpace(string(common))),
 	}, nil
+}
+
+// CanonicalPath resolves abs, symlinks, and Windows 8.3 names so Git-reported
+// paths can be compared with Go temp directories.
+func CanonicalPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return p
+	}
+	p = filepath.Clean(p)
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if rp, err := filepath.EvalSymlinks(p); err == nil {
+		p = rp
+	}
+	return filepath.Clean(p)
 }
 
 // HEAD returns the current commit SHA, or "" if the repository has no commits.
@@ -302,7 +319,7 @@ func Init(ctx context.Context, dest, branch string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"-c", "core.hooksPath=/dev/null", "init"}
+	args := []string{"-c", "core.hooksPath=" + gitNull(), "init"}
 	if branch != "" {
 		args = append(args, "-b", branch)
 	}
@@ -314,7 +331,7 @@ func Init(ctx context.Context, dest, branch string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, _ = repo.run(ctx, nil, "config", "core.hooksPath", "/dev/null")
+	_, _ = repo.run(ctx, nil, "config", "core.hooksPath", gitNull())
 	return repo, nil
 }
 
@@ -329,7 +346,7 @@ func CloneIsolated(ctx context.Context, srcWorkTree, dest, head, branch string) 
 		return nil, err
 	}
 	args := []string{
-		"-c", "core.hooksPath=/dev/null",
+		"-c", "core.hooksPath=" + gitNull(),
 		"-c", "advice.detachedHead=false",
 		"clone", "--local", "--no-hardlinks", "--no-checkout", "--template=",
 		srcWorkTree, dest,
@@ -341,7 +358,7 @@ func CloneIsolated(ctx context.Context, srcWorkTree, dest, head, branch string) 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := repo.run(ctx, nil, "config", "core.hooksPath", "/dev/null"); err != nil {
+	if _, err := repo.run(ctx, nil, "config", "core.hooksPath", gitNull()); err != nil {
 		return nil, err
 	}
 	remotes, _ := repo.run(ctx, nil, "remote")
@@ -431,7 +448,11 @@ func run(ctx context.Context, dir string, extraEnv []string, args ...string) ([]
 	if err != nil {
 		return nil, err
 	}
-	full := append([]string{"-c", "core.hooksPath=/dev/null", "-c", "core.quotepath=false"}, args...)
+	full := append([]string{
+		"-c", "core.hooksPath=" + gitNull(),
+		"-c", "core.quotepath=false",
+		"-c", "core.autocrlf=false",
+	}, args...)
 	return runBin(ctx, bin, dir, extraEnv, full...)
 }
 
@@ -465,6 +486,10 @@ func runBin(ctx context.Context, bin, dir string, extraEnv []string, args ...str
 	return stdout.Bytes(), nil
 }
 
+func gitNull() string {
+	return os.DevNull
+}
+
 func baseEnv() []string {
 	return append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
@@ -472,6 +497,8 @@ func baseEnv() []string {
 		"GIT_ASKPASS=echo",
 		"GCM_INTERACTIVE=never",
 		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
 	)
 }
 
@@ -583,6 +610,20 @@ func copyPath(src, dst string) error {
 		return closeErr
 	}
 	if err := os.Chmod(tmp, fi.Mode().Perm()); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := replaceFile(tmp, dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+func replaceFile(tmp, dst string) error {
+	if err := os.Rename(tmp, dst); err == nil {
+		return nil
+	}
+	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
 		os.Remove(tmp)
 		return err
 	}

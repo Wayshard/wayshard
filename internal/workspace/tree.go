@@ -65,7 +65,14 @@ func SafeRel(path string) (string, error) {
 	if path == "" {
 		return "", ErrUnsafePath
 	}
-	if filepath.IsAbs(path) {
+	if filepath.IsAbs(path) || filepath.IsAbs(filepath.FromSlash(path)) {
+		return "", ErrUnsafePath
+	}
+	// Unix absolute and Windows volume-relative (`/abs`, `\Windows`) plus `C:foo`.
+	if strings.HasPrefix(path, "/") {
+		return "", ErrUnsafePath
+	}
+	if len(path) >= 2 && path[1] == ':' {
 		return "", ErrUnsafePath
 	}
 	clean := filepath.ToSlash(filepath.Clean(path))
@@ -289,8 +296,7 @@ func copyPath(src, dst string) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+	if err := ReplaceFile(tmp, dst); err != nil {
 		return err
 	}
 	return nil
@@ -305,6 +311,22 @@ func writeBytes(dst string, data []byte, mode string) error {
 		return err
 	}
 	if err := os.Chmod(tmp, permFor(mode)); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := ReplaceFile(tmp, dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ReplaceFile moves tmp onto dst, replacing an existing file. Windows cannot
+// rename over a destination, so remove-then-rename is used when needed.
+func ReplaceFile(tmp, dst string) error {
+	if err := os.Rename(tmp, dst); err == nil {
+		return nil
+	}
+	if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {
 		os.Remove(tmp)
 		return err
 	}

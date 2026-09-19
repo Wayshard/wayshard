@@ -53,6 +53,7 @@ func Open(path string) (WorkspaceBackend, error) {
 	if err != nil {
 		return nil, err
 	}
+	abs = gitutil.CanonicalPath(abs)
 	fi, err := os.Stat(abs)
 	if err != nil {
 		return nil, err
@@ -79,6 +80,10 @@ type GitWorkspaceBackend struct {
 func NewGitBackend(repo *gitutil.Repo, root string) *GitWorkspaceBackend {
 	if root == "" {
 		root = repo.WorkTree
+	}
+	root = gitutil.CanonicalPath(root)
+	if repo != nil && repo.WorkTree != "" {
+		repo.WorkTree = gitutil.CanonicalPath(repo.WorkTree)
 	}
 	return &GitWorkspaceBackend{repo: repo, root: root}
 }
@@ -126,19 +131,41 @@ func (b *GitWorkspaceBackend) CurrentState(ctx context.Context) (*SourceState, e
 }
 
 func (b *GitWorkspaceBackend) inRoot(workTreeRel string) (string, bool) {
-	abs := filepath.Join(b.repo.WorkTree, filepath.FromSlash(workTreeRel))
-	rel, err := filepath.Rel(b.root, abs)
+	rel, err := SafeRel(filepath.ToSlash(workTreeRel))
 	if err != nil {
 		return "", false
 	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." || rel == "" {
+	if sameDir(b.root, b.repo.WorkTree) {
+		return rel, true
+	}
+	abs := filepath.Join(b.repo.WorkTree, filepath.FromSlash(rel))
+	got, err := filepath.Rel(b.root, abs)
+	if err != nil {
 		return "", false
 	}
-	if _, err := SafeRel(rel); err != nil {
+	got = filepath.ToSlash(got)
+	if got == "." || got == "" {
 		return "", false
 	}
-	return rel, true
+	if _, err := SafeRel(got); err != nil {
+		return "", false
+	}
+	return got, true
+}
+
+func sameDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if gitutil.CanonicalPath(a) == gitutil.CanonicalPath(b) {
+		return true
+	}
+	sa, err1 := os.Stat(a)
+	sb, err2 := os.Stat(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return os.SameFile(sa, sb)
 }
 
 // FilesystemWorkspaceBackend is a non-git directory tree.

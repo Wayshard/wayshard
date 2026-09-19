@@ -8,12 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/testutil"
 )
 
 func TestFakeACPIntakeToCompleteArtifactOnly(t *testing.T) {
@@ -104,15 +104,5 @@ func TestNoViableRouteWithoutHarness(t *testing.T) {
 
 func buildFakeACP(t *testing.T) string {
 	t.Helper()
-	out := filepath.Join(t.TempDir(), "wayshard-fake-acp")
-	cmd := exec.Command("go", "build", "-o", out, "./cmd/wayshard-fake-acp")
-	cmd.Dir = filepath.Join("..", "..")
-	if wd, err := os.Getwd(); err == nil {
-		cmd.Dir = filepath.Clean(filepath.Join(wd, "..", ".."))
-	}
-	b, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("build: %v\n%s", err, b)
-	}
-	return out
+	return testutil.BuildFakeACP(t)
 }

@@ -2,7 +2,7 @@
 # Generate maintainer-owned signing material locally. Never run this in CI.
 # Does not require Apple, Microsoft, Google, or any paid account.
 set -euo pipefail
-OUT="${1:-$HOME/wayshard-signing-material}"
+OUT="${1:?usage: generate-signing-material.sh <secure-signing-directory>}"
 mkdir -p "$OUT"
 umask 077
 cd "$OUT"

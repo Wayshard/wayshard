@@ -52,10 +52,6 @@ func (b DarwinBackend) Apply(ctx context.Context, p Policy) (Cleanup, error) {
 }
 
 func (DarwinBackend) Constrain(cmd *exec.Cmd, p Policy) error {
-	compiled, err := (DarwinBackend{}).Compile(p)
-	if err != nil {
-		return err
-	}
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -84,6 +80,19 @@ func (DarwinBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 		if lp, err := exec.LookPath(orig); err == nil {
 			orig = lp
 		}
+	}
+	if orig != "" {
+		if abs, err := filepath.Abs(orig); err == nil {
+			orig = abs
+		}
+		if rp, err := filepath.EvalSymlinks(orig); err == nil {
+			orig = rp
+		}
+		p.ReadOnlyRoots = append(append([]string{}, p.ReadOnlyRoots...), filepath.Dir(orig))
+	}
+	compiled, err := (DarwinBackend{}).Compile(p)
+	if err != nil {
+		return err
 	}
 	dir, err := os.MkdirTemp("", "wayshard-seatbelt-*")
 	if err != nil {

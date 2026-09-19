@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/acp"
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/testutil"
 )
 
 var fakeACP string
@@ -21,7 +22,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	fakeACP = filepath.Join(dir, "wayshard-fake-acp")
+	fakeACP = filepath.Join(dir, testutil.ExeName("wayshard-fake-acp"))
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	cmd := exec.Command("go", "build", "-o", fakeACP, "./cmd/wayshard-fake-acp")
@@ -41,7 +42,7 @@ func placeFake(t *testing.T, dir, name string) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dst := filepath.Join(dir, name)
+	dst := filepath.Join(dir, testutil.ExeName(name))
 	if err := os.Symlink(fakeACP, dst); err != nil {
 		b, err2 := os.ReadFile(fakeACP)
 		if err2 != nil {
@@ -162,7 +163,7 @@ func TestDiscoverNeverRunsNpx(t *testing.T) {
 		if strings.Contains(strings.Join(in.Notes, " "), "package-runner") {
 			sawNpxRefuse = true
 		}
-		if filepath.Base(in.Executable) == "wayshard-fake-acp" {
+		if normalizeExecName(in.Executable) == "wayshard-fake-acp" {
 			sawFake = true
 		}
 		if normalizeExecName(in.Executable) == "npx" && in.Health == domain.HarnessReady {

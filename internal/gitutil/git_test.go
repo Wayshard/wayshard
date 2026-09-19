@@ -16,6 +16,19 @@ func requireGit(t *testing.T) {
 	}
 }
 
+func sameFilePath(t *testing.T, a, b string) bool {
+	t.Helper()
+	if CanonicalPath(a) == CanonicalPath(b) {
+		return true
+	}
+	sa, err1 := os.Stat(a)
+	sb, err2 := os.Stat(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return os.SameFile(sa, sb)
+}
+
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -23,6 +36,8 @@ func git(t *testing.T, dir string, args ...string) string {
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_SYSTEM="+os.DevNull,
 		"GIT_AUTHOR_NAME=Wayshard",
 		"GIT_AUTHOR_EMAIL=test@wayshard.dev",
 		"GIT_COMMITTER_NAME=Wayshard",
@@ -62,7 +77,7 @@ func TestDiscoverHEADBranchStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.WorkTree != dir && filepath.Clean(repo.WorkTree) != filepath.Clean(dir) {
+	if !sameFilePath(t, repo.WorkTree, dir) {
 		t.Fatalf("worktree = %s want %s", repo.WorkTree, dir)
 	}
 	head, err := repo.HEAD(ctx)

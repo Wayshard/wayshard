@@ -600,8 +600,7 @@ func copyAtomic(src, dst, mode string) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, dst); err != nil {
-		os.Remove(tmpName)
+	if err := workspace.ReplaceFile(tmpName, dst); err != nil {
 		return err
 	}
 	return os.Chmod(dst, perm)
@@ -631,7 +630,7 @@ func workspaceCopyBlob(src, dst string) error {
 		os.Remove(tmp)
 		return closeErr
 	}
-	return os.Rename(tmp, dst)
+	return workspace.ReplaceFile(tmp, dst)
 }
 
 func pruneEmpty(root, rel string) {
@@ -672,7 +671,7 @@ func (j *Journal) Save() error {
 		os.Remove(tmpName)
 		return err
 	}
-	return os.Rename(tmpName, j.Path())
+	return workspace.ReplaceFile(tmpName, j.Path())
 }
 
 func LoadJournal(path string) (*Journal, error) {

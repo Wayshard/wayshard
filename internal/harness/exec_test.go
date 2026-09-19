@@ -2,14 +2,12 @@ package harness
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/routing"
+	"github.com/Wayshard/wayshard/internal/testutil"
 )
 
 func TestACPExecPlanViaFakeHarness(t *testing.T) {
@@ -48,15 +46,5 @@ func TestACPExecAuthRequired(t *testing.T) {
 
 func buildFake(t *testing.T) string {
 	t.Helper()
-	out := filepath.Join(t.TempDir(), "wayshard-fake-acp")
-	cmd := exec.Command("go", "build", "-o", out, "github.com/Wayshard/wayshard/cmd/wayshard-fake-acp")
-	cmd.Dir = filepath.Join("..", "..")
-	if wd, err := os.Getwd(); err == nil {
-		cmd.Dir = filepath.Clean(filepath.Join(wd, "..", ".."))
-	}
-	b, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("build fake: %v\n%s", err, b)
-	}
-	return out
+	return testutil.BuildFakeACP(t)
 }

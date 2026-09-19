@@ -97,10 +97,12 @@ You can run the helper (prompts as needed):
 
 ```sh
 umask 077
-bash scripts/release/generate-signing-material.sh ~/wayshard-signing-material
+bash scripts/release/generate-signing-material.sh <secure-signing-directory>
 ```
 
-Or run the exact commands below in a private directory (`umask 077`).
+Or run the exact commands below in a maintainer-controlled private directory
+outside the repository (`umask 077`). Do not generate keys under the Wayshard
+source tree.
 Private keys are irreplaceable: losing the Android keystore breaks APK update
 identity; losing the Windows PFX changes publisher identity; losing the
 minisign secret requires publishing a new public key.
@@ -167,19 +169,20 @@ binary paths.
 
 ```sh
 umask 077
-mkdir -p ~/wayshard-signing-material
+SIGNING_DIR="<secure-signing-directory>"
+mkdir -p "$SIGNING_DIR"
 cp -a upload-keystore.jks upload-keystore.jks.b64 \
   windows-codesign.key windows-codesign.crt windows-codesign.pfx windows-codesign.pfx.b64 \
   wayshard-release.minisign.sec wayshard-release.minisign.sec.b64 wayshard-release.minisign.pub \
-  ~/wayshard-signing-material/
-sha256sum ~/wayshard-signing-material/*
-tar -czf wayshard-signing-material.tar.gz -C "$HOME" wayshard-signing-material
+  "$SIGNING_DIR/"
+sha256sum "$SIGNING_DIR"/*
+tar -czf wayshard-signing-material.tar.gz -C "$(dirname "$SIGNING_DIR")" "$(basename "$SIGNING_DIR")"
 sha256sum wayshard-signing-material.tar.gz
 ```
 
 Copy `wayshard-signing-material.tar.gz` to encrypted offline media. Do not put
 private keys in git, chat, or an unencrypted cloud drive. After backup, shred
-working copies outside `~/wayshard-signing-material` if you generated them in a
+working copies outside the secure signing directory if you generated them in a
 scratch directory.
 
 ## 4. GitHub UI
