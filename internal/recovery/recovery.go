@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,42 @@ import (
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
 )
+
+// restoreWriteCheckpoint restores the authoritative run workspace from the
+// pre-attempt checkpoint of an interrupted write attempt, discarding partial
+// writes. It never trusts the current partially-written workspace.
+func restoreWriteCheckpoint(ctx context.Context, st *storage.Store, r domain.Run, stg domain.Stage, a domain.StageAttempt, log *slog.Logger) error {
+	cp, err := st.LatestCheckpointForAttempt(ctx, a.ID)
+	if err != nil {
+		cp, err = st.LatestCheckpointForStage(ctx, stg.ID)
+	}
+	if err != nil || cp == nil {
+		return fmt.Errorf("no checkpoint for interrupted write attempt")
+	}
+	snap, err := workspace.LoadSnapshot(cp.TreePath)
+	if err != nil {
+		return fmt.Errorf("load checkpoint: %w", err)
+	}
+	if snap.TreeHash != "" && cp.TreeHash != "" && snap.TreeHash != cp.TreeHash {
+		return fmt.Errorf("checkpoint hash mismatch")
+	}
+	ws, err := st.GetWorkspaceByRun(ctx, r.ID)
+	if err != nil {
+		return err
+	}
+	b, err := workspace.Open(ws.RunPath)
+	if err != nil {
+		return err
+	}
+	if err := workspace.RestoreSnapshot(ctx, b, snap, ws.RunPath); err != nil {
+		return err
+	}
+	if log != nil {
+		log.Info("restored workspace from checkpoint", "run", r.ID, "stage", stg.ID, "checkpoint", cp.ID)
+	}
+	_ = st.EmitEvent(ctx, "checkpoint.restored", r.ID, map[string]any{"checkpointId": cp.ID, "stageId": stg.ID})
+	return nil
+}
 
 // Reconcile runs at startup before the scheduler accepts new work. It marks
 // interrupted attempts/stages and reconciles incomplete publication journals.
@@ -33,6 +70,13 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 			for _, a := range atts {
 				if a.Status == domain.AttemptRunning || a.Status == domain.AttemptPending {
 					_ = st.UpdateAttemptStatus(ctx, a.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart")
+					if stg.Kind.WritesWorkspace() {
+						if err := restoreWriteCheckpoint(ctx, st, r, stg, a, log); err != nil {
+							log.Error("checkpoint restore failed", "run", r.ID, "stage", stg.ID, "err", err)
+							_ = st.UpdateRunStatus(ctx, r.ID, domain.RunBlocked, domain.BlockedRecovery, "checkpoint restore failed: "+err.Error())
+							_ = st.EmitEvent(ctx, "recovery.blocked", r.ID, map[string]any{"stageId": stg.ID, "attemptId": a.ID, "reason": err.Error()})
+						}
+					}
 				}
 			}
 			if stg.Status == domain.AttemptRunning {

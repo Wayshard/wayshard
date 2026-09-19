@@ -384,6 +384,13 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 		if att == nil {
 			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "cannot append attempt")
 		}
+		if st.Kind.WritesWorkspace() {
+			if err := e.checkpointBeforeWrite(ctx, run, st, att); err != nil {
+				_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptFailed, domain.FailInfrastructure, err.Error())
+				_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailInfrastructure, err.Error())
+				return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "checkpoint: "+err.Error())
+			}
+		}
 		e.insertRouteDecision(ctx, run, st, att, cand, dec, assess)
 		res, adec := e.execAttempt(ctx, run, task, st, att, cand, bundle)
 		attemptsMade++
@@ -429,6 +436,13 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 			corr := e.appendAttempt(ctx, st, run, cand)
 			if corr == nil {
 				break
+			}
+			if st.Kind.WritesWorkspace() {
+				if err := e.checkpointBeforeWrite(ctx, run, st, corr); err != nil {
+					_ = e.Store.UpdateAttemptStatus(ctx, corr.ID, domain.AttemptFailed, domain.FailInfrastructure, err.Error())
+					_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailInfrastructure, err.Error())
+					return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "checkpoint: "+err.Error())
+				}
 			}
 			res2, _ := e.execAttempt(ctx, run, task, st, corr, cand, bundle)
 			attemptsMade++

@@ -84,7 +84,8 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | ACP client callbacks: fs read/write scoped to run workspace; permission requests surface durable approvals | `harness.ACPExec` hooks | `TestApprovalLifecycle`; callback scoping via `withinRoot` | partial (terminal callbacks still method-not-found) |
 | Object GC, workspace retention, disk pressure gate | `internal/storage/gc.go`, `scheduler.tick` | `gc_test.go`; low-disk gate blocks write-heavy runs with `BlockedStorage` | done |
 | Backup excludes repos; optional secrets | `internal/backup` | `backup_test.go` | done |
-| Startup reconciliation of interrupted attempts/stages and incomplete publication journals | `internal/recovery` | unit paths; journal recovery wired from `app.Open` | partial (no orphan-process sweep; crash injection not black-box tested) |
+| Startup reconciliation of interrupted attempts/stages and incomplete publication journals; interrupted write attempts restore from a pre-attempt workspace checkpoint | `internal/recovery`, `orchestrator.checkpointBeforeWrite`, `workspace.RestoreSnapshot` | `TestRecoveryRestoresInterruptedWriteCheckpoint`, `TestRecoveryBlocksOnCorruptCheckpoint`, `TestWriteAttemptCreatesCheckpoint` | done (Linux); no orphan-process sweep; publication crash injection still not black-box tested |
+| Durable pre-attempt workspace checkpoints (schema v2) for Executor/Repair; corruption fails closed | `internal/storage/checkpoints.go`, `internal/orchestrator/checkpoint.go` | `TestWriteAttemptCreatesCheckpoint`, `TestRecoveryBlocksOnCorruptCheckpoint`, `TestUpgradeFromV1` | done |
 
 ## Clients
 

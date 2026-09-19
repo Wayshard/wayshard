@@ -2,12 +2,27 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
 )
+
+func openRawDB(ctx context.Context, path string) (*sql.DB, error) {
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)", path)
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
 
 func TestOpenMigrateAndIntegrity(t *testing.T) {
 	ctx := context.Background()
@@ -23,8 +38,50 @@ func TestOpenMigrateAndIntegrity(t *testing.T) {
 	if err := s.DB.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != 1 {
-		t.Fatalf("schema version = %d", v)
+	if v != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", v, schemaVersion)
+	}
+}
+
+// TestUpgradeFromV1 verifies an existing schema-1 database upgrades cleanly to
+// the checkpoint schema while preserving existing rows.
+func TestUpgradeFromV1(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	// Build a schema-1 database by applying only migration 001.
+	raw, err := openRawDB(ctx, filepath.Join(dir, "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := execScript(ctx, raw, migration001); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `INSERT INTO projects(id, name, path, source_kind, repo_identity, git_remote, default_branch, status, knowledge_rev, created_at, updated_at, last_opened_at) VALUES ('p1','legacy','/tmp/legacy','filesystem','','','','available','',?,?,?)`, nowRFC3339(), nowRFC3339(), nowRFC3339()); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close()
+	// Now open with the server, which should migrate to v2.
+	s, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var v int
+	if err := s.DB.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != schemaVersion {
+		t.Fatalf("schema version after upgrade = %d", v)
+	}
+	got, err := s.GetProject(ctx, "p1")
+	if err != nil || got.Name != "legacy" {
+		t.Fatalf("legacy row unreadable after upgrade: %+v err=%v", got, err)
 	}
 }
 

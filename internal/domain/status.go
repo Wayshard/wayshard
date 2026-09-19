@@ -143,6 +143,7 @@ const (
 	BlockedIntegration   BlockedReason = "INTEGRATION"
 	BlockedUser          BlockedReason = "USER"
 	BlockedPolicy        BlockedReason = "POLICY"
+	BlockedRecovery      BlockedReason = "RECOVERY"
 )
 
 // FailureClass distinguishes retry policy.

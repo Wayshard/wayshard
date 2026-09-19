@@ -129,6 +129,27 @@ func TestInfrastructureBudgetTerminates(t *testing.T) {
 	}
 }
 
+// TestWriteAttemptCreatesCheckpoint proves a write attempt persists a real,
+// restorable checkpoint before executing.
+func TestWriteAttemptCreatesCheckpoint(t *testing.T) {
+	e, st, runID := newEngine(t, budgetExec{})
+	if err := e.ProcessRun(context.Background(), runID); err != nil {
+		t.Fatal(err)
+	}
+	cps, err := st.ListCheckpointsByRun(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cps) == 0 {
+		t.Fatal("no checkpoint created for write attempt")
+	}
+	for _, cp := range cps {
+		if cp.TreePath == "" {
+			t.Fatalf("checkpoint has no tree path: %+v", cp)
+		}
+	}
+}
+
 // TestCompletionPolicyHonoursBaseline proves a pre-existing failure is not a
 // blocking regression.
 func TestCompletionPolicyHonoursBaseline(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 
 const (
 	busyTimeoutMS = 5000
-	schemaVersion = 1
+	schemaVersion = 2
 )
 
 var ErrNotFound = errors.New("not found")
@@ -91,6 +91,15 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("apply migration 001: %w", err)
 		}
 		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+		current = 1
+	}
+	if current < 2 {
+		if err := execScript(ctx, s.DB, migration002); err != nil {
+			return fmt.Errorf("apply migration 002: %w", err)
+		}
+		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (2, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return err
 		}
 	}
