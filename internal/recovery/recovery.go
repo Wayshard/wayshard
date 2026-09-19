@@ -42,7 +42,29 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 		log.Info("reconciled interrupted run", "run", r.ID, "status", r.Status)
 	}
 	reconcileJournals(ctx, st, log)
+	cleanupValidationWorkspaces(st, log)
 	return nil
+}
+
+// cleanupValidationWorkspaces removes disposable validation copies left by an
+// interrupted run. They never hold authoritative state.
+func cleanupValidationWorkspaces(st *storage.Store, log *slog.Logger) {
+	root := filepath.Join(st.Root, "runtime", "workspaces")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		vdir := filepath.Join(root, e.Name(), "validation")
+		if _, err := os.Stat(vdir); err == nil {
+			if err := os.RemoveAll(vdir); err != nil {
+				log.Warn("cleanup validation workspace", "dir", vdir, "err", err)
+			}
+		}
+	}
 }
 
 // reconcileJournals finds on-disk publication journals and resumes or

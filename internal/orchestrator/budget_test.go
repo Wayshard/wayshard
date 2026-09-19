@@ -69,6 +69,7 @@ func newEngine(t *testing.T, exec StageExec) (*Engine, *storage.Store, string) {
 	if err := st.CreateTaskRun(ctx, msg, task, run); err != nil {
 		t.Fatal(err)
 	}
+	insertTestWorkspace(t, st, run, p.Path)
 	e := &Engine{Store: st, Candidates: budgetCandidates{}, Exec: exec, Budget: DefaultBudgets()}
 	return e, st, run.ID
 }

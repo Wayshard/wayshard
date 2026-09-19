@@ -82,8 +82,13 @@ func (s *Scheduler) Cancel(runID string) bool {
 }
 
 // Enqueue starts a run, locking on its concrete source identity so concurrent
-// integrations into the same repository serialize.
+// integrations into the same repository serialize. It honors the same
+// storage-pressure gate as the poll loop.
 func (s *Scheduler) Enqueue(runID string) {
+	if allowed, _ := s.Store.WriteHeavyAllowed(); !allowed {
+		_ = s.Store.UpdateRunStatus(context.Background(), runID, domain.RunBlocked, domain.BlockedStorage, "low disk: write-heavy work suspended")
+		return
+	}
 	src := s.sourceIDFor(context.Background(), runID)
 	go s.runOne(context.Background(), runID, src)
 }

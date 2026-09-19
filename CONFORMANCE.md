@@ -53,7 +53,9 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Fake ACP scenarios | `cmd/wayshard-fake-acp`, `internal/harness/exec.go` | `TestACPExecPlanViaFakeHarness`, `TestACPExecAuthRequired`, `internal/acp/driver_test.go` | done |
 | Invalid stage output bounded retry | `runStage` correction attempt | orchestrator machine | done |
 | Validation server-owned, passive discovery | `internal/validation` | `TestPassiveDiscoveryDoesNotExecute` | done |
-| Validation commands run through the Tool Sandbox (no host FS, no ambient secrets) | `validation.Runner` + `sandbox.ToolPolicy` | `TestValidationRunsInToolSandbox`, `TestValidationOrdinaryCommandStillWorks` | done |
+| Validation commands run through the Tool Sandbox (no host FS, no ambient secrets) | `validation.Runner` + `sandbox.ToolPolicy` | `TestValidationRunsInToolSandbox`, `TestValidationOrdinaryCommandStillWorks`, `TestValidationNetworkNoneEnforced` | done |
+| Validation executes only in disposable validation workspaces; its filesystem side effects never enter RunDelta/integration | `orchestrator.baselineValidationWorkspace`/`finalValidationWorkspace` | `TestValidationDoesNotContaminateWhenHarnessWritesNothing`, `TestValidationDoesNotContaminateAgentDelta`, `TestValidationFailureDoesNotContaminate` | done (Linux black-box) |
+| Validation cancellation terminates the check process tree | `validation.Runner` group kill | `TestValidationCancellationKillsDescendants` | done (Linux) |
 | Validation baseline vs final distinguishes pre-existing failure from regression | `ensureBaseline`, `CompletionPolicy` | `TestValidationBaselineClassification`, `TestCompletionPolicyHonoursBaseline` | done |
 | CompletionPolicy Go-owned | `internal/orchestrator/completion.go` | `completion_test.go` | done |
 | Artifact-only complete without integrate | CompletionPolicy + e2e | `TestArtifactOnlyCompletesWithoutIntegration` | done |
@@ -71,7 +73,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
-| Linux sandbox: Landlock filesystem confinement (read-only/write roots), Landlock ABI>=4 network deny for `none`, process group, pdeathsig, explicit env allowlist | `internal/sandbox/linux.go`, `landlock_linux.go`, `helper_linux.go`, `env.go` | `TestLandlockFilesystemConfinement`, `TestLandlockReadOnlyView`, `TestEnvAllowlistDropsHostSecrets`, `TestNativeCompileAndConstrain` | done (Linux black-box) |
+| Linux sandbox: Landlock filesystem confinement (read-only/write roots) + seccomp-BPF communication-socket confinement for `none` (denies `socket(2)` for all domains incl. AF_INET/AF_INET6/AF_UNIX and `io_uring_setup(2)`), process group, pdeathsig, explicit env allowlist | `internal/sandbox/linux.go`, `landlock_linux.go`, `seccomp_linux.go`, `helper_linux.go`, `env.go` | `TestLandlockFilesystemConfinement`, `TestLandlockReadOnlyView`, `TestNetworkNoneEnforced`, `TestNetworkUnrestrictedStillWorks`, `TestUnsupportedNetworkPoliciesFailClosed`, `TestEnvAllowlistDropsHostSecrets`, `TestNativeCompileAndConstrain` | done (Linux black-box, amd64/arm64) |
 | macOS sandbox: `sandbox-exec` seatbelt profile compiled from SandboxPolicy; process group; fail if missing when Required | `internal/sandbox/seatbelt.go`, `darwin.go` | `TestSeatbeltProfileCompilation` (all OS) | code present; native runtime enforcement UNVERIFIED (no macOS execution here) |
 | Windows sandbox: Job Objects + new process group; AppContainer not claimed; fail closed if unavailable | `internal/sandbox/windows.go` | cross-compile + policy tests | code present; native runtime enforcement UNVERIFIED |
 | Required isolation never silently unrestricted | `LinuxBackend.Compile`/`Constrain` fail closed when Landlock unavailable; unsupported backends error | `TestRequiredIsolationNeverSilent`, `TestReducedSecurityStillDoesNotSilentlyUnrestrict`, `TestUnsupportedConstrainFailsClosed`, `TestProbeNeverClaimsUnrestricted` | done |
@@ -128,8 +130,8 @@ The forensic audit of `v0.1.0-rc.6` (`325fa20`) found eight P0 defects. This pas
 
 - **Sandbox filesystem confinement**: Linux now applies Landlock rules (read-only roots for system/toolchain, read-write roots for the run workspace and synthetic temp, denied everywhere else) via an in-binary helper, inherited by child/grandchild processes. Black-box canaries confirm host reads, host writes and `/tmp` escapes are denied while workspace reads/writes succeed.
 - **Environment confinement**: blacklist replaced by an explicit allowlist per process class; server secrets and unrelated host credentials are absent from harness/tool/probe environments.
-- **Network policy**: `none` is enforced via Landlock network rules (ABI>=4) and fails closed if unavailable; `unrestricted` no longer accidentally removes connectivity. `allowlist`/`brokered` are explicitly unsupported and fail closed.
-- **Validation Tool Sandbox**: all repository-controlled checks run confined; ambient secrets and host filesystem are unavailable, while benign commands pass.
+- **Network policy**: `none` is enforced by a seccomp-BPF filter installed before exec (Landlock alone cannot mediate UDP or AF_UNIX). It denies `socket(2)` for every domain — AF_INET, AF_INET6, AF_UNIX (filesystem and abstract), AF_NETLINK, AF_PACKET — plus `io_uring_setup(2)`, and rejects the x32 syscall ABI; it is inherited across exec, child and grandchild. `unrestricted` keeps normal TCP/UDP connectivity. `allowlist`/`brokered` are explicitly unsupported and fail closed (the helper also refuses an unknown mode). Verified on Linux amd64/arm64.
+- **Validation Tool Sandbox**: all repository-controlled checks run confined; ambient secrets and host filesystem are unavailable, while benign commands pass. Validation executes in disposable validation workspaces (materialized from the task-start snapshot for baseline, and from the authoritative run workspace for final), so its writes/deletes/mode changes/symlinks/git mutations never reach the authoritative run workspace, RunDelta, or the user source tree. The copy is an isolated `git clone --no-hardlinks` or byte copy — never hardlinks.
 - **Bounded repair/retry**: deterministic Go budgets cap stages, repairs, replans and per-stage attempts. A permanently failing review or repeated infrastructure failure reaches `BLOCKED`/`FAILED` with bounded stages/events (previously 4,523 stages / 22,621 events).
 - **Stage lifecycle**: stages now leave `running` on attempt completion; terminal runs have no stale running stage.
 - **Real cancellation**: `Sched.Cancel` cancels the stage context, which tears down the ACP process tree; run becomes `CANCELLED` and no orphan remains.
@@ -140,7 +142,8 @@ The forensic audit of `v0.1.0-rc.6` (`325fa20`) found eight P0 defects. This pas
 - **Auth boundary**: loopback local-admin is now limited to `POST /v1/pairing/invitations`; all other product APIs return 401 unauthenticated on a fresh or fully-revoked server.
 - **Symlink escape**: project file APIs resolve symlinks and deny escapes.
 - **Idempotency conflict**: same key with a different body returns 409; same body replays.
-- **Low-disk gate**: critical disk blocks write-heavy runs with `BlockedStorage`.
+- **Low-disk gate**: critical disk blocks write-heavy runs with `BlockedStorage` on both the poll and enqueue paths.
+- **Approval cleanup**: cancelling a run invalidates its outstanding approvals instead of leaving them pending.
 - **Recovery**: startup reconciles interrupted stages/attempts and resumes/classifies incomplete publication journals; source-identity locking is applied on the enqueue path.
 
 Still partial or unverified after this pass:

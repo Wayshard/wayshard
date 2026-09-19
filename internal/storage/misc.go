@@ -169,6 +169,21 @@ func (s *Store) ResolveApproval(ctx context.Context, id, status, by string) erro
 	})
 }
 
+// CancelPendingApprovalsForRun invalidates outstanding approvals belonging to
+// a run so cancellation cannot leave a permanently pending approval.
+func (s *Store) CancelPendingApprovalsForRun(ctx context.Context, runID, by string) error {
+	list, err := s.ListPendingApprovals(ctx)
+	if err != nil {
+		return err
+	}
+	for _, a := range list {
+		if a.RunID == runID {
+			_ = s.ResolveApproval(ctx, a.ID, "cancelled", by)
+		}
+	}
+	return nil
+}
+
 func (s *Store) GetApproval(ctx context.Context, id string) (*domain.Approval, error) {
 	var a domain.Approval
 	var created string

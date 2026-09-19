@@ -146,9 +146,10 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 		c.Summary = "tool sandbox could not be established"
 		return c
 	}
-	if cwd, err := os.Getwd(); err == nil {
-		_ = cwd
-	}
+	// Kill the whole process group on cancellation/timeout, not just the
+	// direct child, so validation cannot leave orphaned descendants.
+	cmd.Cancel = func() error { return con.KillTree(cmd) }
+	cmd.WaitDelay = 5 * time.Second
 
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -181,11 +182,16 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 }
 
 func (r *Runner) syntheticHome(workspace string) string {
-	base := r.DataDir
+	// Keep the tool HOME beside the disposable validation workspace so it is
+	// discarded with it, rather than accumulating in a shared location.
+	base := filepath.Dir(workspace)
+	if base == "" {
+		base = r.DataDir
+	}
 	if base == "" {
 		base = os.TempDir()
 	}
-	h := filepath.Join(base, "runtime", "sandbox", "tool")
+	h := filepath.Join(base, "toolhome")
 	_ = os.MkdirAll(h, 0o700)
 	return h
 }

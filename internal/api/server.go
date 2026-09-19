@@ -516,6 +516,7 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request, _ *auth.Princ
 		writeErr(w, err)
 		return
 	}
+	_ = s.Store.CancelPendingApprovalsForRun(r.Context(), id, "cancellation")
 	_ = s.Store.ResetStaleRunningStages(r.Context(), id)
 	writeJSON(w, 200, map[string]any{"ok": true, "status": domain.RunCancelled})
 }

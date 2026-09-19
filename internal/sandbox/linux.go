@@ -25,14 +25,15 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 		c.Features = append(c.Features, "landlock")
 	}
 	if p.Network == NetNone {
-		abi, err := landlockABI()
-		if err != nil || abi < 4 {
+		// NetworkNone is enforced by seccomp-BPF at exec time (Landlock alone
+		// cannot mediate UDP or AF_UNIX).
+		if _, err := seccompAuditArch(); err != nil {
 			c.Unavailable = append(c.Unavailable, "network_deny")
 			if p.Required {
-				return c, fmt.Errorf("%w: network denial requires landlock ABI>=4", ErrRequiredIsolation)
+				return c, fmt.Errorf("%w: %v", ErrRequiredIsolation, err)
 			}
 		} else {
-			c.Features = append(c.Features, "network_deny")
+			c.Features = append(c.Features, "seccomp_network_deny")
 		}
 	}
 	if p.Network == NetAllowlist || p.Network == NetBrokered {
@@ -136,10 +137,9 @@ func (LinuxBackend) Report() IsolationReport {
 		return r
 	}
 	r.Features = []string{"landlock_fs", "process_group", "pdeathsig", "env_allowlist"}
-	abi, _ := landlockABI()
-	if abi >= 4 {
-		r.Features = append(r.Features, "landlock_net")
+	if _, err := seccompAuditArch(); err == nil {
+		r.Features = append(r.Features, "seccomp_network_deny")
 	}
-	r.Detail = "linux landlock filesystem confinement + process group + pdeathsig + env allowlist"
+	r.Detail = "linux landlock filesystem confinement + seccomp network confinement + process group + pdeathsig + env allowlist"
 	return r
 }

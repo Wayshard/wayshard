@@ -38,6 +38,7 @@ func TestFullSyntheticRunArtifactOnly(t *testing.T) {
 	if err := st.CreateTaskRun(ctx, msg, task, run); err != nil {
 		t.Fatal(err)
 	}
+	insertTestWorkspace(t, st, run, p.Path)
 	eng := &Engine{
 		Store:  st,
 		Jev:    jev.DeterministicEngine{},
@@ -67,6 +68,22 @@ func TestFullSyntheticRunArtifactOnly(t *testing.T) {
 type candidateList []routing.Candidate
 
 func (c candidateList) Candidates(context.Context) ([]routing.Candidate, error) { return c, nil }
+
+// insertTestWorkspace gives the engine an authoritative run workspace so
+// validation can materialize an isolated copy.
+func insertTestWorkspace(t *testing.T, st *storage.Store, run *domain.Run, src string) {
+	t.Helper()
+	rec := &domain.WorkspaceRecord{
+		RunID:      run.ID,
+		ProjectID:  run.ProjectID,
+		Kind:       "filesystem",
+		SourcePath: src,
+		RunPath:    t.TempDir(),
+	}
+	if err := st.InsertWorkspace(context.Background(), rec); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestNoViableRouteBlocks(t *testing.T) {
 	ctx := context.Background()

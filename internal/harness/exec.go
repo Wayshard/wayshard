@@ -217,10 +217,13 @@ func (e *ACPExec) permissionHook(ctx context.Context, req orchestrator.StageRequ
 		for {
 			select {
 			case <-cbctx.Done():
+				_ = e.Store.ResolveApproval(context.WithoutCancel(cbctx), a.ID, "cancelled", "cancellation")
 				return acp.CancelledPermission(), cbctx.Err()
 			case <-ctx.Done():
+				_ = e.Store.ResolveApproval(context.WithoutCancel(ctx), a.ID, "cancelled", "cancellation")
 				return acp.CancelledPermission(), ctx.Err()
 			case <-deadline.C:
+				_ = e.Store.ResolveApproval(context.WithoutCancel(cbctx), a.ID, "cancelled", "timeout")
 				return acp.CancelledPermission(), fmt.Errorf("approval timed out")
 			case <-ticker.C:
 				got, err := e.Store.GetApproval(cbctx, a.ID)

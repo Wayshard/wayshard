@@ -128,6 +128,7 @@ func (e *Engine) markCancelled(ctx context.Context, runID string) error {
 	if err == nil && !r.Status.Terminal() {
 		_ = e.Store.UpdateRunStatus(context.WithoutCancel(ctx), runID, domain.RunCancelled, domain.BlockedUser, "cancelled")
 	}
+	_ = e.Store.CancelPendingApprovalsForRun(context.WithoutCancel(ctx), runID, "cancellation")
 	_ = e.Store.ResetStaleRunningStages(context.WithoutCancel(ctx), runID)
 	return nil
 }
@@ -221,15 +222,22 @@ func (e *Engine) ensureBaseline(ctx context.Context, run *domain.Run, task *doma
 			}
 		}
 	}
-	checks := validation.Discover(ws.RunPath)
-	if len(checks) == 0 {
-		return
-	}
 	runner := e.Validate
 	if runner == nil {
 		runner = &validation.Runner{Store: e.Store}
 	}
-	art := runner.Run(ctx, ws.RunPath, checks, nil)
+	// Baseline runs in a disposable copy of the task-start snapshot so its
+	// side effects cannot reach the authoritative run workspace or RunDelta.
+	vw, err := e.baselineValidationWorkspace(ctx, run.ID)
+	if err != nil {
+		return
+	}
+	defer vw.Cleanup()
+	checks := validation.Discover(vw.Dir)
+	if len(checks) == 0 {
+		return
+	}
+	art := runner.Run(ctx, vw.Dir, checks, nil)
 	art.Baseline = true
 	body, err := artifacts.Marshal(art)
 	if err != nil {
@@ -443,13 +451,16 @@ func (e *Engine) runValidate(ctx context.Context, run *domain.Run, task *domain.
 	if att == nil {
 		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "cannot append attempt")
 	}
-	wsPath := ""
-	if ws, err := e.Store.GetWorkspaceByRun(ctx, run.ID); err == nil {
-		wsPath = ws.RunPath
-	} else if proj, err := e.Store.GetProject(ctx, run.ProjectID); err == nil {
-		wsPath = proj.Path
+	// Final validation inspects an isolated copy of the authoritative candidate
+	// so its writes can never alter the run workspace, RunDelta or integration.
+	vw, verr := e.finalValidationWorkspace(ctx, run.ID)
+	if verr != nil {
+		_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptFailed, domain.FailInfrastructure, verr.Error())
+		_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailInfrastructure, verr.Error())
+		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "validation workspace unavailable: "+verr.Error())
 	}
-	checks := validation.Discover(wsPath)
+	defer vw.Cleanup()
+	checks := validation.Discover(vw.Dir)
 	plan, _ := loadPlan(ctx, e.Store, run.ID)
 	if plan != nil {
 		for _, cmd := range plan.ValidationPlan {
@@ -461,7 +472,7 @@ func (e *Engine) runValidate(ctx context.Context, run *domain.Run, task *domain.
 	if runner == nil {
 		runner = &validation.Runner{Store: e.Store}
 	}
-	art := runner.Run(ctx, wsPath, checks, baseline)
+	art := runner.Run(ctx, vw.Dir, checks, baseline)
 	body, err := artifacts.Marshal(art)
 	if err != nil {
 		return err
