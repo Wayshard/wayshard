@@ -184,6 +184,8 @@ jobs:
       - name: Init Tauri Android project
         working-directory: clients/desktop
         run: bunx tauri android init --ci
+      - name: Set Android version metadata
+        run: bash scripts/release/android-version-properties.sh
       - name: Materialize Android signing keystore
         env:
           WAYSHARD_ANDROID_KEYSTORE_BASE64: ${{ secrets.WAYSHARD_ANDROID_KEYSTORE_BASE64 }}

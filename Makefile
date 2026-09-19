@@ -84,6 +84,7 @@ release-scripts-test:
 	bash scripts/release/checksums_test.sh
 	bash scripts/release/android_patch_test.sh
 	bash scripts/release/android_jks_test.sh
+	bash scripts/release/android_version_properties_test.sh
 	bash scripts/release/package_go_test.sh
 	bash scripts/release/windows_pfx_test.sh
 	bash scripts/release/minisign_test.sh
