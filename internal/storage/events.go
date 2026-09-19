@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
@@ -19,6 +20,14 @@ type EventRecord struct {
 	CreatedAt      time.Time
 }
 
+// eventRecorder buffers events inserted inside one transaction so they can be
+// published only after the transaction commits.
+type eventRecorder struct {
+	events []domain.Event
+}
+
+var txRecorders sync.Map // *sql.Tx -> *eventRecorder
+
 func InsertEvent(ctx context.Context, tx *sql.Tx, ev EventRecord) (int64, error) {
 	if ev.CreatedAt.IsZero() {
 		ev.CreatedAt = time.Now().UTC()
@@ -29,7 +38,32 @@ func InsertEvent(ctx context.Context, tx *sql.Tx, ev EventRecord) (int64, error)
 		return 0, err
 	}
 	seq, err := res.LastInsertId()
+	if err == nil {
+		if v, ok := txRecorders.Load(tx); ok {
+			if r, ok := v.(*eventRecorder); ok {
+				r.events = append(r.events, domain.Event{
+					Seq:       seq,
+					Type:      ev.Type,
+					ProjectID: ev.ProjectID,
+					RunID:     ev.RunID,
+					Payload:   ev.Payload,
+					CreatedAt: ev.CreatedAt,
+				})
+			}
+		}
+	}
 	return seq, err
+}
+
+// dispatch publishes committed events to the live hook. It must only be called
+// after the surrounding transaction has committed.
+func (s *Store) dispatch(events []domain.Event) {
+	if s.EventHook == nil || len(events) == 0 {
+		return
+	}
+	for _, ev := range events {
+		s.EventHook(ev)
+	}
 }
 
 func InsertEventJSON(ctx context.Context, tx *sql.Tx, typ, projectID, conversationID, runID string, payload any) (int64, error) {

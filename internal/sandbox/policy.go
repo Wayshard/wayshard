@@ -116,9 +116,11 @@ func (WindowsBackend) Available() bool { return runtime.GOOS == "windows" }
 
 func ToolPolicy(runWorkspace, syntheticHome string, net NetworkMode) Policy {
 	return Policy{
-		ReadWriteRoots: []string{runWorkspace, syntheticHome},
-		DeniedRoots:    []string{"/"},
+		ReadOnlyRoots:  systemReadOnlyRoots(),
+		ReadWriteRoots: append([]string{runWorkspace, syntheticHome}, systemDeviceRoots()...),
+		DeniedRoots:    nil,
 		SyntheticHome:  syntheticHome,
+		SyntheticTemp:  syntheticHome,
 		Network:        net,
 		MemoryBytes:    2 << 30,
 		WallTimeSec:    30 * 60,
@@ -128,9 +130,23 @@ func ToolPolicy(runWorkspace, syntheticHome string, net NetworkMode) Policy {
 	}
 }
 
-func HarnessPolicy(runWorkspace, configDir string) Policy {
+func HarnessPolicy(runWorkspace, syntheticTemp string) Policy {
 	return Policy{
-		ReadWriteRoots: []string{runWorkspace, configDir},
+		ReadOnlyRoots:  systemReadOnlyRoots(),
+		ReadWriteRoots: append([]string{runWorkspace, syntheticTemp}, systemDeviceRoots()...),
+		SyntheticTemp:  syntheticTemp,
+		Network:        NetUnrestricted,
+		Required:       true,
+	}
+}
+
+// ReadOnlyViewPolicy is used for read-only stages: the run/project view is
+// readable but not writable, and non-system host paths stay denied.
+func ReadOnlyViewPolicy(viewPath, syntheticTemp string) Policy {
+	return Policy{
+		ReadOnlyRoots:  append([]string{viewPath}, systemReadOnlyRoots()...),
+		ReadWriteRoots: append([]string{syntheticTemp}, systemDeviceRoots()...),
+		SyntheticTemp:  syntheticTemp,
 		Network:        NetUnrestricted,
 		Required:       true,
 	}

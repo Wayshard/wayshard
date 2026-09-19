@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayshard/wayshard/internal/domain"
 	_ "modernc.org/sqlite"
 )
 
@@ -29,6 +30,9 @@ type Store struct {
 	DB      *sql.DB
 	Root    string
 	Objects *ObjectStore
+	// EventHook receives durable domain events after their transaction commits.
+	// It is a live-delivery projection; the events table remains the source for replay.
+	EventHook func(domain.Event)
 }
 
 func Open(ctx context.Context, root string) (*Store, error) {
@@ -139,11 +143,20 @@ func (s *Store) WithTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	if err != nil {
 		return err
 	}
+	rec := &eventRecorder{}
+	txRecorders.Store(tx, rec)
+	defer txRecorders.Delete(tx)
 	if err := fn(tx); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// Publish only after a successful commit so live subscribers never observe
+	// an event whose domain mutation was rolled back.
+	s.dispatch(rec.events)
+	return nil
 }
 
 func (s *Store) IntegrityCheck(ctx context.Context) error {

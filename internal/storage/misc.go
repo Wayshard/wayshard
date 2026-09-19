@@ -121,6 +121,13 @@ func (s *Store) ClearAttention(ctx context.Context, id string) error {
 	return err
 }
 
+// ClearAttentionForRunKind resolves the outstanding attention for a run's
+// notification kind, e.g. after an approval is answered.
+func (s *Store) ClearAttentionForRunKind(ctx context.Context, runID, kind string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE notifications SET attention = 0 WHERE run_id = ? AND kind = ?`, runID, kind)
+	return err
+}
+
 func (s *Store) InsertApproval(ctx context.Context, a *domain.Approval) error {
 	if a.ID == "" {
 		a.ID = id.New()
@@ -146,6 +153,8 @@ func (s *Store) InsertApproval(ctx context.Context, a *domain.Approval) error {
 
 func (s *Store) ResolveApproval(ctx context.Context, id, status, by string) error {
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		var runID string
+		_ = tx.QueryRowContext(ctx, `SELECT run_id FROM approvals WHERE id = ?`, id).Scan(&runID)
 		res, err := tx.ExecContext(ctx, `UPDATE approvals SET status = ?, resolved_by = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`,
 			status, by, nowRFC3339(), id)
 		if err != nil {
@@ -155,7 +164,7 @@ func (s *Store) ResolveApproval(ctx context.Context, id, status, by string) erro
 		if n == 0 {
 			return ErrConflict
 		}
-		_, err = InsertEventJSON(ctx, tx, "approval.resolved", "", "", "", map[string]any{"id": id, "status": status, "by": by})
+		_, err = InsertEventJSON(ctx, tx, "approval.resolved", "", "", runID, map[string]any{"id": id, "status": status, "by": by})
 		return err
 	})
 }
@@ -182,13 +191,22 @@ func (s *Store) ListPendingApprovals(ctx context.Context) ([]domain.Approval, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []domain.Approval
+	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	var out []domain.Approval
+	for _, id := range ids {
 		a, err := s.GetApproval(ctx, id)
 		if err != nil {
 			return nil, err

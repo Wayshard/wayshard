@@ -180,7 +180,7 @@ func (s *Server) startTerminal(w http.ResponseWriter, r *http.Request, p *auth.P
 }
 
 func (s *Server) ptyWS(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.principal(r); err != nil && !s.allowLocalAdmin(r) {
+	if _, err := s.principal(r); err != nil {
 		http.Error(w, "unauthorized", 401)
 		return
 	}

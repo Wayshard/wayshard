@@ -75,6 +75,8 @@ type ValidationArtifact struct {
 	Warnings         []string          `json:"warnings"`
 	Unverified       []string          `json:"unverified"`
 	BaselineCompared bool              `json:"baselineCompared"`
+	// Baseline marks a pre-execution baseline capture rather than final results.
+	Baseline bool `json:"baseline,omitempty"`
 }
 
 type InvestigationArtifact struct {

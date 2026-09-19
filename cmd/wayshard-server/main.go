@@ -10,10 +10,16 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/app"
 	"github.com/Wayshard/wayshard/internal/paths"
+	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/version"
 )
 
 func main() {
+	// The same binary doubles as the sandbox helper used to confine harness
+	// and tool processes.
+	if sandbox.MaybeRunHelper(os.Args) {
+		return
+	}
 	listen := flag.String("listen", "127.0.0.1:7420", "HTTP listen address (loopback by default)")
 	advertise := flag.String("advertise", "", "externally reachable URL to embed in pairing invitations")
 	data := flag.String("data", "", "data directory (default: platform user data dir)")

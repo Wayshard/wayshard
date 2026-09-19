@@ -40,6 +40,20 @@ func testAPI(t *testing.T) (*Server, *httptest.Server) {
 	return s, ts
 }
 
+func issueCred(t *testing.T, s *Server) string {
+	t.Helper()
+	ctx := context.Background()
+	inv, err := s.Auth.CreateInvitation(ctx, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Auth.CompletePairing(ctx, auth.CompletePairingRequest{Code: inv.Code, DeviceKind: "cli", DeviceName: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Credential
+}
+
 func TestHealthAndMeta(t *testing.T) {
 	_, ts := testAPI(t)
 	res, err := http.Get(ts.URL + "/healthz")
@@ -53,6 +67,7 @@ func TestHealthAndMeta(t *testing.T) {
 
 func TestOpenProjectIsPassive(t *testing.T) {
 	s, ts := testAPI(t)
+	cred := issueCred(t, s)
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
@@ -60,6 +75,7 @@ func TestOpenProjectIsPassive(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"path": root, "name": "demo"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/projects/open", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.RemoteAddr = "127.0.0.1:1"
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -77,6 +93,7 @@ func TestOpenProjectIsPassive(t *testing.T) {
 
 func TestFileSaveConflict(t *testing.T) {
 	s, ts := testAPI(t)
+	cred := issueCred(t, s)
 	root := t.TempDir()
 	path := filepath.Join(root, "a.txt")
 	if err := os.WriteFile(path, []byte("one"), 0o644); err != nil {
@@ -85,6 +102,7 @@ func TestFileSaveConflict(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"path": root})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/projects/open", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.RemoteAddr = "127.0.0.1:1"
 	res, _ := http.DefaultClient.Do(req)
 	var proj struct {
@@ -93,6 +111,7 @@ func TestFileSaveConflict(t *testing.T) {
 	_ = json.NewDecoder(res.Body).Decode(&proj)
 	// read
 	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/v1/projects/"+proj.ID+"/file?path=a.txt", nil)
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.RemoteAddr = "127.0.0.1:1"
 	res, _ = http.DefaultClient.Do(req)
 	var got struct {
@@ -103,6 +122,7 @@ func TestFileSaveConflict(t *testing.T) {
 	payload, _ := json.Marshal(map[string]string{"path": "a.txt", "content": "three", "expectedHash": got.Hash})
 	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/v1/projects/"+proj.ID+"/file", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.RemoteAddr = "127.0.0.1:1"
 	res, _ = http.DefaultClient.Do(req)
 	if res.StatusCode != http.StatusConflict {
@@ -116,12 +136,14 @@ func TestFileSaveConflict(t *testing.T) {
 }
 
 func TestRemoveProjectDoesNotDeleteSource(t *testing.T) {
-	_, ts := testAPI(t)
+	s, ts := testAPI(t)
+	cred := issueCred(t, s)
 	root := t.TempDir()
 	_ = os.WriteFile(filepath.Join(root, "keep.txt"), []byte("x"), 0o644)
 	body, _ := json.Marshal(map[string]string{"path": root})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/projects/open", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.RemoteAddr = "127.0.0.1:1"
 	res, _ := http.DefaultClient.Do(req)
 	var proj struct {
@@ -129,6 +151,7 @@ func TestRemoveProjectDoesNotDeleteSource(t *testing.T) {
 	}
 	_ = json.NewDecoder(res.Body).Decode(&proj)
 	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/v1/projects/"+proj.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.RemoteAddr = "127.0.0.1:1"
 	res, _ = http.DefaultClient.Do(req)
 	if res.StatusCode != 200 {

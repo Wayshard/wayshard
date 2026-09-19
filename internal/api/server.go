@@ -146,12 +146,8 @@ func (s *Server) requireAuth(h func(http.ResponseWriter, *http.Request, *auth.Pr
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.principal(r)
 		if err != nil {
-			if s.allowLocalAdmin(r) {
-				p = &auth.Principal{DeviceID: "local-admin", Kind: "local", Name: "local-admin"}
-			} else {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-				return
-			}
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
 		}
 		h(w, r, p)
 	}
@@ -175,7 +171,7 @@ func (s *Server) allowLocalAdmin(r *http.Request) bool {
 	if !auth.LocalAdminBypass(host) {
 		return false
 	}
-	// loopback-only recovery pairing / first-run
+	// loopback-only recovery pairing / first-run when no trusted device exists
 	devs, err := s.Store.ListDevices(r.Context())
 	if err != nil {
 		return false
@@ -459,7 +455,11 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request, p *auth.Pri
 		sum := sha256.Sum256(raw)
 		if resp, ok, err := s.Store.GetIdempotency(r.Context(), key, p.DeviceID, hex.EncodeToString(sum[:])); err == nil && ok {
 			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
 			w.Write([]byte(resp))
+			return
+		} else if errors.Is(err, storage.ErrConflict) {
+			http.Error(w, `{"error":"idempotency key reused with a different request"}`, http.StatusConflict)
 			return
 		}
 	}
@@ -502,11 +502,22 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request, _ *auth.Principa
 }
 
 func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
-	if err := s.Store.UpdateRunStatus(r.Context(), r.PathValue("id"), domain.RunCancelled, domain.BlockedUser, "cancelled by client"); err != nil {
+	id := r.PathValue("id")
+	// Interrupt active execution first; this cancels the stage context, which
+	// tears down the ACP process tree.
+	if s.Sched != nil {
+		s.Sched.Cancel(id)
+	}
+	if run, err := s.Store.GetRun(r.Context(), id); err == nil && run.Status.Terminal() {
+		writeJSON(w, 200, map[string]any{"ok": true, "status": run.Status})
+		return
+	}
+	if err := s.Store.UpdateRunStatus(r.Context(), id, domain.RunCancelled, domain.BlockedUser, "cancelled by client"); err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true})
+	_ = s.Store.ResetStaleRunningStages(r.Context(), id)
+	writeJSON(w, 200, map[string]any{"ok": true, "status": domain.RunCancelled})
 }
 
 func (s *Server) retryRun(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
@@ -660,8 +671,8 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request, _ *auth.Princ
 		return
 	}
 	rel := r.URL.Query().Get("path")
-	root := filepath.Join(p.Path, filepath.Clean("/"+rel))
-	if !strings.HasPrefix(root, p.Path) {
+	root, err := secureJoin(p.Path, rel, false)
+	if err != nil {
 		http.Error(w, "path", 400)
 		return
 	}
@@ -696,7 +707,7 @@ func (s *Server) readFile(w http.ResponseWriter, r *http.Request, _ *auth.Princi
 	rel := r.URL.Query().Get("path")
 	full, err := safeJoin(p.Path, rel)
 	if err != nil {
-		writeErr(w, err)
+		http.Error(w, `{"error":"path escapes project"}`, http.StatusBadRequest)
 		return
 	}
 	b, err := os.ReadFile(full)
@@ -723,9 +734,9 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request, _ *auth.Princ
 		writeErr(w, err)
 		return
 	}
-	full, err := safeJoin(p.Path, body.Path)
+	full, err := secureJoin(p.Path, body.Path, true)
 	if err != nil {
-		writeErr(w, err)
+		http.Error(w, `{"error":"path escapes project"}`, http.StatusBadRequest)
 		return
 	}
 	cur, err := os.ReadFile(full)
@@ -753,7 +764,7 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request, _ *auth.Princ
 }
 
 func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.principal(r); err != nil && !s.allowLocalAdmin(r) {
+	if _, err := s.principal(r); err != nil {
 		http.Error(w, "unauthorized", 401)
 		return
 	}
@@ -805,8 +816,42 @@ func writeErr(w http.ResponseWriter, err error) {
 }
 
 func safeJoin(root, rel string) (string, error) {
-	full := filepath.Join(root, filepath.Clean("/"+rel))
-	if !strings.HasPrefix(full, filepath.Clean(root)+string(os.PathSeparator)) && full != filepath.Clean(root) {
+	return secureJoin(root, rel, false)
+}
+
+// secureJoin resolves the target and requires it to remain inside root, even
+// when intermediate path components are symlinks. forWrite additionally
+// resolves the deepest existing ancestor.
+func secureJoin(root, rel string, forWrite bool) (string, error) {
+	rootClean := filepath.Clean(root)
+	if resolved, err := filepath.EvalSymlinks(rootClean); err == nil {
+		rootClean = resolved
+	}
+	full := filepath.Join(rootClean, filepath.Clean("/"+rel))
+	check := full
+	if forWrite {
+		// Resolve the nearest existing ancestor so a new file cannot be
+		// written through a symlinked directory that escapes the root.
+		check = full
+		for {
+			parent := filepath.Dir(check)
+			if parent == check {
+				break
+			}
+			if _, err := os.Lstat(check); err == nil {
+				break
+			}
+			check = parent
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(check)
+	if err != nil {
+		resolved = check
+	}
+	if resolved != rootClean && !strings.HasPrefix(resolved, rootClean+string(os.PathSeparator)) {
+		return "", errors.New("path escapes project")
+	}
+	if full != rootClean && !strings.HasPrefix(full, rootClean+string(os.PathSeparator)) {
 		return "", errors.New("path escapes project")
 	}
 	return full, nil

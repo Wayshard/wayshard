@@ -24,16 +24,14 @@ func TestIntakeThroughCompleteWithSyntheticExec(t *testing.T) {
 	defer a.Close()
 	ts := httptest.NewServer(a.Handler())
 	defer ts.Close()
+	cred := appCred(t, a)
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("demo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	open, _ := json.Marshal(map[string]string{"path": dir, "name": "demo"})
-	resp, err := http.Post(ts.URL+"/v1/projects/open", "application/json", bytes.NewReader(open))
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := postJSON(t, ts.URL+"/v1/projects/open", string(open), cred)
 	if resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("open %d %s", resp.StatusCode, b)
@@ -42,7 +40,7 @@ func TestIntakeThroughCompleteWithSyntheticExec(t *testing.T) {
 		ID string `json:"id"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&proj)
-	resp, _ = http.Post(ts.URL+"/v1/projects/"+proj.ID+"/conversations", "application/json", bytes.NewReader([]byte(`{"title":"s"}`)))
+	resp = postJSON(t, ts.URL+"/v1/projects/"+proj.ID+"/conversations", `{"title":"s"}`, cred)
 	var conv struct {
 		ID string `json:"id"`
 	}
@@ -50,6 +48,7 @@ func TestIntakeThroughCompleteWithSyntheticExec(t *testing.T) {
 	msg, _ := json.Marshal(map[string]any{"text": "brainstorm a README outline", "artifactOnly": true})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/v1/conversations/"+conv.ID+"/messages", bytes.NewReader(msg))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.Header.Set("Idempotency-Key", "e2e-1")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {

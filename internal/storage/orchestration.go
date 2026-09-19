@@ -365,9 +365,76 @@ func (s *Store) UpdateAttemptStatus(ctx context.Context, attemptID string, statu
 	if status != domain.AttemptPending && status != domain.AttemptRunning {
 		finished = now
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE stage_attempts SET status = ?, failure_class = ?, error = ?, finished_at = COALESCE(?, finished_at) WHERE id = ?`,
-		string(status), string(class), errMsg, finished, attemptID)
-	return err
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE stage_attempts SET status = ?, failure_class = ?, error = ?, finished_at = COALESCE(?, finished_at) WHERE id = ?`,
+			string(status), string(class), errMsg, finished, attemptID)
+		if err != nil {
+			return err
+		}
+		var runID string
+		_ = tx.QueryRowContext(ctx, `SELECT run_id FROM stage_attempts WHERE id = ?`, attemptID).Scan(&runID)
+		_, err = InsertEventJSON(ctx, tx, "stage.attempt.status", "", "", runID, map[string]any{
+			"attemptId": attemptID, "status": status, "class": class,
+		})
+		return err
+	})
+}
+
+// UpdateStageStatus records the terminal status of a stage. Stages must not
+// remain "running" after their active attempt ends.
+func (s *Store) UpdateStageStatus(ctx context.Context, stageID string, status domain.StageAttemptStatus, class domain.FailureClass, errMsg string) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		var runID string
+		if err := tx.QueryRowContext(ctx, `SELECT run_id FROM stages WHERE id = ?`, stageID).Scan(&runID); err != nil {
+			if err == sql.ErrNoRows {
+				return ErrNotFound
+			}
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE stages SET status = ?, updated_at = ? WHERE id = ?`,
+			string(status), nowRFC3339(), stageID); err != nil {
+			return err
+		}
+		_, err := InsertEventJSON(ctx, tx, "stage.status", "", "", runID, map[string]any{
+			"stageId": stageID, "status": status, "class": class, "error": errMsg,
+		})
+		return err
+	})
+}
+
+// CountStagesByKind returns how many stages of a kind exist for a run.
+func (s *Store) CountStagesByKind(ctx context.Context, runID string, kind domain.StageKind) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM stages WHERE run_id = ? AND kind = ?`, runID, string(kind)).Scan(&n)
+	return n, err
+}
+
+// CountStages returns the total number of stages for a run.
+func (s *Store) CountStages(ctx context.Context, runID string) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM stages WHERE run_id = ?`, runID).Scan(&n)
+	return n, err
+}
+
+// PendingApprovalCount returns unresolved approvals for a run.
+func (s *Store) PendingApprovalCount(ctx context.Context, runID string) (int, error) {
+	var n int
+	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM approvals WHERE run_id = ? AND status = 'pending'`, runID).Scan(&n)
+	return n, err
+}
+
+// ResetStaleRunningStages marks any stage still running at startup as interrupted.
+func (s *Store) ResetStaleRunningStages(ctx context.Context, runID string) error {
+	stages, err := s.ListStages(ctx, runID)
+	if err != nil {
+		return err
+	}
+	for _, st := range stages {
+		if st.Status == domain.AttemptRunning {
+			_ = s.UpdateStageStatus(ctx, st.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart or terminal run")
+		}
+	}
+	return nil
 }
 
 func (s *Store) ListAttempts(ctx context.Context, stageID string) ([]domain.StageAttempt, error) {

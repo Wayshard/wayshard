@@ -22,7 +22,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Loopback 127.0.0.1 HTTP/WS, no TLS product | `cmd/wayshard-server --listen`, default `paths.DefaultPort` | listen default in app.Open | done |
 | Pairing, advertised URL, per-device verifier, revoke, identity challenge | `internal/auth` | `internal/auth/auth_test.go` | done |
 | Web session cookie | `pairingComplete` sets `wayshard_session` | pairing complete path | done |
-| Local recovery pairing when no devices | `allowLocalAdmin` | API tests use loopback first-run | done |
+| Local recovery pairing when no devices | `allowLocalAdmin` limited to `POST /v1/pairing/invitations` | `TestFreshServerAuthBoundary` (all other product APIs return 401 unauthenticated) | done |
 | SecretVault envelope encryption, no replace on unlock fail | `internal/secrets` | `internal/secrets/vault_test.go` | done |
 | APIs never return secret plaintext | `Vault.Status` | `TestAPIsDoNotReturnPlaintext` | done |
 
@@ -39,6 +39,13 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
 | Assess → plan → execute (fake ACP writes run workspace) → validate → review → READY_TO_INTEGRATE → three-way integrate → COMPLETE | `internal/orchestrator/machine.go`, `internal/harness/exec.go`, `cmd/wayshard-fake-acp` | `TestSourceChangingOrchestrationThroughIntegrate` (`internal/app/source_e2e_test.go`); asserts source unchanged until integrate, dirty `user.txt` stays user-owned, RunDelta is agent-only, journal present, complete only after publish | done |
+| Deterministic budgets bound repair/attempt/stage growth; permanent failure reaches BLOCKED/FAILED | `internal/orchestrator/budget.go`, `machine.go` | `TestRepairBudgetTerminates`, `TestInfrastructureBudgetTerminates` | done |
+| Stage status leaves `running` when its attempt ends | `storage.UpdateStageStatus` | `TestRepairBudgetTerminates`/`TestInfrastructureBudgetTerminates` assert no stale running stage | done |
+| Real cancellation interrupts active harness and process tree | `scheduler.Cancel`, `acp` driver shutdown | `TestCancellationInterruptsActiveHarness` (process-tree check) | done |
+| Infrastructure fallback executes next viable candidate; quality failure does not | `runStage` attempt ladder | covered by `TestInfrastructureBudgetTerminates` (no candidate => bounded fail); quality path via completion policy | partial |
+| Live WebSocket push of committed events | `storage.EventHook` + `events.Hub.Broadcast` | `TestLiveWebSocketEvents` | done |
+| Durable notifications derived from committed events | `internal/notifications` | `TestDeriveRunBlocked`, `TestBlockedRunCreatesAttentionNotification` | done |
+| Approvals durable, resolvable from any device | `internal/api` approvals + ACP permission hook | `TestApprovalLifecycle`; ACP pause path not exercised by a real harness | partial |
 | Integration conflict through orchestrator (not integration package alone) | `conflictBefore` wrapping `IntegrateAdapter` | `TestOrchestratorIntegrationConflictBlocks` | done |
 | Append-only attempts | `AppendAttempt` | `TestFailedAttemptNotRewritten` | done |
 | NO_VIABLE_ROUTE | `internal/routing` | `TestHardFilterImpossible`, `TestNoViableRouteWithoutHarness` | done |
@@ -46,6 +53,8 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Fake ACP scenarios | `cmd/wayshard-fake-acp`, `internal/harness/exec.go` | `TestACPExecPlanViaFakeHarness`, `TestACPExecAuthRequired`, `internal/acp/driver_test.go` | done |
 | Invalid stage output bounded retry | `runStage` correction attempt | orchestrator machine | done |
 | Validation server-owned, passive discovery | `internal/validation` | `TestPassiveDiscoveryDoesNotExecute` | done |
+| Validation commands run through the Tool Sandbox (no host FS, no ambient secrets) | `validation.Runner` + `sandbox.ToolPolicy` | `TestValidationRunsInToolSandbox`, `TestValidationOrdinaryCommandStillWorks` | done |
+| Validation baseline vs final distinguishes pre-existing failure from regression | `ensureBaseline`, `CompletionPolicy` | `TestValidationBaselineClassification`, `TestCompletionPolicyHonoursBaseline` | done |
 | CompletionPolicy Go-owned | `internal/orchestrator/completion.go` | `completion_test.go` | done |
 | Artifact-only complete without integrate | CompletionPolicy + e2e | `TestArtifactOnlyCompletesWithoutIntegration` | done |
 
@@ -62,23 +71,25 @@ Status is `done` when code and tests exist in this repository. External-only ite
 
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
-| Linux sandbox: user/net/mount/pid/uts namespaces + uid/gid map + process group + pdeathsig; constrain-or-fail if namespaces missing | `internal/sandbox/linux.go` | `TestNativeCompileAndConstrain`, `TestProcessTreeKill`, `TestCompileRequiresWritableRoots` (linux CI) | done |
-| macOS sandbox: `sandbox-exec` seatbelt profile compiled from SandboxPolicy (FS roots, network deny/allow); process group; fail if `sandbox-exec` missing when Required | `internal/sandbox/seatbelt.go`, `darwin.go`, `darwin_stub.go` | `TestSeatbeltProfileCompilation` (all OS); `TestNativeCompileAndConstrain` / `TestProcessTreeKill` on darwin CI; `TestForeignBackendsAreUnavailableHere` | done |
-| Windows sandbox: Job Objects (kill-on-close, active-process, job memory) + new process group; AppContainer **not claimed**; fail closed if CreateJobObject/assign fails when Required | `internal/sandbox/windows.go`, `windows_stub.go` | compiled `GOOS=windows go build ./...`; `TestNativeCompileAndConstrain` / `TestProcessTreeKill` on windows CI; `TestForeignBackendsAreUnavailableHere` | done |
-| Required isolation never silently unrestricted; unsupported backends error even if Required=false | `Manager.Start`, `AsConstrainer`, `UnsupportedBackend` | `TestRequiredIsolationNeverSilent`, `TestReducedSecurityStillDoesNotSilentlyUnrestrict`, `TestUnsupportedConstrainFailsClosed`, `TestProbeNeverClaimsUnrestricted` | done |
-| Harness launch applies compiled policy (`SetupCmd`/`AfterStart`) instead of policy types only | `internal/acp.Spec`, `internal/harness/exec.go` | fake-ACP e2e under constrained launch | done |
-| Object GC, workspace retention, disk pressure | `internal/storage/gc.go` | `gc_test.go` | done |
+| Linux sandbox: Landlock filesystem confinement (read-only/write roots), Landlock ABI>=4 network deny for `none`, process group, pdeathsig, explicit env allowlist | `internal/sandbox/linux.go`, `landlock_linux.go`, `helper_linux.go`, `env.go` | `TestLandlockFilesystemConfinement`, `TestLandlockReadOnlyView`, `TestEnvAllowlistDropsHostSecrets`, `TestNativeCompileAndConstrain` | done (Linux black-box) |
+| macOS sandbox: `sandbox-exec` seatbelt profile compiled from SandboxPolicy; process group; fail if missing when Required | `internal/sandbox/seatbelt.go`, `darwin.go` | `TestSeatbeltProfileCompilation` (all OS) | code present; native runtime enforcement UNVERIFIED (no macOS execution here) |
+| Windows sandbox: Job Objects + new process group; AppContainer not claimed; fail closed if unavailable | `internal/sandbox/windows.go` | cross-compile + policy tests | code present; native runtime enforcement UNVERIFIED |
+| Required isolation never silently unrestricted | `LinuxBackend.Compile`/`Constrain` fail closed when Landlock unavailable; unsupported backends error | `TestRequiredIsolationNeverSilent`, `TestReducedSecurityStillDoesNotSilentlyUnrestrict`, `TestUnsupportedConstrainFailsClosed`, `TestProbeNeverClaimsUnrestricted` | done |
+| Harness and tool launch apply the compiled filesystem/env policy to the process and descendants | `sandbox` helper re-exec + `harness.ACPExec` + `validation.Runner` | confinement tests (host read/write denied, workspace allowed, child/grandchild confined) | done (Linux) |
+| Discovery probes use a confined environment (no ambient secrets) | `harness.probeOne` + `sandbox.HarnessEnv` | harness discovery tests | done; probe filesystem is not Landlock-confined (env only) |
+| ACP client callbacks: fs read/write scoped to run workspace; permission requests surface durable approvals | `harness.ACPExec` hooks | `TestApprovalLifecycle`; callback scoping via `withinRoot` | partial (terminal callbacks still method-not-found) |
+| Object GC, workspace retention, disk pressure gate | `internal/storage/gc.go`, `scheduler.tick` | `gc_test.go`; low-disk gate blocks write-heavy runs with `BlockedStorage` | done |
 | Backup excludes repos; optional secrets | `internal/backup` | `backup_test.go` | done |
-| Startup reconciliation | `internal/recovery` | used in `app.Open` | done |
+| Startup reconciliation of interrupted attempts/stages and incomplete publication journals | `internal/recovery` | unit paths; journal recovery wired from `app.Open` | partial (no orphan-process sweep; crash injection not black-box tested) |
 
 ## Clients
 
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
-| Web full surfaces (session/changes/files/terminal + overlays) | `clients/web/src/wayshard` | `app.test.ts`, vite build | done |
-| CLI/TUI full client same API | `cmd/wayshard`, `clients/tui/src/index.ts` | tui test, go build | done |
-| Desktop Tauri 2 + local server provision independent of window | `clients/desktop/src-tauri` | Rust `provision_local_server` | done |
-| Android is Tauri 2 of the same web client, not a custom WebView | `clients/desktop` identifier `dev.wayshard.app`, `ANDROID.md`, release `tauri android build` | CI release android job | done |
+| Web full surfaces (session/changes/files/terminal + overlays) | `clients/web/src/wayshard` | `app.test.ts`, vite build | partial (raw JSON views, polling not WS, no pairing UI, no diff viewer) |
+| CLI/TUI full client same API | `cmd/wayshard` (shipped), `clients/tui` (not packaged) | tui test, go build | partial (shipped CLI is a thin scriptable client; richer bun TUI not built by `make`/`package-go.sh`) |
+| Desktop Tauri 2 + local server provision independent of window | `clients/desktop/src-tauri` | Rust `provision_local_server`; `cargo check` | partial (GUI runtime not exercised; no Linux detach/setsid) |
+| Android is Tauri 2 of the same web client, not a custom WebView | `clients/desktop` identifier `dev.wayshard.app`, `ANDROID.md`, release `tauri android build` | CI release android job | UNVERIFIED runtime (packaging only; no device/emulator run) |
 | Shared SDK | `clients/sdk` | sdk unit test | done |
 
 ## CI/CD
@@ -110,3 +121,34 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Apple Developer ID / notarization / commercial Windows CA / Play Console | intentionally not used |
 | Tailscale Serve / tunnel | user networking |
 | Real-harness compatibility jobs | provisioned environments only |
+
+## Post-audit remediation (P0 pass)
+
+The forensic audit of `v0.1.0-rc.6` (`325fa20`) found eight P0 defects. This pass fixed and independently verified:
+
+- **Sandbox filesystem confinement**: Linux now applies Landlock rules (read-only roots for system/toolchain, read-write roots for the run workspace and synthetic temp, denied everywhere else) via an in-binary helper, inherited by child/grandchild processes. Black-box canaries confirm host reads, host writes and `/tmp` escapes are denied while workspace reads/writes succeed.
+- **Environment confinement**: blacklist replaced by an explicit allowlist per process class; server secrets and unrelated host credentials are absent from harness/tool/probe environments.
+- **Network policy**: `none` is enforced via Landlock network rules (ABI>=4) and fails closed if unavailable; `unrestricted` no longer accidentally removes connectivity. `allowlist`/`brokered` are explicitly unsupported and fail closed.
+- **Validation Tool Sandbox**: all repository-controlled checks run confined; ambient secrets and host filesystem are unavailable, while benign commands pass.
+- **Bounded repair/retry**: deterministic Go budgets cap stages, repairs, replans and per-stage attempts. A permanently failing review or repeated infrastructure failure reaches `BLOCKED`/`FAILED` with bounded stages/events (previously 4,523 stages / 22,621 events).
+- **Stage lifecycle**: stages now leave `running` on attempt completion; terminal runs have no stale running stage.
+- **Real cancellation**: `Sched.Cancel` cancels the stage context, which tears down the ACP process tree; run becomes `CANCELLED` and no orphan remains.
+- **Live WebSocket events**: committed durable events are published after commit via `Store.EventHook` → `Hub.Broadcast`; replay remains the source for reconnect. Verified live delivery of a newly committed event.
+- **Notifications**: derived from committed events (run complete/blocked/failed, integration conflict, approval required) with attention state.
+- **Approvals**: ACP permission requests create durable approvals; any authorized device may resolve; `pendingApprovals` gates completion.
+- **Validation baseline**: baseline captured on the untouched snapshot before the first write stage; pre-existing failures are recorded as such and do not trigger repair.
+- **Auth boundary**: loopback local-admin is now limited to `POST /v1/pairing/invitations`; all other product APIs return 401 unauthenticated on a fresh or fully-revoked server.
+- **Symlink escape**: project file APIs resolve symlinks and deny escapes.
+- **Idempotency conflict**: same key with a different body returns 409; same body replays.
+- **Low-disk gate**: critical disk blocks write-heavy runs with `BlockedStorage`.
+- **Recovery**: startup reconciles interrupted stages/attempts and resumes/classifies incomplete publication journals; source-identity locking is applied on the enqueue path.
+
+Still partial or unverified after this pass:
+
+- Real installed ACP harness interoperability (no supported harness was installed; only the deterministic fake was exercised).
+- macOS/Windows runtime sandbox enforcement (code present; not executed natively here).
+- ACP terminal callbacks remain method-not-found; only fs read/write and permission callbacks are wired.
+- Context assembly is still not injected into orchestration stages; planner/reviewer receive only the task objective.
+- Web/Desktop/Android runtime parity and client completeness (see the Clients table).
+- Live Jev, model metadata enrichment, event retention/pruning, and publication-crash injection tests.
+- Discovery `--version` probes are env-filtered but not filesystem-confined.

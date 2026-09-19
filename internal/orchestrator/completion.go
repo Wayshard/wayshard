@@ -15,6 +15,11 @@ func CompletionPolicy(artifactOnly bool, plan *artifacts.PlanArtifact, val *arti
 	if val != nil {
 		for _, c := range val.Checks {
 			if c.Required && (c.Status == string(domain.CheckFail) || c.Status == string(domain.CheckBlocked)) {
+				// A failure that was already present at baseline is user
+				// baseline, not an agent regression.
+				if c.Baseline == string(domain.CheckFail) && c.Status == string(domain.CheckFail) {
+					continue
+				}
 				return domain.OutcomeRepair
 			}
 		}

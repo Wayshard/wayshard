@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"path/filepath"
 	"time"
@@ -63,7 +62,10 @@ type Engine struct {
 	Candidates CandidateSource
 	Validate   *validation.Runner
 	Log        *slog.Logger
+	Budget     Budgets
 }
+
+func (e *Engine) budgets() Budgets { return e.Budget.withDefaults() }
 
 func (e *Engine) ProcessRun(ctx context.Context, runID string) error {
 	run, err := e.Store.GetRun(ctx, runID)
@@ -88,33 +90,19 @@ func (e *Engine) ProcessRun(ctx context.Context, runID string) error {
 		run, _ = e.Store.GetRun(ctx, run.ID)
 	}
 	for !run.Status.Terminal() {
+		if ctx.Err() != nil {
+			return e.markCancelled(ctx, run.ID)
+		}
 		switch run.Status {
-		case domain.RunPlanning:
-			if err := e.runStage(ctx, run, task, domain.StagePlan); err != nil {
-				return err
+		case domain.RunPlanning, domain.RunExecuting, domain.RunValidating,
+			domain.RunReviewing, domain.RunRepairing, domain.RunReplanning, domain.RunExploring:
+			if run.Status == domain.RunExecuting {
+				// Establish the baseline on the untouched snapshot before the
+				// first write stage, so pre-existing failures are not mistaken
+				// for agent regressions.
+				e.ensureBaseline(ctx, run, task)
 			}
-		case domain.RunExploring:
-			if err := e.runStage(ctx, run, task, domain.StageExplore); err != nil {
-				return err
-			}
-		case domain.RunExecuting:
-			if err := e.runStage(ctx, run, task, domain.StageExecute); err != nil {
-				return err
-			}
-		case domain.RunValidating:
-			if err := e.runStage(ctx, run, task, domain.StageValidate); err != nil {
-				return err
-			}
-		case domain.RunReviewing:
-			if err := e.runStage(ctx, run, task, domain.StageReview); err != nil {
-				return err
-			}
-		case domain.RunRepairing:
-			if err := e.runStage(ctx, run, task, domain.StageRepair); err != nil {
-				return err
-			}
-		case domain.RunReplanning:
-			if err := e.runStage(ctx, run, task, domain.StageReplan); err != nil {
+			if err := e.runStage(ctx, run, task, stageForStatus(run.Status)); err != nil {
 				return err
 			}
 		case domain.RunReadyToIntegrate, domain.RunIntegrating:
@@ -131,6 +119,16 @@ func (e *Engine) ProcessRun(ctx context.Context, runID string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (e *Engine) markCancelled(ctx context.Context, runID string) error {
+	// A cancellation may already have been recorded by the API path.
+	r, err := e.Store.GetRun(context.WithoutCancel(ctx), runID)
+	if err == nil && !r.Status.Terminal() {
+		_ = e.Store.UpdateRunStatus(context.WithoutCancel(ctx), runID, domain.RunCancelled, domain.BlockedUser, "cancelled")
+	}
+	_ = e.Store.ResetStaleRunningStages(context.WithoutCancel(ctx), runID)
 	return nil
 }
 
@@ -178,7 +176,126 @@ func (e *Engine) assess(ctx context.Context, run *domain.Run, task *domain.Task)
 	return e.Store.CompareAndSetRunStatus(ctx, run.ID, domain.RunAssessing, next, "", "")
 }
 
+func stageForStatus(s domain.RunStatus) domain.StageKind {
+	switch s {
+	case domain.RunPlanning:
+		return domain.StagePlan
+	case domain.RunExploring:
+		return domain.StageExplore
+	case domain.RunExecuting:
+		return domain.StageExecute
+	case domain.RunValidating:
+		return domain.StageValidate
+	case domain.RunReviewing:
+		return domain.StageReview
+	case domain.RunRepairing:
+		return domain.StageRepair
+	case domain.RunReplanning:
+		return domain.StageReplan
+	default:
+		return domain.StagePlan
+	}
+}
+
+// ensureBaseline runs the discovered mandatory checks once against the
+// untouched run workspace and persists the outcome as a baseline validation
+// artifact. Discovery stays passive; execution routes through the validation
+// runner (Tool Sandbox).
+func (e *Engine) ensureBaseline(ctx context.Context, run *domain.Run, task *domain.Task) {
+	if task.ArtifactOnly || run.Status != domain.RunExecuting {
+		return
+	}
+	if e.hasBaseline(ctx, run.ID) {
+		return
+	}
+	ws, err := e.Store.GetWorkspaceByRun(ctx, run.ID)
+	if err != nil || ws == nil {
+		return
+	}
+	if e.Workspace != nil {
+		if proj, err := e.Store.GetProject(ctx, run.ProjectID); err == nil {
+			if _, _, err := e.Workspace.Prepare(ctx, *proj, *run); err == nil {
+				if w2, err := e.Store.GetWorkspaceByRun(ctx, run.ID); err == nil {
+					ws = w2
+				}
+			}
+		}
+	}
+	checks := validation.Discover(ws.RunPath)
+	if len(checks) == 0 {
+		return
+	}
+	runner := e.Validate
+	if runner == nil {
+		runner = &validation.Runner{Store: e.Store}
+	}
+	art := runner.Run(ctx, ws.RunPath, checks, nil)
+	art.Baseline = true
+	body, err := artifacts.Marshal(art)
+	if err != nil {
+		return
+	}
+	stages, _ := e.Store.ListStages(ctx, run.ID)
+	stageID := ""
+	if len(stages) > 0 {
+		stageID = stages[0].ID
+	}
+	_ = e.Store.InsertArtifact(ctx, &domain.Artifact{
+		RunID: run.ID, StageID: stageID, Kind: domain.ArtifactValidation,
+		SchemaVer: artifacts.SchemaVersion, JSON: body, Valid: true,
+	})
+}
+
+func (e *Engine) hasBaseline(ctx context.Context, runID string) bool {
+	arts, err := e.Store.ListArtifacts(ctx, runID)
+	if err != nil {
+		return false
+	}
+	for _, a := range arts {
+		if a.Kind != domain.ArtifactValidation {
+			continue
+		}
+		if v, err := artifacts.ParseAndValidate(domain.ArtifactValidation, a.JSON); err == nil {
+			if va, ok := v.(artifacts.ValidationArtifact); ok && va.Baseline {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (e *Engine) baselineChecks(ctx context.Context, runID string) map[string]string {
+	arts, err := e.Store.ListArtifacts(ctx, runID)
+	if err != nil {
+		return nil
+	}
+	for _, a := range arts {
+		if a.Kind != domain.ArtifactValidation {
+			continue
+		}
+		v, err := artifacts.ParseAndValidate(domain.ArtifactValidation, a.JSON)
+		if err != nil {
+			continue
+		}
+		va, ok := v.(artifacts.ValidationArtifact)
+		if !ok || !va.Baseline {
+			continue
+		}
+		out := map[string]string{}
+		for _, c := range va.Checks {
+			out[c.Name] = c.Status
+		}
+		return out
+	}
+	return nil
+}
+
+// runStage appends one stage and, within its attempt budget, executes it. The
+// stage always leaves the running state when this returns.
 func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Task, kind domain.StageKind) error {
+	if reason, detail, over := e.budget(ctx, kind, run.ID); over {
+		return e.stopBlocked(ctx, run, reason, detail)
+	}
 	stages, err := e.Store.ListStages(ctx, run.ID)
 	if err != nil {
 		return err
@@ -187,6 +304,11 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 	if err := e.Store.AppendStage(ctx, st); err != nil {
 		return err
 	}
+	if ctx.Err() != nil {
+		_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptCancelled, domain.FailUser, "cancelled")
+		return e.markCancelled(ctx, run.ID)
+	}
+
 	cands := []routing.Candidate{}
 	if e.Candidates != nil {
 		cands, _ = e.Candidates.Candidates(ctx)
@@ -207,133 +329,230 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 	if kind != domain.StageValidate {
 		dec = router.Route(ctx, kind, cfg, cands, assess)
 		if dec.Blocked != "" {
+			_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailPolicy, dec.Detail)
 			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunBlocked, dec.Blocked, dec.Detail)
 		}
 	}
+
+	if kind != domain.StageValidate && e.Workspace != nil {
+		proj, err := e.Store.GetProject(ctx, run.ProjectID)
+		if err != nil {
+			_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailData, err.Error())
+			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", err.Error())
+		}
+		if _, _, err := e.Workspace.Prepare(ctx, *proj, *run); err != nil {
+			_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailInfrastructure, err.Error())
+			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", err.Error())
+		}
+	}
+
+	if kind == domain.StageValidate {
+		return e.runValidate(ctx, run, task, st)
+	}
+
+	// Build the attempt ladder: primary then explicit infrastructure fallbacks.
+	candidates := []routing.Candidate{dec.Candidate}
+	candidates = append(candidates, dec.Fallbacks...)
+	maxAttempts := e.budgets().MaxStageAttempts
+
+	attemptsMade := 0
+	corrections := 0
+	for _, cand := range candidates {
+		if attemptsMade >= maxAttempts {
+			break
+		}
+		if ctx.Err() != nil {
+			_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptCancelled, domain.FailUser, "cancelled")
+			return e.markCancelled(ctx, run.ID)
+		}
+		att := e.appendAttempt(ctx, st, run, cand)
+		if att == nil {
+			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "cannot append attempt")
+		}
+		e.insertRouteDecision(ctx, run, st, att, cand, dec, assess)
+		res, adec := e.execAttempt(ctx, run, task, st, att, cand)
+		attemptsMade++
+		if res.Usage != nil {
+			res.Usage.RunID = run.ID
+			res.Usage.StageID = st.ID
+			res.Usage.AttemptID = att.ID
+			_ = e.Store.InsertUsage(ctx, res.Usage)
+		}
+		if ctx.Err() != nil {
+			_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptCancelled, domain.FailUser, "cancelled")
+			_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptCancelled, domain.FailUser, "cancelled")
+			return e.markCancelled(ctx, run.ID)
+		}
+		if res.Err != nil {
+			class := res.Class
+			if class == "" {
+				class = domain.FailInfrastructure
+			}
+			_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptFailed, class, res.Err.Error())
+			// Infrastructure failure may fall back to the next viable route.
+			if class == domain.FailInfrastructure && attemptsMade < maxAttempts {
+				continue
+			}
+			dec2 := adec
+			return e.failStage(ctx, run, st, kind, class, res.Err, dec2)
+		}
+
+		parsed, perr := e.persistArtifact(ctx, run.ID, st.ID, att.ID, kind, res.ArtifactJSON)
+		if perr == nil {
+			_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptSucceeded, "", "")
+			_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptSucceeded, "", "")
+			if kind.WritesWorkspace() {
+				e.recordDelta(ctx, run.ID)
+			}
+			return e.advance(ctx, run, task, kind, parsed)
+		}
+
+		// Invalid structured output: one bounded correction attempt.
+		_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptInvalid, domain.FailTask, perr.Error())
+		if corrections < 1 && attemptsMade < maxAttempts {
+			corrections++
+			corr := e.appendAttempt(ctx, st, run, cand)
+			if corr == nil {
+				break
+			}
+			res2, _ := e.execAttempt(ctx, run, task, st, corr, cand)
+			attemptsMade++
+			if res2.Err == nil {
+				if parsed2, perr2 := e.persistArtifact(ctx, run.ID, st.ID, corr.ID, kind, res2.ArtifactJSON); perr2 == nil {
+					_ = e.Store.UpdateAttemptStatus(ctx, corr.ID, domain.AttemptSucceeded, "", "")
+					_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptSucceeded, "", "")
+					if kind.WritesWorkspace() {
+						e.recordDelta(ctx, run.ID)
+					}
+					return e.advance(ctx, run, task, kind, parsed2)
+				}
+			}
+			_ = e.Store.UpdateAttemptStatus(ctx, corr.ID, domain.AttemptInvalid, domain.FailTask, "invalid stage output")
+		}
+		_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailTask, "invalid stage output")
+		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "invalid stage output")
+	}
+
+	// No viable attempt completed: infrastructure retry budget exhausted.
+	_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailInfrastructure, "attempt budget exhausted")
+	return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "infrastructure attempt budget exhausted")
+}
+
+func (e *Engine) runValidate(ctx context.Context, run *domain.Run, task *domain.Task, st *domain.Stage) error {
+	att := e.appendAttempt(ctx, st, run, routing.Candidate{})
+	if att == nil {
+		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "cannot append attempt")
+	}
+	wsPath := ""
+	if ws, err := e.Store.GetWorkspaceByRun(ctx, run.ID); err == nil {
+		wsPath = ws.RunPath
+	} else if proj, err := e.Store.GetProject(ctx, run.ProjectID); err == nil {
+		wsPath = proj.Path
+	}
+	checks := validation.Discover(wsPath)
+	plan, _ := loadPlan(ctx, e.Store, run.ID)
+	if plan != nil {
+		for _, cmd := range plan.ValidationPlan {
+			checks = append(checks, artifacts.ValidationCheck{Name: cmd, Kind: "task", Command: cmd, Required: false, Status: string(domain.CheckNotVerified)})
+		}
+	}
+	baseline := e.baselineChecks(ctx, run.ID)
+	runner := e.Validate
+	if runner == nil {
+		runner = &validation.Runner{Store: e.Store}
+	}
+	art := runner.Run(ctx, wsPath, checks, baseline)
+	body, err := artifacts.Marshal(art)
+	if err != nil {
+		return err
+	}
+	res := StageResult{ArtifactJSON: body}
+	if ctx.Err() != nil {
+		_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptCancelled, domain.FailUser, "cancelled")
+		_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptCancelled, domain.FailUser, "cancelled")
+		return e.markCancelled(ctx, run.ID)
+	}
+	parsed, perr := e.persistArtifact(ctx, run.ID, st.ID, att.ID, domain.StageValidate, res.ArtifactJSON)
+	if perr != nil {
+		_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptInvalid, domain.FailTask, perr.Error())
+		_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, domain.FailTask, perr.Error())
+		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "invalid validation artifact")
+	}
+	_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptSucceeded, "", "")
+	_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptSucceeded, "", "")
+	return e.advance(ctx, run, task, domain.StageValidate, parsed)
+}
+
+func (e *Engine) appendAttempt(ctx context.Context, st *domain.Stage, run *domain.Run, cand routing.Candidate) *domain.StageAttempt {
 	attempts, _ := e.Store.ListAttempts(ctx, st.ID)
 	now := time.Now().UTC()
 	att := &domain.StageAttempt{StageID: st.ID, RunID: run.ID, Ordinal: len(attempts) + 1, Status: domain.AttemptRunning, StartedAt: &now}
-	att.HarnessID = dec.Candidate.Harness.ID
-	att.ModelID = dec.Candidate.ModelID
+	att.HarnessID = cand.Harness.ID
+	att.ModelID = cand.ModelID
 	if err := e.Store.AppendAttempt(ctx, att); err != nil {
-		return err
+		return nil
 	}
+	return att
+}
+
+func (e *Engine) insertRouteDecision(ctx context.Context, run *domain.Run, st *domain.Stage, att *domain.StageAttempt, cand routing.Candidate, dec routing.Decision, assess *jev.Assessment) {
 	rd := &domain.RouteDecision{
 		RunID:         run.ID,
 		StageID:       st.ID,
-		HarnessID:     dec.Candidate.Harness.ID,
-		ModelID:       dec.Candidate.ModelID,
+		HarnessID:     cand.Harness.ID,
+		ModelID:       cand.ModelID,
 		Profile:       run.Profile,
-		Isolation:     dec.Candidate.Isolation,
+		Isolation:     cand.Isolation,
 		FallbacksJSON: routing.FallbacksJSON(dec.Fallbacks),
 		PolicyVersion: jev.PolicyVersion,
 		Reason:        dec.Reason,
 		Degraded:      dec.Degraded || run.DegradedRouting,
 	}
-	if assess != nil {
-		// assessment id is not threaded; reason still recorded
-	}
 	_ = e.Store.InsertRouteDecision(ctx, rd)
+}
 
-	if kind.WritesWorkspace() && e.Workspace != nil {
-		proj, err := e.Store.GetProject(ctx, run.ProjectID)
-		if err != nil {
-			return err
-		}
-		if _, _, err := e.Workspace.Prepare(ctx, *proj, *run); err != nil {
-			_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptFailed, domain.FailInfrastructure, err.Error())
-			return e.retryOrFail(ctx, run, st, att, kind, dec, domain.FailInfrastructure, err)
-		}
+func (e *Engine) execAttempt(ctx context.Context, run *domain.Run, task *domain.Task, st *domain.Stage, att *domain.StageAttempt, cand routing.Candidate) (StageResult, routing.Decision) {
+	if e.Exec == nil {
+		body, err := syntheticArtifact(st.Kind, task.Objective)
+		return StageResult{ArtifactJSON: body, Err: err}, routing.Decision{Candidate: cand}
 	}
+	ws, _ := e.Store.GetWorkspaceByRun(ctx, run.ID)
+	return mustExec(ctx, e.Exec, StageRequest{Run: *run, Task: *task, Stage: *st, Attempt: *att, Route: cand, Workspace: ws}), routing.Decision{Candidate: cand}
+}
 
-	res := StageResult{}
-	if kind == domain.StageValidate {
-		wsPath := ""
-		if ws, err := e.Store.GetWorkspaceByRun(ctx, run.ID); err == nil {
-			wsPath = ws.RunPath
-		} else {
-			if proj, err := e.Store.GetProject(ctx, run.ProjectID); err == nil {
-				wsPath = proj.Path
-			}
-		}
-		checks := validation.Discover(wsPath)
-		plan, _ := loadPlan(ctx, e.Store, run.ID)
-		if plan != nil {
-			for _, cmd := range plan.ValidationPlan {
-				checks = append(checks, artifacts.ValidationCheck{Name: cmd, Kind: "task", Command: cmd, Required: false, Status: string(domain.CheckNotVerified)})
-			}
-		}
-		runner := e.Validate
-		if runner == nil {
-			runner = &validation.Runner{Store: e.Store}
-		}
-		art := runner.Run(ctx, wsPath, checks, nil)
-		res.ArtifactJSON, _ = artifacts.Marshal(art)
-	} else if e.Exec != nil {
-		ws, _ := e.Store.GetWorkspaceByRun(ctx, run.ID)
-		res = mustExec(ctx, e.Exec, StageRequest{Run: *run, Task: *task, Stage: *st, Attempt: *att, Route: dec.Candidate, Workspace: ws})
-	} else {
-		res.ArtifactJSON, res.Err = syntheticArtifact(kind, task.Objective)
-	}
-	if res.Usage != nil {
-		res.Usage.RunID = run.ID
-		res.Usage.StageID = st.ID
-		res.Usage.AttemptID = att.ID
-		_ = e.Store.InsertUsage(ctx, res.Usage)
-	}
-	if res.Err != nil {
-		class := res.Class
-		if class == "" {
-			class = domain.FailInfrastructure
-		}
-		_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptFailed, class, res.Err.Error())
-		return e.retryOrFail(ctx, run, st, att, kind, dec, class, res.Err)
-	}
+func (e *Engine) persistArtifact(ctx context.Context, runID, stageID, attemptID string, kind domain.StageKind, raw string) (any, error) {
 	akind := artifacts.KindForStage(kind)
-	parsed, perr := artifacts.ParseAndValidate(akind, res.ArtifactJSON)
-	valid := perr == nil
-	body := res.ArtifactJSON
-	if valid {
-		if s, err := artifacts.Marshal(parsed); err == nil {
-			body = s
-		}
+	parsed, perr := artifacts.ParseAndValidate(akind, raw)
+	if perr != nil {
+		return nil, perr
 	}
-	if !valid {
-		// bounded correction: one retry of the same attempt lineage as a NEW attempt
-		_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptInvalid, domain.FailTask, perr.Error())
-		corr := &domain.StageAttempt{StageID: st.ID, RunID: run.ID, Ordinal: att.Ordinal + 1, Status: domain.AttemptRunning, HarnessID: att.HarnessID, ModelID: att.ModelID}
-		now := time.Now().UTC()
-		corr.StartedAt = &now
-		if err := e.Store.AppendAttempt(ctx, corr); err != nil {
-			return err
-		}
-		var res2 StageResult
-		if e.Exec != nil {
-			ws, _ := e.Store.GetWorkspaceByRun(ctx, run.ID)
-			res2 = mustExec(ctx, e.Exec, StageRequest{Run: *run, Task: *task, Stage: *st, Attempt: *corr, Route: dec.Candidate, Workspace: ws})
-		} else {
-			res2.ArtifactJSON, res2.Err = syntheticArtifact(kind, task.Objective)
-		}
-		parsed, perr = artifacts.ParseAndValidate(akind, res2.ArtifactJSON)
-		if perr != nil {
-			_ = e.Store.UpdateAttemptStatus(ctx, corr.ID, domain.AttemptInvalid, domain.FailTask, perr.Error())
-			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "invalid stage output")
-		}
-		body, _ = artifacts.Marshal(parsed)
-		valid = true
-		_ = e.Store.UpdateAttemptStatus(ctx, corr.ID, domain.AttemptSucceeded, "", "")
-		att = corr
-	} else {
-		_ = e.Store.UpdateAttemptStatus(ctx, att.ID, domain.AttemptSucceeded, "", "")
+	body := raw
+	if s, err := artifacts.Marshal(parsed); err == nil {
+		body = s
 	}
-	art := &domain.Artifact{RunID: run.ID, StageID: st.ID, AttemptID: att.ID, Kind: akind, SchemaVer: artifacts.SchemaVersion, JSON: body, Valid: valid}
-	if err := e.Store.InsertArtifact(ctx, art); err != nil {
-		return err
+	if err := e.Store.InsertArtifact(ctx, &domain.Artifact{RunID: runID, StageID: stageID, AttemptID: attemptID, Kind: akind, SchemaVer: artifacts.SchemaVersion, JSON: body, Valid: true}); err != nil {
+		return nil, err
 	}
-	if kind.WritesWorkspace() {
-		e.recordDelta(ctx, run.ID)
+	return parsed, nil
+}
+
+func (e *Engine) failStage(ctx context.Context, run *domain.Run, st *domain.Stage, kind domain.StageKind, class domain.FailureClass, err error, dec routing.Decision) error {
+	_ = e.Store.UpdateStageStatus(ctx, st.ID, domain.AttemptFailed, class, err.Error())
+	if class == domain.FailTask {
+		if kind == domain.StageExecute {
+			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunRepairing, "", err.Error())
+		}
+		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", err.Error())
 	}
-	return e.advance(ctx, run, task, kind, parsed)
+	if class == domain.FailPolicy {
+		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunBlocked, domain.BlockedPolicy, err.Error())
+	}
+	return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", err.Error())
+}
+
+func (e *Engine) stopBlocked(ctx context.Context, run *domain.Run, reason domain.BlockedReason, detail string) error {
+	_ = e.Store.ResetStaleRunningStages(ctx, run.ID)
+	return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunBlocked, reason, detail)
 }
 
 func (e *Engine) recordDelta(ctx context.Context, runID string) {
@@ -359,8 +578,7 @@ func (e *Engine) advance(ctx context.Context, run *domain.Run, task *domain.Task
 	case domain.StageExplore:
 		return e.Store.CompareAndSetRunStatus(ctx, run.ID, from, domain.RunPlanning, "", "")
 	case domain.StagePlan, domain.StageReplan:
-		p, _ := parsed.(artifacts.PlanArtifact)
-		if p.ArtifactOnly {
+		if p, ok := parsed.(artifacts.PlanArtifact); ok && p.ArtifactOnly {
 			task.ArtifactOnly = true
 		}
 		return e.Store.CompareAndSetRunStatus(ctx, run.ID, from, domain.RunExecuting, "", "")
@@ -372,7 +590,8 @@ func (e *Engine) advance(ctx context.Context, run *domain.Run, task *domain.Task
 		plan, _ := loadPlan(ctx, e.Store, run.ID)
 		val, _ := loadVal(ctx, e.Store, run.ID)
 		rev, _ := parsed.(artifacts.ReviewArtifact)
-		outcome := CompletionPolicy(task.ArtifactOnly, plan, val, &rev, 0, false)
+		pending, _ := e.Store.PendingApprovalCount(ctx, run.ID)
+		outcome := CompletionPolicy(task.ArtifactOnly, plan, val, &rev, pending, false)
 		return e.applyOutcome(ctx, run, from, outcome)
 	default:
 		return nil
@@ -404,6 +623,9 @@ func (e *Engine) integrate(ctx context.Context, run *domain.Run, task *domain.Ta
 	if task.ArtifactOnly {
 		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunComplete, "", "")
 	}
+	if ctx.Err() != nil {
+		return e.markCancelled(ctx, run.ID)
+	}
 	_ = e.Store.CompareAndSetRunStatus(ctx, run.ID, domain.RunReadyToIntegrate, domain.RunIntegrating, "", "")
 	if e.Integrate == nil {
 		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunComplete, "", "no integrator (artifact treated complete)")
@@ -423,29 +645,13 @@ func (e *Engine) integrate(ctx context.Context, run *domain.Run, task *domain.Ta
 	return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunComplete, "", "")
 }
 
-func (e *Engine) retryOrFail(ctx context.Context, run *domain.Run, st *domain.Stage, att *domain.StageAttempt, kind domain.StageKind, dec routing.Decision, class domain.FailureClass, err error) error {
-	if class == domain.FailInfrastructure && len(dec.Fallbacks) > 0 {
-		fb := dec.Fallbacks[0]
-		now := time.Now().UTC()
-		natt := &domain.StageAttempt{StageID: st.ID, RunID: run.ID, Ordinal: att.Ordinal + 1, Status: domain.AttemptRunning, HarnessID: fb.Harness.ID, ModelID: fb.ModelID, StartedAt: &now}
-		if err := e.Store.AppendAttempt(ctx, natt); err != nil {
-			return err
-		}
-		return fmt.Errorf("fallback scheduled: %w", err)
-	}
-	if class == domain.FailTask {
-		if kind == domain.StageExecute {
-			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunRepairing, "", err.Error())
-		}
-		return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", err.Error())
-	}
-	return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", err.Error())
-}
-
 func mustExec(ctx context.Context, x StageExec, req StageRequest) StageResult {
 	res, err := x.Execute(ctx, req)
 	if err != nil && res.Err == nil {
 		res.Err = err
+	}
+	if res.Class == "" && res.Err != nil {
+		res.Class = domain.FailInfrastructure
 	}
 	return res
 }
@@ -505,16 +711,26 @@ func loadPlan(ctx context.Context, st *storage.Store, runID string) (*artifacts.
 }
 
 func loadVal(ctx context.Context, st *storage.Store, runID string) (*artifacts.ValidationArtifact, error) {
-	a, err := st.LatestArtifact(ctx, runID, domain.ArtifactValidation)
+	arts, err := st.ListArtifacts(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
-	v, err := artifacts.ParseAndValidate(domain.ArtifactValidation, a.JSON)
-	if err != nil {
-		return nil, err
+	for i := len(arts) - 1; i >= 0; i-- {
+		a := arts[i]
+		if a.Kind != domain.ArtifactValidation || !a.Valid {
+			continue
+		}
+		v, err := artifacts.ParseAndValidate(domain.ArtifactValidation, a.JSON)
+		if err != nil {
+			continue
+		}
+		va, ok := v.(artifacts.ValidationArtifact)
+		if !ok || va.Baseline {
+			continue
+		}
+		return &va, nil
 	}
-	p := v.(artifacts.ValidationArtifact)
-	return &p, nil
+	return nil, storage.ErrNotFound
 }
 
 func NewID() string { return id.New() }

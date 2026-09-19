@@ -14,6 +14,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/acp"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/id"
+	"github.com/Wayshard/wayshard/internal/sandbox"
 )
 
 // package runners that would download/install a harness if used as a launcher.
@@ -205,7 +206,16 @@ func baseInstallation(def Definition, exe string) Installation {
 func probeOne(ctx context.Context, inst *Installation, timeout time.Duration) {
 	ad := AdapterFor(inst.Adapter, inst.Executable)
 	spec := ad.LaunchSpec(*inst)
-	ver := acp.ProbeVersion(ctx, inst.Executable, nil)
+	// Discovery probes use a confined environment and must not inherit
+	// arbitrary host secrets. The deterministic fake harness scenario knob is
+	// forwarded so its behavior is observable in tests.
+	extras := map[string]string{}
+	if v := os.Getenv("WAYSHARD_FAKE_SCENARIO"); v != "" {
+		extras["WAYSHARD_FAKE_SCENARIO"] = v
+	}
+	probeEnv := sandbox.HarnessEnv("", "", extras)
+	spec.Env = probeEnv
+	ver := acp.ProbeVersionEnv(ctx, inst.Executable, nil, probeEnv)
 	inst.Version = ver
 
 	res, err := acp.Probe(ctx, spec, timeout)
@@ -363,6 +373,11 @@ func canonicalPath(p string) string {
 		p = rp
 	}
 	return p
+}
+
+func homeDir() string {
+	h, _ := os.UserHomeDir()
+	return h
 }
 
 func expandHome(p, home string) string {

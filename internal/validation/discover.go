@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/artifacts"
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
 
@@ -64,6 +65,11 @@ func exists(root, name string) bool {
 
 type Runner struct {
 	Store *storage.Store
+	// DataDir roots synthetic HOME/TMP for confined validation. Optional.
+	DataDir string
+	// Network is the validation command network policy. Empty means unrestricted
+	// (validation is server-controlled and may need dependency access).
+	Network sandbox.NetworkMode
 }
 
 func (r *Runner) Run(ctx context.Context, workspace string, plan []artifacts.ValidationCheck, baseline map[string]string) artifacts.ValidationArtifact {
@@ -104,12 +110,53 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 	parts := strings.Fields(c.Command)
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	cmd.Dir = dir
+
+	// Confine validation commands through the Tool Sandbox.
+	home := r.syntheticHome(dir)
+	net := r.Network
+	if net == "" {
+		net = sandbox.NetUnrestricted
+	}
+	pol := sandbox.ToolPolicy(dir, home, net)
+	if exe, err := exec.LookPath(parts[0]); err == nil {
+		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(exe))
+		if parent := filepath.Dir(filepath.Dir(exe)); parent != "/" {
+			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, parent)
+		}
+	}
+	if root := os.Getenv("GOROOT"); root != "" {
+		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, root)
+	}
+	if hm, err := os.UserHomeDir(); err == nil {
+		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Join(hm, ".local", "go"), filepath.Join(hm, "go"))
+	}
+	cmd.Env = sandbox.ToolEnv(home, home, nil)
+
+	b := sandbox.DefaultBackend()
+	con := sandbox.AsConstrainer(b)
+	sandboxFailed := false
+	if _, err := con.Compile(pol); err != nil {
+		sandboxFailed = true
+	} else if err := con.Constrain(cmd, pol); err != nil {
+		sandboxFailed = true
+	}
+	if sandboxFailed {
+		c.Status = string(domain.CheckBlocked)
+		c.Dir = dir
+		c.Summary = "tool sandbox could not be established"
+		return c
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		_ = cwd
+	}
+
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
 	c.DurationMS = time.Since(start).Milliseconds()
 	c.Dir = dir
+	c.Fingerprint = "tool_sandbox:" + string(net)
 	if r.Store != nil {
 		h, _ := r.Store.Objects.Put(buf.Bytes())
 		c.LogHash = h
@@ -131,4 +178,14 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 	c.ExitCode = 0
 	c.Summary = "ok"
 	return c
+}
+
+func (r *Runner) syntheticHome(workspace string) string {
+	base := r.DataDir
+	if base == "" {
+		base = os.TempDir()
+	}
+	h := filepath.Join(base, "runtime", "sandbox", "tool")
+	_ = os.MkdirAll(h, 0o700)
+	return h
 }

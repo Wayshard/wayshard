@@ -16,6 +16,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/events"
 	"github.com/Wayshard/wayshard/internal/harness"
 	"github.com/Wayshard/wayshard/internal/jev"
+	"github.com/Wayshard/wayshard/internal/notifications"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/paths"
 	"github.com/Wayshard/wayshard/internal/pty"
@@ -80,6 +81,11 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		cfg.Log.Warn("identity", "err", err)
 	}
 	hub := events.NewHub(st)
+	st.EventHook = func(ev domain.Event) {
+		// Live projection of a committed durable event.
+		hub.Broadcast(ev)
+		notifications.Derive(context.Background(), st, cfg.Log, ev)
+	}
 	var engine jev.DecisionEngine = jev.DeterministicEngine{}
 	if cfg.JevKey != "" || os.Getenv("TYPESAFE_API_KEY") != "" {
 		key := cfg.JevKey
@@ -93,10 +99,11 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		Store:     st,
 		Jev:       engine,
 		Router:    &routing.Router{Engine: engine},
-		Exec:      &harness.ACPExec{Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}},
+		Exec:      &harness.ACPExec{Store: st, Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}},
 		Workspace: &orchestrator.WorkspaceAdapter{Store: st, DataDir: cfg.DataDir},
 		Integrate: &orchestrator.IntegrateAdapter{Store: st},
-		Validate:  &validation.Runner{Store: st},
+		Validate:  &validation.Runner{Store: st, DataDir: cfg.DataDir},
+		Budget:    orchestrator.DefaultBudgets(),
 		Log:       cfg.Log,
 	}
 	if os.Getenv("WAYSHARD_SYNTHETIC_ROUTE") == "1" {

@@ -948,18 +948,29 @@ func Probe(ctx context.Context, spec Spec, timeout time.Duration) (*ProbeResult,
 
 // ProbeVersion runs command --version with a short timeout. Failure is non-fatal.
 func ProbeVersion(ctx context.Context, command string, extraArgs []string) string {
+	return ProbeVersionEnv(ctx, command, extraArgs, nil)
+}
+
+// ProbeVersionEnv is ProbeVersion with an explicit, already-confined environment.
+func ProbeVersionEnv(ctx context.Context, command string, extraArgs, env []string) string {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	args := append([]string{}, extraArgs...)
 	args = append(args, "--version")
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Stdin = nil
+	if env != nil {
+		cmd.Env = env
+	}
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return strings.TrimSpace(string(bytes.SplitN(out, []byte("\n"), 2)[0]))
 	}
 	cmd = exec.CommandContext(ctx, command, "--version")
 	cmd.Stdin = nil
+	if env != nil {
+		cmd.Env = env
+	}
 	out, err = cmd.CombinedOutput()
 	if err != nil {
 		return ""
