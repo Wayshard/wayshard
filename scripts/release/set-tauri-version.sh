@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Set Tauri/Cargo/Android versions from a git tag.
-# v0.1.0-rc.1 -> tauri/cargo 0.1.0-rc.1, Android versionCode 10001 (below stable 0.1.0).
+# GitHub/artifact names keep v0.1.0-rc.N. Windows MSI requires a numeric prerelease
+# identifier, so the bundler version becomes 0.1.0-N. Android versionCode stays
+# below the matching stable release.
 set -euo pipefail
 TAG="${1:?usage: set-tauri-version.sh <tag>}"
 CONF="${2:-clients/desktop/src-tauri/tauri.conf.json}"
@@ -40,26 +42,51 @@ def android_version_code(v: str) -> int:
     return base + n
 
 
+def bundler_version(v: str) -> str:
+    """MSI/WiX requires numeric-only prerelease identifiers (0.1.0-rc.2 -> 0.1.0-2)."""
+    core, _, pre = v.partition("-")
+    if not pre:
+        return core
+    n = 1
+    if pre.isdigit():
+        n = int(pre)
+    else:
+        for label in ("rc.", "beta.", "alpha."):
+            if pre.startswith(label):
+                rest = pre[len(label) :]
+                try:
+                    n = int(rest.split(".")[0].split("+")[0])
+                except ValueError:
+                    n = 1
+                break
+    if n < 1:
+        n = 1
+    if n > 65535:
+        n = 65535
+    return f"{core}-{n}"
+
+
 code = android_version_code(ver)
+bundle_ver = bundler_version(ver)
 path = Path(conf_path)
 doc = json.loads(path.read_text(encoding="utf-8"))
-doc["version"] = ver
+doc["version"] = bundle_ver
 android = doc.setdefault("bundle", {}).setdefault("android", {})
 android["versionCode"] = code
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-print(f"set {path} version={ver} android.versionCode={code}")
+print(f"set {path} version={bundle_ver} (from {ver}) android.versionCode={code}")
 
 cargo = Path(cargo_path)
 if cargo.is_file():
     text = cargo.read_text(encoding="utf-8")
     new, n = re.subn(
         r'(?m)^version\s*=\s*"[^"]*"',
-        f'version = "{ver}"',
+        f'version = "{bundle_ver}"',
         text,
         count=1,
     )
     if n != 1:
         raise SystemExit(f"{cargo}: could not replace package version")
     cargo.write_text(new, encoding="utf-8")
-    print(f"set {cargo} version={ver}")
+    print(f"set {cargo} version={bundle_ver}")
 PY

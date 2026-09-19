@@ -167,10 +167,22 @@ jobs:
       - name: Set Tauri version from tag
         shell: bash
         run: bash scripts/release/set-tauri-version.sh "${{ github.ref_name }}"
+      - name: Resolve Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          ndk="${ANDROID_NDK_HOME:-${ANDROID_NDK_LATEST_HOME:-}}"
+          if [[ -z "$ndk" || ! -d "$ndk" ]]; then
+            ndk="$(ls -d "$sdk"/ndk-* "$sdk"/ndk/* 2>/dev/null | sort -V | tail -1 || true)"
+          fi
+          test -n "$ndk" && test -d "$ndk"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "using NDK $ndk"
       - name: Init Tauri Android project
         working-directory: clients/desktop
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: bunx tauri android init --ci
       - name: Materialize Android signing keystore
         env:
@@ -181,8 +193,6 @@ jobs:
         run: bash scripts/release/android-sign.sh
       - name: Build signed Android APK
         working-directory: clients/desktop
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: bunx tauri android build --apk
       - name: Package and verify signed APK
         run: |

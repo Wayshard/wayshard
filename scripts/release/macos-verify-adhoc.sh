@@ -36,14 +36,18 @@ verify_one() {
   return 1
 }
 
-found=0
+found_app=0
 while IFS= read -r -d '' f; do
-  found=1
+  found_app=1
   verify_one "$f"
-done < <(find "$DEST" \( -name '*.app' -o -name '*.dmg' \) -print0 2>/dev/null)
+done < <(find "$DEST" -name '*.app' -print0 2>/dev/null)
 
-# Also check nested .app inside dmg is not required; Tauri signs the .app before dmg.
-if [[ "$found" -eq 0 ]]; then
-  echo "no .app/.dmg under $DEST" >&2
+if [[ "$found_app" -eq 0 ]]; then
+  echo "no .app under $DEST; official macOS artifacts must include an ad-hoc signed application" >&2
   exit 1
+fi
+
+# The DMG is a container. Ad-hoc policy applies to the .app; an unsigned DMG is expected.
+if find "$DEST" -name '*.dmg' -print -quit | grep -q .; then
+  echo "dmg container present (ad-hoc requirement is on the .app)"
 fi

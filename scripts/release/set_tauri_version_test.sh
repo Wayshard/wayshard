@@ -20,10 +20,10 @@ python3 - "$TMP/tauri.conf.json" "$TMP/Cargo.toml" <<'PY'
 import json, sys
 from pathlib import Path
 conf = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert conf["version"] == "0.1.0-rc.1", conf["version"]
+assert conf["version"] == "0.1.0-1", conf["version"]
 assert conf["bundle"]["android"]["versionCode"] == 10001, conf["bundle"]["android"]["versionCode"]
 cargo = Path(sys.argv[2]).read_text(encoding="utf-8")
-assert 'version = "0.1.0-rc.1"' in cargo
+assert 'version = "0.1.0-1"' in cargo
 print("rc version mapping ok")
 PY
 bash "$ROOT/scripts/release/set-tauri-version.sh" "v0.1.0" "$TMP/tauri.conf.json" "$TMP/Cargo.toml"
