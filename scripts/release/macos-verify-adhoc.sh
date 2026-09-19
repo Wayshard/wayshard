@@ -22,12 +22,14 @@ verify_one() {
     # ad-hoc typically shows Signature=adhoc
     if echo "$out" | grep -qi 'Signature=adhoc'; then
       echo "ad-hoc signature ok: $path"
+      codesign --verify --verbose=4 "$path"
       return 0
     fi
   fi
   # Some tools only print "flags=0x2(adhoc)"
   if echo "$out" | grep -qi adhoc; then
     echo "ad-hoc signature ok: $path"
+    codesign --verify --verbose=4 "$path"
     return 0
   fi
   echo "could not confirm ad-hoc signature on $path" >&2

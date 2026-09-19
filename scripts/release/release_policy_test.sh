@@ -39,6 +39,9 @@ if grep -E "$forbidden" "$REL" "$TAURI"; then
 fi
 
 grep -q 'APPLE_SIGNING_IDENTITY: "-"' "$REL" || fail "macOS must ad-hoc sign with identity -"
+grep -q 'prerelease:' "$REL" || fail "release.yml must classify prerelease tags"
+grep -q "contains(github.ref_name, '-rc.')" "$REL" || fail "release.yml must treat -rc. tags as prereleases"
+grep -q 'make_latest:' "$REL" || fail "release.yml must not promote prereleases to latest"
 python3 - "$TAURI" <<'PY'
 import json, sys
 cfg = json.load(open(sys.argv[1], encoding="utf-8"))

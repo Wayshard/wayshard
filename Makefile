@@ -88,6 +88,7 @@ release-scripts-test:
 	bash scripts/release/windows_pfx_test.sh
 	bash scripts/release/minisign_test.sh
 	bash scripts/release/release_policy_test.sh
+	bash scripts/release/set_tauri_version_test.sh
 
 clean:
 	rm -rf $(BINDIR) coverage.out

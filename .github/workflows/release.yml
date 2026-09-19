@@ -8,8 +8,12 @@ on:
 # Official artifacts are published only from Wayshard/wayshard on v* tags.
 # Custom signing material lives in the GitHub Environment "release" and is
 # never available to pull_request CI. Publishing uses the automatic GITHUB_TOKEN.
+# Tags containing -rc. / -beta. / -alpha. are GitHub prereleases, never latest.
 permissions:
   contents: write
+
+env:
+  IS_PRERELEASE: ${{ contains(github.ref_name, '-rc.') || contains(github.ref_name, '-beta.') || contains(github.ref_name, '-alpha.') }}
 
 jobs:
   release:
@@ -55,7 +59,10 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: Wayshard ${{ github.ref_name }}
           generate_release_notes: true
+          prerelease: ${{ env.IS_PRERELEASE }}
+          make_latest: ${{ env.IS_PRERELEASE == 'false' }}
           files: dist/go/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -125,6 +132,8 @@ jobs:
       - name: Upload desktop artifacts
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ env.IS_PRERELEASE }}
+          make_latest: ${{ env.IS_PRERELEASE == 'false' }}
           files: dist/desktop/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -182,6 +191,8 @@ jobs:
       - name: Upload Android artifacts
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ env.IS_PRERELEASE }}
+          make_latest: ${{ env.IS_PRERELEASE == 'false' }}
           files: dist/android/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -217,6 +228,8 @@ jobs:
       - name: Upload combined checksums
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ env.IS_PRERELEASE }}
+          make_latest: ${{ env.IS_PRERELEASE == 'false' }}
           files: |
             SHA256SUMS.txt
             SHA256SUMS.txt.minisig
