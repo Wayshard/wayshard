@@ -40,6 +40,11 @@ fi
 
 grep -q 'APPLE_SIGNING_IDENTITY: "-"' "$REL" || fail "macOS must ad-hoc sign with identity -"
 grep -q 'prerelease:' "$REL" || fail "release.yml must classify prerelease tags"
+test -s "$ROOT/clients/desktop/src-tauri/icons/icon.png" || fail "missing Tauri icon.png"
+test -s "$ROOT/clients/desktop/src-tauri/icons/icon.ico" || fail "missing Tauri icon.ico"
+test -s "$ROOT/clients/desktop/src-tauri/icons/icon.icns" || fail "missing Tauri icon.icns"
+grep -q 'packages: platform-tools' "$REL" || fail "android job must not install obsolete sdkmanager tools package"
+grep -q 'github.ref_name' "$REL" || fail "tag version scripts must use github.ref_name, not PowerShell \${GITHUB_REF_NAME}"
 grep -q "contains(github.ref_name, '-rc.')" "$REL" || fail "release.yml must treat -rc. tags as prereleases"
 grep -q 'make_latest:' "$REL" || fail "release.yml must not promote prereleases to latest"
 python3 - "$TAURI" <<'PY'

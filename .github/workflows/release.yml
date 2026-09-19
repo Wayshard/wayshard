@@ -98,7 +98,8 @@ jobs:
         run: bun install --frozen-lockfile && bun run --cwd web build
         working-directory: clients
       - name: Set Tauri version from tag
-        run: bash scripts/release/set-tauri-version.sh "${GITHUB_REF_NAME}"
+        shell: bash
+        run: bash scripts/release/set-tauri-version.sh "${{ github.ref_name }}"
       - name: Build desktop
         env:
           APPLE_SIGNING_IDENTITY: "-"
@@ -151,6 +152,9 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          accept-android-sdk-licenses: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
@@ -161,7 +165,8 @@ jobs:
         run: bun install --frozen-lockfile && bun run --cwd web build
         working-directory: clients
       - name: Set Tauri version from tag
-        run: bash scripts/release/set-tauri-version.sh "${GITHUB_REF_NAME}"
+        shell: bash
+        run: bash scripts/release/set-tauri-version.sh "${{ github.ref_name }}"
       - name: Init Tauri Android project
         working-directory: clients/desktop
         env:
