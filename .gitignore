@@ -28,7 +28,8 @@ node_modules/
 .bun/
 
 # Embedded / client build output (generated)
-/internal/webembed/dist/
+/internal/webembed/dist/*
+!/internal/webembed/dist/.gitkeep
 /clients/web/dist/
 /clients/**/dist/
 
@@ -48,6 +49,10 @@ local.properties
 *.db-shm
 *.key
 *.pem
+*.jks
+*.pfx
+*.p12
+*.minisign.sec
 .env
 .env.*
 !.env.example

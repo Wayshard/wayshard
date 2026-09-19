@@ -254,6 +254,10 @@ Release families:
 
 Never bundle external coding harnesses/bridges.
 
+Official signing material is generated and held by the Wayshard maintainer. Wayshard cryptographically signs Android APKs (JKS/PKCS12), Windows installers (self-signed Authenticode PFX), macOS apps (ad-hoc identity `-`), and the SHA-256 checksum manifest (minisign). That is not Apple/Microsoft platform PKI trust and does not require Apple Developer, notarization, a commercial CA, Azure signing, Google Play, or another paid/external signing account. There is no Tauri auto-updater. Private keys live only in the protected GitHub Environment `release`. PR CI is secret-free.
+
+Rejected alternatives: Apple Developer ID and notarization, commercial Windows Authenticode certificates, Azure Artifact Signing, Google Play App Signing, third-party cloud signing, and unused Tauri updater keypairs.
+
 ## Design restraint
 
 The backend is sophisticated; the user experience should not advertise that complexity everywhere.

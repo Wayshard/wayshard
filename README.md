@@ -149,6 +149,7 @@ Wayshard is intended to be developed as a public monorepo under `Wayshard/waysha
 Official CI/CD uses GitHub Actions. Normal pull-request CI must work without production secrets, paid model calls, or external harness installations; deterministic fake ACP harnesses cover orchestration behavior.
 
 Official tagged releases are built by CI and published through GitHub Releases.
+Maintainer setup (Environment `release`, maintainer-owned signing secrets, permissions) is in [`docs/release.md`](./docs/release.md).
 
 Expected release families:
 

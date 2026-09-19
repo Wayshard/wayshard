@@ -87,18 +87,26 @@ Status is `done` when code and tests exist in this repository. External-only ite
 |---|---|---|---|
 | PR CI no secrets/paid models/harness installs | `.github/workflows/ci.yml` | workflow | done |
 | Linux/macOS/Windows server+CLI | ci.go job + `make build-cross` | workflow | done |
-| Desktop Linux/macOS/Windows | release desktop matrix | workflow | done |
-| Android Tauri APK | release android job | workflow | done |
-| Checksums, notices, Go SBOM | release job | workflow | done |
-| Web embedded in server | `internal/webembed` | embed dist | done |
+| Desktop Linux | `.github/workflows/release.yml` job `desktop` | checksums + minisign; no paid Linux signing | done |
+| Desktop macOS ad-hoc sign (identity `-`, no Apple account) | `tauri.conf.json` `bundle.macOS.signingIdentity`, `APPLE_SIGNING_IDENTITY=-`, `scripts/release/macos-verify-adhoc.sh` | `release_policy_test.sh`; live `codesign` on macOS runners only; Gatekeeper warnings expected | done |
+| Desktop Windows self-signed Authenticode | `scripts/release/windows-sign.ps1`; secrets `WAYSHARD_WINDOWS_PFX_*` | `windows_pfx_test.sh`; live `signtool` on Windows runners only; SmartScreen/untrusted publisher expected | done |
+| Android Tauri APK, maintainer JKS, no Play | job `android`, `scripts/release/android-sign.sh` | `android_jks_test.sh`, `android_patch_test.sh`; APK verified; unsigned not published as signed | done |
+| Minisign on combined SHA256SUMS.txt | `scripts/release/minisign-sign.sh`; secrets `WAYSHARD_RELEASE_MINISIGN_*`; public key `keys/wayshard-release.minisign.pub` | `minisign_test.sh`; checksums job verifies before upload | done |
+| Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`android`/`checksums` | `make release-scripts-test` (overlapping globs cannot duplicate server rows) | done |
+| CycloneDX SBOM (not `go version -m`) | `scripts/release/sbom.sh` | fails the release job on generator/validation error | done |
+| Frozen client lockfile on release (and PR client install) | `bun install --frozen-lockfile` in `ci.yml` + `release.yml` | lockfile `clients/bun.lock` | done |
+| Release credentials isolated | `environment: release` on publish jobs; `ci.yml` has no `secrets.*` | `release_policy_test.sh`; PR CI remains secret-free | done |
+| Web embedded in server | `internal/webembed` | embed dist before `make build-cross` | done |
 
 ## External / manual only (not implementation failures)
 
 | Item | Why it cannot be closed in-repo |
 |---|---|
-| GitHub org/repo administration, Actions enablement | operator |
-| `TYPESAFE_API_KEY` live Jev | credential |
+| GitHub org/repo administration, Actions enablement, Environment `release` | operator |
+| Android JKS, Windows PFX, minisign secret key stored as Environment `release` secrets | operator-generated material; workflow consumes them |
+| Commit of `keys/wayshard-release.minisign.pub` | operator |
+| `TYPESAFE_API_KEY` live Jev | runtime credential, not Actions |
 | User-installed OpenCode/Codex/etc. | product boundary: never install harnesses |
-| Android signing keystore | secret |
+| Apple Developer ID / notarization / commercial Windows CA / Play Console | intentionally not used |
 | Tailscale Serve / tunnel | user networking |
 | Real-harness compatibility jobs | provisioned environments only |

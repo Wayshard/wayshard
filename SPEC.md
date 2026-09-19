@@ -470,7 +470,7 @@ Wayshard-owned components share a release line while tolerating explicitly compa
 - Web is embedded in Server and therefore version matched.
 - Desktop may provision/manage a local Wayshard Server but must not kill active runs just to apply an update.
 - Server updates drain/checkpoint active work where practical.
-- Android uses normal signed Android distribution/update mechanisms; signed APKs may also be published through GitHub Releases.
+- Android official artifacts are signed with a maintainer-generated JKS/PKCS12 upload key and may be published through GitHub Releases. Wayshard does not require Google Play.
 - CLI is distributed as standalone native executables for supported desktop operating systems.
 
 Database migrations ship inside the Go server. Forward migration creates appropriate pre-migration recovery state. Unsupported downgrade does not attempt unsafe automatic reverse migration.
@@ -492,6 +492,8 @@ Official release artifacts are created by CI from tagged source and published to
 - Wayshard Desktop;
 - Wayshard Android APK;
 - checksums, release notes, third-party notices, and other supply-chain metadata appropriate to the release.
+
+Official artifacts are cryptographically signed with maintainer-generated keys. Wayshard does not require a paid Apple Developer account, notarization, a commercial Windows CA, Microsoft/Azure signing, Google Play, or any other external signing account. macOS uses ad-hoc signing (identity `-`); Windows installers use a maintainer self-signed Authenticode certificate; Android uses the maintainer upload keystore; the SHA-256 checksum manifest is signed with a maintainer minisign key. This is Wayshard cryptographic signing, not Apple or Microsoft platform PKI trust. Users may see Gatekeeper and SmartScreen warnings. There is no automatic Tauri updater.
 
 Web ships inside Server rather than as a separate ordinary download.
 

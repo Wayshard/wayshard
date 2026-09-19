@@ -5,8 +5,9 @@ on:
     tags:
       - "v*"
 
-# Signing credentials are only available to this protected release job.
-# Forks cannot trigger this workflow with production secrets.
+# Official artifacts are published only from Wayshard/wayshard on v* tags.
+# Custom signing material lives in the GitHub Environment "release" and is
+# never available to pull_request CI. Publishing uses the automatic GITHUB_TOKEN.
 permissions:
   contents: write
 
@@ -15,6 +16,7 @@ jobs:
     name: Official GitHub Release
     runs-on: ubuntu-latest
     if: github.repository == 'Wayshard/wayshard'
+    environment: release
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,27 +39,24 @@ jobs:
           cp -a clients/web/dist/. internal/webembed/dist/
       - name: Cross-compile Server and CLI
         run: make build-cross VERSION=${GITHUB_REF_NAME} COMMIT=${GITHUB_SHA}
-      - name: Checksums
+      - name: Name Go artifacts
         run: |
-          cd bin
-          sha256sum wayshard-server-* wayshard-* > SHA256SUMS.txt
-      - name: SBOM (Go modules)
+          chmod +x scripts/release/*.sh scripts/release/*.py
+          mkdir -p dist/go
+          scripts/release/package-go.sh "${GITHUB_REF_NAME}" bin dist/go
+      - name: Generate CycloneDX SBOM
+        run: scripts/release/sbom.sh "${GITHUB_REF_NAME}" dist/go
+      - name: Copy notices
         run: |
-          go version -m bin/wayshard-server-linux-amd64 > sbom-go-server.txt || true
-          mkdir -p release
-          cp NOTICE LICENSE THIRD_PARTY_NOTICES.md release/
-          cp bin/SHA256SUMS.txt release/
-          cp sbom-go-server.txt release/ || true
-          cp bin/wayshard-server-* bin/wayshard-* release/
+          cp LICENSE NOTICE THIRD_PARTY_NOTICES.md dist/go/
+      - name: Checksums (Go + SBOM + notices)
+        run: |
+          python3 scripts/release/checksums.py --out dist/go/SHA256SUMS-go.txt dist/go/*
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            release/**
-            NOTICE
-            LICENSE
-            THIRD_PARTY_NOTICES.md
+          files: dist/go/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -65,6 +64,7 @@ jobs:
     name: Desktop (${{ matrix.os }})
     needs: release
     if: github.repository == 'Wayshard/wayshard'
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -88,22 +88,52 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Install JS deps and build web
-        run: bun install && bun run --cwd web build
+        run: bun install --frozen-lockfile && bun run --cwd web build
         working-directory: clients
+      - name: Set Tauri version from tag
+        run: bash scripts/release/set-tauri-version.sh "${GITHUB_REF_NAME}"
       - name: Build desktop
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
         run: bunx tauri build
         working-directory: clients/desktop
+      - name: Verify macOS ad-hoc signature
+        if: matrix.target == 'macos'
+        run: bash scripts/release/macos-verify-adhoc.sh clients/desktop/src-tauri/target/release/bundle
+      - name: Name desktop artifacts
+        shell: bash
+        run: |
+          mkdir -p dist/desktop
+          bash scripts/release/package-desktop.sh "${GITHUB_REF_NAME}" "${{ matrix.target }}" \
+            clients/desktop/src-tauri/target/release/bundle dist/desktop
+      - name: Self-sign Windows installers
+        if: matrix.target == 'windows'
+        env:
+          WAYSHARD_WINDOWS_PFX_BASE64: ${{ secrets.WAYSHARD_WINDOWS_PFX_BASE64 }}
+          WAYSHARD_WINDOWS_PFX_PASSWORD: ${{ secrets.WAYSHARD_WINDOWS_PFX_PASSWORD }}
+        shell: pwsh
+        run: powershell -File scripts/release/windows-sign.ps1 dist/desktop
+      - name: Remove Windows PFX
+        if: always() && matrix.target == 'windows'
+        shell: bash
+        run: bash scripts/release/windows-cleanup.sh
+      - name: Checksums (desktop)
+        shell: bash
+        run: |
+          if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+          "$PY" scripts/release/checksums.py --out "dist/desktop/SHA256SUMS-desktop-${{ matrix.target }}.txt" dist/desktop/*
       - name: Upload desktop artifacts
         uses: softprops/action-gh-release@v2
         with:
-          files: clients/desktop/src-tauri/target/release/bundle/**/*
+          files: dist/desktop/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   android:
-    name: Android APK (Tauri 2)
+    name: Android APK (Tauri 2, signed)
     needs: release
     if: github.repository == 'Wayshard/wayshard'
+    environment: release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,18 +149,76 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
       - name: Build web
-        run: bun install && bun run --cwd web build
+        run: bun install --frozen-lockfile && bun run --cwd web build
         working-directory: clients
-      - name: Init and build Tauri Android
+      - name: Set Tauri version from tag
+        run: bash scripts/release/set-tauri-version.sh "${GITHUB_REF_NAME}"
+      - name: Init Tauri Android project
         working-directory: clients/desktop
         env:
           NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+        run: bunx tauri android init --ci
+      - name: Materialize Android signing keystore
+        env:
+          WAYSHARD_ANDROID_KEYSTORE_BASE64: ${{ secrets.WAYSHARD_ANDROID_KEYSTORE_BASE64 }}
+          WAYSHARD_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.WAYSHARD_ANDROID_KEYSTORE_PASSWORD }}
+          WAYSHARD_ANDROID_KEY_ALIAS: ${{ secrets.WAYSHARD_ANDROID_KEY_ALIAS }}
+          WAYSHARD_ANDROID_KEY_PASSWORD: ${{ secrets.WAYSHARD_ANDROID_KEY_PASSWORD }}
+        run: bash scripts/release/android-sign.sh
+      - name: Build signed Android APK
+        working-directory: clients/desktop
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+        run: bunx tauri android build --apk
+      - name: Package and verify signed APK
         run: |
-          bunx tauri android init --ci || true
-          bunx tauri android build --apk
-      - name: Upload APK
+          mkdir -p dist/android
+          bash scripts/release/package-android.sh "${GITHUB_REF_NAME}" \
+            clients/desktop/src-tauri/gen/android dist/android
+          python3 scripts/release/checksums.py --out dist/android/SHA256SUMS-android.txt dist/android/*
+      - name: Remove signing material
+        if: always()
+        run: bash scripts/release/android-cleanup.sh
+      - name: Upload Android artifacts
         uses: softprops/action-gh-release@v2
         with:
-          files: clients/desktop/src-tauri/gen/android/**/*.apk
+          files: dist/android/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  checksums:
+    name: Combined SHA256SUMS
+    needs: [release, desktop, android]
+    if: github.repository == 'Wayshard/wayshard'
+    environment: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p all-assets
+          gh release download "${GITHUB_REF_NAME}" -D all-assets
+      - name: Install minisign
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - name: Write combined checksums
+        run: python3 scripts/release/checksums.py --out SHA256SUMS.txt all-assets/*
+      - name: Minisign checksum manifest
+        env:
+          WAYSHARD_RELEASE_MINISIGN_KEY_BASE64: ${{ secrets.WAYSHARD_RELEASE_MINISIGN_KEY_BASE64 }}
+          WAYSHARD_RELEASE_MINISIGN_PASSWORD: ${{ secrets.WAYSHARD_RELEASE_MINISIGN_PASSWORD }}
+        run: |
+          test -s keys/wayshard-release.minisign.pub
+          bash scripts/release/minisign-sign.sh SHA256SUMS.txt
+          bash scripts/release/minisign-verify.sh SHA256SUMS.txt keys/wayshard-release.minisign.pub
+      - name: Upload combined checksums
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            SHA256SUMS.txt
+            SHA256SUMS.txt.minisig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
