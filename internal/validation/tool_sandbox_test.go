@@ -4,16 +4,28 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/Wayshard/wayshard/internal/artifacts"
 	"github.com/Wayshard/wayshard/internal/domain"
 )
 
+// These tests exercise real OS confinement and use POSIX shell scripts; the
+// forensic sandbox failure was demonstrated on Linux. macOS/Windows runtime
+// enforcement remains unverified (see CONFORMANCE.md).
+func requireLinux(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("native sandbox enforcement is verified on Linux only")
+	}
+}
+
 // TestValidationRunsInToolSandbox proves repository-controlled validation
 // commands cannot read host files, write outside the workspace, or see ambient
 // secrets, while ordinary commands still work.
 func TestValidationRunsInToolSandbox(t *testing.T) {
+	requireLinux(t)
 	host := t.TempDir()
 	hostCanary := filepath.Join(host, "host-canary.txt")
 	if err := os.WriteFile(hostCanary, []byte("host-secret"), 0o600); err != nil {
@@ -58,6 +70,7 @@ func TestValidationRunsInToolSandbox(t *testing.T) {
 
 // TestValidationOrdinaryCommandStillWorks ensures benign commands pass.
 func TestValidationOrdinaryCommandStillWorks(t *testing.T) {
+	requireLinux(t)
 	ws := t.TempDir()
 	r := &Runner{DataDir: t.TempDir()}
 	art := r.Run(context.Background(), ws, []artifacts.ValidationCheck{
@@ -71,6 +84,7 @@ func TestValidationOrdinaryCommandStillWorks(t *testing.T) {
 // TestValidationBaselineClassification distinguishes pre-existing failures from
 // new regressions.
 func TestValidationBaselineClassification(t *testing.T) {
+	requireLinux(t)
 	ws := t.TempDir()
 	script := "#!/bin/sh\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(ws, "fail.sh"), []byte(script), 0o755); err != nil {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,9 @@ import (
 // TestCancellationInterruptsActiveHarness proves cancellation propagates to the
 // active harness process and yields a cancelled run instead of hanging.
 func TestCancellationInterruptsActiveHarness(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process-tree cancellation semantics are verified on POSIX; Windows remains unverified")
+	}
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "timeout")

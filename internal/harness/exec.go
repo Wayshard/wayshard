@@ -200,12 +200,12 @@ func (e *ACPExec) permissionHook(ctx context.Context, req orchestrator.StageRequ
 			resource = p.ToolCall.Kind
 		}
 		a := &domain.Approval{
-			RunID:   req.Run.ID,
-			StageID: req.Stage.ID,
-			Kind:    "acp_permission",
+			RunID:    req.Run.ID,
+			StageID:  req.Stage.ID,
+			Kind:     "acp_permission",
 			Resource: resource,
-			Reason:  "harness requested permission for " + resource,
-			Status:  "pending",
+			Reason:   "harness requested permission for " + resource,
+			Status:   "pending",
 		}
 		if err := e.Store.InsertApproval(cbctx, a); err != nil {
 			return acp.CancelledPermission(), err
