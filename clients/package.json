@@ -2,7 +2,7 @@
   "name": "wayshard-clients",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.2.21",
+  "packageManager": "bun@1.4.2",
   "workspaces": ["sdk", "web", "tui", "desktop"],
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
