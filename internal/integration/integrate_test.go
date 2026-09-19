@@ -380,7 +380,8 @@ func TestIdentitySerializesBySourcePathNotProjectID(t *testing.T) {
 	if id1.Key() != id2.Key() {
 		t.Fatalf("identity unstable: %s %s", id1.Key(), id2.Key())
 	}
-	if !strings.Contains(id1.Key(), src) && !strings.Contains(id1.Path, src) {
-		t.Fatalf("identity should include source path: %+v", id1)
+	want := gitutil.CanonicalPath(src)
+	if !strings.Contains(gitutil.CanonicalPath(id1.Path), want) && !strings.Contains(id1.Key(), want) {
+		t.Fatalf("identity should include source path: %+v want %s", id1, want)
 	}
 }

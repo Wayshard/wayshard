@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os/exec"
@@ -60,8 +61,11 @@ func TestSeatbeltProfileCompilation(t *testing.T) {
 	if !strings.Contains(prof, "(deny network*)") {
 		t.Fatal("network none must deny network")
 	}
-	if !strings.Contains(prof, "(allow file-map-executable)") {
-		t.Fatal("profile must allow mapping the dynamic linker")
+	if !strings.Contains(prof, "(import \"system.sb\")") {
+		t.Fatal("profile must import system.sb so binaries can start")
+	}
+	if !strings.Contains(prof, "(allow process-exec)") {
+		t.Fatal("profile must allow process-exec")
 	}
 	quoted := strconv.Quote(filepath.ToSlash(filepath.Clean(ws)))
 	if !strings.Contains(prof, quoted) {
@@ -110,6 +114,8 @@ func TestNativeCompileAndConstrain(t *testing.T) {
 		t.Fatal("expected applied features")
 	}
 	cmd := trueCmd()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := c.Constrain(cmd, p); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +129,7 @@ func TestNativeCompileAndConstrain(t *testing.T) {
 	}
 	defer clean()
 	if err := cmd.Wait(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("constrained process: %v stderr=%s profile=%s", err, stderr.String(), compiled.Profile)
 	}
 }
 

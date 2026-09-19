@@ -85,22 +85,38 @@ func DiscoverContext(ctx context.Context, path string) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
-	common, err := run(ctx, abs, nil, "rev-parse", "--absolute-git-common-dir")
-	if err != nil {
-		common = gitDir
+	workTree := CanonicalPath(strings.TrimSpace(string(top)))
+	absGitDir := absGitPath(workTree, strings.TrimSpace(string(gitDir)))
+	commonOut, err := run(ctx, abs, nil, "rev-parse", "--git-common-dir")
+	common := absGitDir
+	if err == nil {
+		if c := strings.TrimSpace(string(commonOut)); c != "" && !strings.HasPrefix(c, "--") {
+			common = absGitPath(workTree, c)
+		}
 	}
 	return &Repo{
-		WorkTree:  CanonicalPath(strings.TrimSpace(string(top))),
-		GitDir:    CanonicalPath(strings.TrimSpace(string(gitDir))),
-		CommonDir: CanonicalPath(strings.TrimSpace(string(common))),
+		WorkTree:  workTree,
+		GitDir:    absGitDir,
+		CommonDir: common,
 	}, nil
+}
+
+func absGitPath(workTree, p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || strings.HasPrefix(p, "--") {
+		return CanonicalPath(workTree)
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(workTree, p)
+	}
+	return CanonicalPath(p)
 }
 
 // CanonicalPath resolves abs, symlinks, and Windows 8.3 names so Git-reported
 // paths can be compared with Go temp directories.
 func CanonicalPath(p string) string {
 	p = strings.TrimSpace(p)
-	if p == "" {
+	if p == "" || strings.HasPrefix(p, "--") {
 		return p
 	}
 	p = filepath.Clean(p)

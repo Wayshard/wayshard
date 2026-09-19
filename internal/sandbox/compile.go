@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 )
 
@@ -32,6 +33,9 @@ func compileCommon(p Policy) error {
 }
 
 func filterEnv(p Policy, base []string) []string {
+	if base == nil {
+		base = os.Environ()
+	}
 	deny := map[string]struct{}{"TYPESAFE_API_KEY": {}, "WAYSHARD_VAULT_KEY": {}, "WAYSHARD_VAULT_PASSPHRASE": {}}
 	if len(p.EnvAllow) == 0 {
 		out := make([]string, 0, len(base))
