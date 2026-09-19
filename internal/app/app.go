@@ -173,9 +173,26 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 	}
 	var out []routing.Candidate
 	for _, h := range list {
-		out = append(out, routing.Candidate{Harness: h, Isolation: h.Isolation})
+		out = append(out, routing.Candidate{Harness: h, Isolation: h.Isolation, Network: harnessNetwork(h.DefinitionID, h.Adapter)})
 	}
 	return out, nil
+}
+
+// harnessNetwork classifies whether a harness needs model/provider network.
+// The deterministic fake harness needs none; real ACP harnesses do.
+func harnessNetwork(definitionID, adapter string) domain.NetworkCapability {
+	switch definitionID {
+	case "wayshard-fake-acp":
+		return domain.NetworkNone
+	}
+	switch adapter {
+	case "generic":
+		// A generic ACP agent may be local or remote; treat as provider-needing
+		// unless it is the known local fake.
+		return domain.NetworkProvider
+	default:
+		return domain.NetworkProvider
+	}
 }
 
 type syntheticCandidates struct{}
@@ -190,5 +207,6 @@ func (syntheticCandidates) Candidates(context.Context) ([]routing.Candidate, err
 			Isolation:     domain.IsolationOuterOnly,
 		},
 		ModelID: "synthetic",
+		Network: domain.NetworkNone,
 	}}, nil
 }

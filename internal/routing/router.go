@@ -16,6 +16,7 @@ type Candidate struct {
 	ModelID      string
 	Effort       string
 	Isolation    domain.IsolationMode
+	Network      domain.NetworkCapability
 	DynamicModel bool
 }
 
@@ -29,6 +30,9 @@ type Config struct {
 	ForceHarness     string
 	ForceModel       string
 	Pool             []string // automatic routing pool of model ids
+	// AllowProviderNetwork enables routes that need model/provider network.
+	// It is false unless secure provider-only isolation is available.
+	AllowProviderNetwork bool
 }
 
 type Decision struct {
@@ -45,7 +49,7 @@ type Router struct {
 }
 
 func (r *Router) Route(ctx context.Context, stage domain.StageKind, cfg Config, cands []Candidate, assess *jev.Assessment) Decision {
-	viable := hardFilter(stage, cfg, cands)
+	viable, providerDropped := hardFilter(stage, cfg, cands)
 	if cfg.ForceHarness != "" || cfg.ForceModel != "" {
 		forced := filterForced(viable, cfg)
 		if len(forced) == 0 {
@@ -54,6 +58,9 @@ func (r *Router) Route(ctx context.Context, stage domain.StageKind, cfg Config, 
 		viable = forced
 	}
 	if len(viable) == 0 {
+		if providerDropped && !cfg.AllowProviderNetwork {
+			return Decision{Blocked: domain.BlockedNoViableRoute, Detail: "secure provider network isolation unavailable"}
+		}
 		return Decision{Blocked: domain.BlockedNoViableRoute, Detail: "no harness/model satisfies stage requirements"}
 	}
 	ranked := prefer(cfg, viable)
@@ -76,8 +83,9 @@ func (r *Router) Route(ctx context.Context, stage domain.StageKind, cfg Config, 
 	return Decision{Candidate: primary, Fallbacks: fb, Reason: reason, Degraded: degraded}
 }
 
-func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) []Candidate {
+func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) ([]Candidate, bool) {
 	var out []Candidate
+	providerDropped := false
 	for _, c := range cands {
 		if c.Harness.Health == domain.HarnessUnavailable || c.Harness.Health == domain.HarnessIncompatible {
 			continue
@@ -86,6 +94,10 @@ func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) []Candida
 			continue
 		}
 		if c.Harness.Health == domain.HarnessUnauth {
+			continue
+		}
+		if c.Network == domain.NetworkProvider && !cfg.AllowProviderNetwork {
+			providerDropped = true
 			continue
 		}
 		if len(cfg.AllowedHarnesses) > 0 && !contains(cfg.AllowedHarnesses, c.Harness.ID) && !contains(cfg.AllowedHarnesses, c.Harness.DisplayName) {
@@ -107,7 +119,7 @@ func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) []Candida
 		}
 		out = append(out, c)
 	}
-	return out
+	return out, providerDropped
 }
 
 func filterForced(cands []Candidate, cfg Config) []Candidate {

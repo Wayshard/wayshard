@@ -36,12 +36,6 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 			c.Features = append(c.Features, "seccomp_network_deny")
 		}
 	}
-	if p.Network == NetAllowlist || p.Network == NetBrokered {
-		c.Unavailable = append(c.Unavailable, "network_allowlist")
-		if p.Required {
-			return c, fmt.Errorf("%w: network %q is not implemented; refusing to pretend support", ErrRequiredIsolation, p.Network)
-		}
-	}
 	if p.SyntheticHome != "" || p.SyntheticTemp != "" {
 		c.Features = append(c.Features, "synthetic_home")
 	}
@@ -140,6 +134,9 @@ func (LinuxBackend) Report() IsolationReport {
 	if _, err := seccompAuditArch(); err == nil {
 		r.Features = append(r.Features, "seccomp_network_deny")
 	}
-	r.Detail = "linux landlock filesystem confinement + seccomp network confinement + process group + pdeathsig + env allowlist"
+	// Secure provider-only networking is not implemented; required-isolation
+	// harnesses run with no network instead.
+	r.Missing = append(r.Missing, "provider_network")
+	r.Detail = "linux landlock filesystem confinement + seccomp network confinement (none) + process group + pdeathsig + env allowlist; secure provider network unavailable"
 	return r
 }

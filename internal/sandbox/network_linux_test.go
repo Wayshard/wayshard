@@ -58,6 +58,7 @@ res(lambda: socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("127.0.0.
 res(lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"x", ("127.0.0.1", %s)), "UDP")
 res(lambda: socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).connect(%q), "UNIXFS")
 res(lambda: socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).connect(%q), "UNIXABS")
+res(lambda: socket.socket(socket.AF_UNIX, socket.SOCK_STREAM).connect("/var/run/docker.sock"), "DOCKER")
 try:
     open("/proc/self/environ","rb").read(); print("PROC=OK")
 except OSError as e:
@@ -95,7 +96,7 @@ func TestNetworkNoneEnforced(t *testing.T) {
 		return out
 	}
 	direct := run("/usr/bin/python3", probe)
-	for _, label := range []string{"TCP", "UDP", "UNIXFS", "UNIXABS", "PROC"} {
+	for _, label := range []string{"TCP", "UDP", "UNIXFS", "UNIXABS", "DOCKER", "PROC"} {
 		if !strings.Contains(direct, label+"=ERRNO") {
 			t.Fatalf("%s not denied under NetworkNone:\n%s", label, direct)
 		}
@@ -113,8 +114,9 @@ func TestNetworkNoneEnforced(t *testing.T) {
 	}
 }
 
-// TestNetworkUnrestrictedStillWorks proves the fix did not destroy networking.
-func TestNetworkUnrestrictedStillWorks(t *testing.T) {
+// TestExplicitUnsafeHostNetworkWorks proves raw host networking is only
+// available with an explicit unsafe opt-in and still works when selected.
+func TestExplicitUnsafeHostNetworkWorks(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("linux-only")
 	}
@@ -127,13 +129,57 @@ func TestNetworkUnrestrictedStillWorks(t *testing.T) {
 	home := t.TempDir()
 	probe := writeNetProbe(t, ws, tcpAddr, udpAddr, fsPath, absName)
 	pol := ToolPolicy(ws, home, NetUnrestricted)
+	pol.AllowUnsafeHostNetwork = true
 	cmd := exec.Command("/usr/bin/python3", probe)
 	out, err := runConstrained(t, c, cmd, pol)
 	if err != nil {
-		t.Fatalf("unrestricted run failed: %v\n%s", err, out)
+		t.Fatalf("unsafe run failed: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "TCP=OK") || !strings.Contains(out, "UDP=OK") {
-		t.Fatalf("unrestricted network did not work:\n%s", out)
+		t.Fatalf("unsafe host network did not work:\n%s", out)
+	}
+}
+
+// TestProviderNetworkFailsClosed proves provider-only network isolation is not
+// silently downgraded to unrestricted.
+func TestProviderNetworkFailsClosed(t *testing.T) {
+	c := AsConstrainer(DefaultBackend())
+	if _, err := c.Compile(ToolPolicy(t.TempDir(), t.TempDir(), NetProvider)); err == nil {
+		t.Fatal("provider network policy did not fail closed")
+	}
+}
+
+// TestProductionHarnessPolicyIsNetworkNone proves the constructor used by the
+// production harness launch path denies network by default, and that the
+// sandbox actually enforces it.
+func TestProductionHarnessPolicyIsNetworkNone(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux-only")
+	}
+	if HarnessPolicy(t.TempDir(), t.TempDir()).Network != NetNone {
+		t.Fatal("HarnessPolicy must default to NetworkNone")
+	}
+	if ReadOnlyViewPolicy(t.TempDir(), t.TempDir()).Network != NetNone {
+		t.Fatal("ReadOnlyViewPolicy must default to NetworkNone")
+	}
+	c := AsConstrainer(DefaultBackend())
+	if !c.Report().Available {
+		t.Skip("native sandbox unavailable")
+	}
+	tcpAddr, udpAddr, fsPath, absName := startListeners(t)
+	ws := t.TempDir()
+	home := t.TempDir()
+	probe := writeNetProbe(t, ws, tcpAddr, udpAddr, fsPath, absName)
+	pol := HarnessPolicy(ws, home)
+	cmd := exec.Command("/usr/bin/python3", probe)
+	out, err := runConstrained(t, c, cmd, pol)
+	if err != nil {
+		t.Fatalf("harness policy run failed: %v\n%s", err, out)
+	}
+	for _, label := range []string{"TCP", "UDP", "UNIXFS", "UNIXABS"} {
+		if !strings.Contains(out, label+"=ERRNO") {
+			t.Fatalf("production harness policy allowed %s:\n%s", label, out)
+		}
 	}
 }
 

@@ -207,6 +207,16 @@ const (
 	ArtifactContextManifest ArtifactKind = "context_manifest"
 )
 
+// NetworkCapability is the network access a harness route requires.
+type NetworkCapability string
+
+const (
+	// NetworkNone means the harness needs no external network.
+	NetworkNone NetworkCapability = "none"
+	// NetworkProvider means the harness needs model/provider network access.
+	NetworkProvider NetworkCapability = "provider"
+)
+
 // NotificationKind is derived from durable domain events.
 type NotificationKind string
 

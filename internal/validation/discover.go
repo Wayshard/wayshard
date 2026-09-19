@@ -67,8 +67,8 @@ type Runner struct {
 	Store *storage.Store
 	// DataDir roots synthetic HOME/TMP for confined validation. Optional.
 	DataDir string
-	// Network is the validation command network policy. Empty means unrestricted
-	// (validation is server-controlled and may need dependency access).
+	// Network is the validation command network policy. Empty means NetworkNone:
+	// project/tool commands are denied network by default.
 	Network sandbox.NetworkMode
 }
 
@@ -115,7 +115,8 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 	home := r.syntheticHome(dir)
 	net := r.Network
 	if net == "" {
-		net = sandbox.NetUnrestricted
+		// Tool/validation network is denied by default.
+		net = sandbox.NetNone
 	}
 	pol := sandbox.ToolPolicy(dir, home, net)
 	if exe, err := exec.LookPath(parts[0]); err == nil {

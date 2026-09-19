@@ -14,6 +14,7 @@ type NetworkMode string
 
 const (
 	NetNone         NetworkMode = "none"
+	NetProvider     NetworkMode = "provider"
 	NetAllowlist    NetworkMode = "allowlist"
 	NetUnrestricted NetworkMode = "unrestricted"
 	NetBrokered     NetworkMode = "brokered"
@@ -27,14 +28,17 @@ type Policy struct {
 	SyntheticTemp  string
 	EnvAllow       []string
 	Network        NetworkMode
-	AllowHosts     []string
-	MemoryBytes    int64
-	CPUPercent     int
-	WallTimeSec    int
-	MaxProcesses   int
-	MaxOutputBytes int64
-	MaxDiskBytes   int64
-	Required       bool
+	// AllowUnsafeHostNetwork must be explicitly set to permit NetUnrestricted.
+	// It is never set by required-isolation production policies.
+	AllowUnsafeHostNetwork bool
+	AllowHosts             []string
+	MemoryBytes            int64
+	CPUPercent             int
+	WallTimeSec            int
+	MaxProcesses           int
+	MaxOutputBytes         int64
+	MaxDiskBytes           int64
+	Required               bool
 }
 
 type Backend interface {
@@ -135,8 +139,11 @@ func HarnessPolicy(runWorkspace, syntheticTemp string) Policy {
 		ReadOnlyRoots:  systemReadOnlyRoots(),
 		ReadWriteRoots: append([]string{runWorkspace, syntheticTemp}, systemDeviceRoots()...),
 		SyntheticTemp:  syntheticTemp,
-		Network:        NetUnrestricted,
-		Required:       true,
+		// Harnesses that require model/provider network are not launched under
+		// raw host networking. Secure provider-only isolation is not yet
+		// implemented, so required-isolation harnesses run with no network.
+		Network:  NetNone,
+		Required: true,
 	}
 }
 
@@ -147,7 +154,7 @@ func ReadOnlyViewPolicy(viewPath, syntheticTemp string) Policy {
 		ReadOnlyRoots:  append([]string{viewPath}, systemReadOnlyRoots()...),
 		ReadWriteRoots: append([]string{syntheticTemp}, systemDeviceRoots()...),
 		SyntheticTemp:  syntheticTemp,
-		Network:        NetUnrestricted,
+		Network:        NetNone,
 		Required:       true,
 	}
 }

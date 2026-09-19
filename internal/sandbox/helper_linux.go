@@ -41,15 +41,23 @@ func runHelper(args []string) bool {
 			os.Exit(125)
 		}
 	}
-	if p.Network == NetNone {
+	switch p.Network {
+	case NetNone:
 		if err := applyNetworkNone(); err != nil {
 			if p.Required {
 				fmt.Fprintln(os.Stderr, "wayshard-sandbox: required network confinement failed:", err)
 				os.Exit(125)
 			}
 		}
-	} else if p.Network != "" && p.Network != NetUnrestricted {
-		// Unsupported network modes must never be silently treated as
+	case NetUnrestricted:
+		if !p.AllowUnsafeHostNetwork {
+			if p.Required {
+				fmt.Fprintln(os.Stderr, "wayshard-sandbox: unrestricted host network requires explicit unsafe opt-in")
+				os.Exit(125)
+			}
+		}
+	default:
+		// provider/allowlist/brokered/empty are never silently treated as
 		// unrestricted.
 		if p.Required {
 			fmt.Fprintf(os.Stderr, "wayshard-sandbox: unsupported network mode %q\n", p.Network)

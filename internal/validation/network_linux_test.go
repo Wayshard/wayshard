@@ -28,13 +28,19 @@ func TestValidationNetworkNoneEnforced(t *testing.T) {
 	ws := t.TempDir()
 	script := fmt.Sprintf(`#!/bin/sh
 /usr/bin/python3 - <<'PY'
-import socket
+import socket,sys
+bad=0
 def res(fn,label):
-    try: fn(); print(label+"=OK")
-    except OSError as e: print(label+"=ERRNO"+str(e.errno))
+    global bad
+    try:
+        fn(); print(label+"=OK"); bad=1
+    except OSError as e:
+        print(label+"=ERRNO"+str(e.errno))
 res(lambda: socket.socket(socket.AF_INET,socket.SOCK_STREAM).connect(("127.0.0.1",%s)),"TCP")
 res(lambda: socket.socket(socket.AF_INET,socket.SOCK_DGRAM).sendto(b"x",("127.0.0.1",9)),"UDP")
 res(lambda: socket.socket(socket.AF_UNIX,socket.SOCK_STREAM).connect("/tmp/nonexistent-ws.sock"),"UNIX")
+res(lambda: socket.socket(socket.AF_UNIX,socket.SOCK_STREAM).connect("/var/run/docker.sock"),"DOCKER")
+sys.exit(bad)
 PY
 `, port)
 	if err := os.WriteFile(filepath.Join(ws, "probe.sh"), []byte(script), 0o755); err != nil {

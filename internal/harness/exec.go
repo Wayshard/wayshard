@@ -28,6 +28,12 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	if req.Stage.Kind == domain.StageValidate || req.Stage.Kind == domain.StageIntegrate {
 		return orchestrator.StageResult{Err: fmt.Errorf("stage %s is server-owned", req.Stage.Kind)}, nil
 	}
+	// Defense in depth: a route that requires provider network must never be
+	// launched, because secure provider-only isolation is not implemented.
+	if req.Route.Network == domain.NetworkProvider {
+		err := fmt.Errorf("secure provider network isolation unavailable")
+		return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
+	}
 	cwd := ""
 	if req.Workspace != nil {
 		cwd = req.Workspace.RunPath
