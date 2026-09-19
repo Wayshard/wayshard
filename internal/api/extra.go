@@ -9,6 +9,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/auth"
 	"github.com/Wayshard/wayshard/internal/backup"
 	"github.com/Wayshard/wayshard/internal/ctxengine"
+	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/knowledge"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
@@ -75,6 +76,17 @@ func (s *Server) runContext(w http.ResponseWriter, r *http.Request, _ *auth.Prin
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	// Prefer the durable manifest of the bundle actually delivered to a stage.
+	if arts, err := s.Store.ListArtifacts(r.Context(), run.ID); err == nil {
+		for i := len(arts) - 1; i >= 0; i-- {
+			if arts[i].Kind == domain.ArtifactContextManifest {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(200)
+				w.Write([]byte(arts[i].JSON))
+				return
+			}
+		}
 	}
 	task, _ := s.Store.GetTask(r.Context(), run.TaskID)
 	proj, _ := s.Store.GetProject(r.Context(), run.ProjectID)

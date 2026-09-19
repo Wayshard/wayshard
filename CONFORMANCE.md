@@ -32,7 +32,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 |---|---|---|---|
 | Open/clone/create/locate/remove; open passive | `internal/api/server.go` | `TestOpenProjectIsPassive`, `TestRemoveProjectDoesNotDeleteSource` | done |
 | Knowledge discovery, cycles, six-file recognition, no `.wayshard` | `internal/knowledge` | `internal/knowledge/discover_test.go` | done |
-| Stage-specific context + manifest | `internal/ctxengine` | `internal/ctxengine/engine_test.go` | done |
+| Stage-specific context actually injected into stages + durable manifest of the delivered bundle | `orchestrator.stageBundle`, `ctxengine` | `TestStageContextIsInjected` (real orchestration path; planner/executor/reviewer bundles non-empty, stage-specific, include project instructions and plan criteria; manifest artifact persisted) | done |
 
 ## Orchestration
 
@@ -74,7 +74,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
 | Linux sandbox: Landlock filesystem confinement + seccomp-BPF communication-socket confinement (`socket(2)` all domains, `io_uring_setup(2)`, x32 ABI rejection), process group, pdeathsig, env allowlist. `NetworkNone` is the default for harness and tool/validation execution. Raw `unrestricted` host networking requires an explicit unsafe opt-in and is never selected by required-isolation policies. Secure provider-only networking is not implemented; provider-requiring routes fail closed. | `internal/sandbox/{linux,landlock_linux,seccomp_linux,helper_linux,env,policy,compile}.go` | `TestLandlockFilesystemConfinement`, `TestLandlockReadOnlyView`, `TestNetworkNoneEnforced`, `TestProductionHarnessPolicyIsNetworkNone`, `TestProviderNetworkFailsClosed`, `TestExplicitUnsafeHostNetworkWorks`, `TestUnsupportedNetworkPoliciesFailClosed`, `TestEnvAllowlistDropsHostSecrets` | done (Linux black-box, amd64/arm64) |
-| Harness network policy: required-isolation harnesses run with `NetworkNone`; harnesses that need model/provider network are non-viable until secure provider isolation exists | `sandbox.HarnessPolicy`, `routing` provider filter, `harness.ACPExec` guard | `TestProviderHarnessRouteFailsClosed`, `TestProviderRouteBlockedWithoutCapability` | done |
+| Harness network policy: required-isolation harnesses run with `NetworkNone`; harnesses that need model/provider network are non-viable until secure provider isolation exists. Routing requires both user permission (`AllowProviderNetwork`) and actual platform capability (`ProviderNetworkAvailable`); permission alone cannot make a provider route viable. | `sandbox.HarnessPolicy`, `routing` provider filter, `harness.ACPExec` guard | `TestProviderHarnessRouteFailsClosed`, `TestProviderRouteBlockedWithoutCapability` | done |
 | Tool/validation network defaults to `NetworkNone`; project/tool commands cannot reach TCP/UDP/Unix/docker.sock | `validation.Runner` | `TestValidationNetworkNoneEnforced` | done (Linux black-box) |
 | macOS sandbox: `sandbox-exec` seatbelt profile compiled from SandboxPolicy; process group; fail if missing when Required | `internal/sandbox/seatbelt.go`, `darwin.go` | `TestSeatbeltProfileCompilation` (all OS) | code present; native runtime enforcement UNVERIFIED (no macOS execution here) |
 | Windows sandbox: Job Objects + new process group; AppContainer not claimed; fail closed if unavailable | `internal/sandbox/windows.go` | cross-compile + policy tests | code present; native runtime enforcement UNVERIFIED |

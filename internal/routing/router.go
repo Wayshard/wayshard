@@ -30,9 +30,13 @@ type Config struct {
 	ForceHarness     string
 	ForceModel       string
 	Pool             []string // automatic routing pool of model ids
-	// AllowProviderNetwork enables routes that need model/provider network.
-	// It is false unless secure provider-only isolation is available.
+	// AllowProviderNetwork is user/policy permission to use model/provider
+	// network. It is not capability.
 	AllowProviderNetwork bool
+	// ProviderNetworkAvailable reports whether the platform can actually
+	// enforce provider-only isolation. A route needs both permission and
+	// capability to be viable.
+	ProviderNetworkAvailable bool
 }
 
 type Decision struct {
@@ -58,7 +62,7 @@ func (r *Router) Route(ctx context.Context, stage domain.StageKind, cfg Config, 
 		viable = forced
 	}
 	if len(viable) == 0 {
-		if providerDropped && !cfg.AllowProviderNetwork {
+		if providerDropped && !(cfg.AllowProviderNetwork && cfg.ProviderNetworkAvailable) {
 			return Decision{Blocked: domain.BlockedNoViableRoute, Detail: "secure provider network isolation unavailable"}
 		}
 		return Decision{Blocked: domain.BlockedNoViableRoute, Detail: "no harness/model satisfies stage requirements"}
@@ -96,7 +100,7 @@ func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) ([]Candid
 		if c.Harness.Health == domain.HarnessUnauth {
 			continue
 		}
-		if c.Network == domain.NetworkProvider && !cfg.AllowProviderNetwork {
+		if c.Network == domain.NetworkProvider && !(cfg.AllowProviderNetwork && cfg.ProviderNetworkAvailable) {
 			providerDropped = true
 			continue
 		}

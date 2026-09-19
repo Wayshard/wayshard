@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/artifacts"
+	"github.com/Wayshard/wayshard/internal/ctxengine"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/id"
 	"github.com/Wayshard/wayshard/internal/jev"
@@ -53,16 +54,18 @@ type CandidateSource interface {
 }
 
 type Engine struct {
-	Store      *storage.Store
-	Jev        jev.DecisionEngine
-	Router     *routing.Router
-	Exec       StageExec
-	Workspace  WorkspacePrep
-	Integrate  Integrator
-	Candidates CandidateSource
-	Validate   *validation.Runner
-	Log        *slog.Logger
-	Budget     Budgets
+	Store         *storage.Store
+	Jev           jev.DecisionEngine
+	Router        *routing.Router
+	Exec          StageExec
+	Workspace     WorkspacePrep
+	Integrate     Integrator
+	Candidates    CandidateSource
+	Validate      *validation.Runner
+	Context       *ctxengine.Engine
+	ContextBudget int
+	Log           *slog.Logger
+	Budget        Budgets
 }
 
 func (e *Engine) budgets() Budgets { return e.Budget.withDefaults() }
@@ -358,6 +361,10 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 		return e.runValidate(ctx, run, task, st)
 	}
 
+	// Build the stage-specific context bundle actually delivered to the
+	// harness (planner/executor/reviewer/repair/explore differ).
+	bundle := e.stageBundle(ctx, run, task, st)
+
 	// Build the attempt ladder: primary then explicit infrastructure fallbacks.
 	candidates := []routing.Candidate{dec.Candidate}
 	candidates = append(candidates, dec.Fallbacks...)
@@ -378,7 +385,7 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 			return e.Store.UpdateRunStatus(ctx, run.ID, domain.RunFailed, "", "cannot append attempt")
 		}
 		e.insertRouteDecision(ctx, run, st, att, cand, dec, assess)
-		res, adec := e.execAttempt(ctx, run, task, st, att, cand)
+		res, adec := e.execAttempt(ctx, run, task, st, att, cand, bundle)
 		attemptsMade++
 		if res.Usage != nil {
 			res.Usage.RunID = run.ID
@@ -423,7 +430,7 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 			if corr == nil {
 				break
 			}
-			res2, _ := e.execAttempt(ctx, run, task, st, corr, cand)
+			res2, _ := e.execAttempt(ctx, run, task, st, corr, cand, bundle)
 			attemptsMade++
 			if res2.Err == nil {
 				if parsed2, perr2 := e.persistArtifact(ctx, run.ID, st.ID, corr.ID, kind, res2.ArtifactJSON); perr2 == nil {
@@ -522,13 +529,13 @@ func (e *Engine) insertRouteDecision(ctx context.Context, run *domain.Run, st *d
 	_ = e.Store.InsertRouteDecision(ctx, rd)
 }
 
-func (e *Engine) execAttempt(ctx context.Context, run *domain.Run, task *domain.Task, st *domain.Stage, att *domain.StageAttempt, cand routing.Candidate) (StageResult, routing.Decision) {
+func (e *Engine) execAttempt(ctx context.Context, run *domain.Run, task *domain.Task, st *domain.Stage, att *domain.StageAttempt, cand routing.Candidate, bundle string) (StageResult, routing.Decision) {
 	if e.Exec == nil {
 		body, err := syntheticArtifact(st.Kind, task.Objective)
 		return StageResult{ArtifactJSON: body, Err: err}, routing.Decision{Candidate: cand}
 	}
 	ws, _ := e.Store.GetWorkspaceByRun(ctx, run.ID)
-	return mustExec(ctx, e.Exec, StageRequest{Run: *run, Task: *task, Stage: *st, Attempt: *att, Route: cand, Workspace: ws}), routing.Decision{Candidate: cand}
+	return mustExec(ctx, e.Exec, StageRequest{Run: *run, Task: *task, Stage: *st, Attempt: *att, Route: cand, Workspace: ws, Bundle: bundle}), routing.Decision{Candidate: cand}
 }
 
 func (e *Engine) persistArtifact(ctx context.Context, runID, stageID, attemptID string, kind domain.StageKind, raw string) (any, error) {
