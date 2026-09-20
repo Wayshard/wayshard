@@ -171,6 +171,32 @@ func TestReconcileRejectsReclaimedCheckpoint(t *testing.T) {
 	}
 }
 
+// TestReconcileCancelsStalePendingApproval proves a permission pending at crash
+// is invalidated on recovery (never auto-approved, never left dangling).
+func TestReconcileCancelsStalePendingApproval(t *testing.T) {
+	ctx := context.Background()
+	st, runID, _ := setupInterruptedWrite(t)
+	ap := &domain.Approval{RunID: runID, Kind: "acp_permission", Resource: "edit", Reason: "needs approval", Status: "pending"}
+	if err := st.InsertApproval(ctx, ap); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(ctx, st, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetApproval(ctx, ap.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status == "pending" {
+		t.Fatal("stale pending approval survived recovery")
+	}
+	stages, _ := st.ListStages(ctx, runID)
+	atts, _ := st.ListAttempts(ctx, stages[0].ID)
+	if atts[0].Status != domain.AttemptInterrupted {
+		t.Fatalf("attempt = %s, want interrupted", atts[0].Status)
+	}
+}
+
 // TestReconcileCancelledRunAttemptConsistency covers the F3 crash window: a
 // durably CANCELLED run with a leftover running attempt.
 func TestReconcileCancelledRunAttemptConsistency(t *testing.T) {

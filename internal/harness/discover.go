@@ -206,17 +206,54 @@ func baseInstallation(def Definition, exe string) Installation {
 func probeOne(ctx context.Context, inst *Installation, timeout time.Duration) {
 	ad := AdapterFor(inst.Adapter, inst.Executable)
 	spec := ad.LaunchSpec(*inst)
-	// Discovery probes use a confined environment and must not inherit
-	// arbitrary host secrets. The deterministic fake harness scenario knob is
-	// forwarded so its behavior is observable in tests.
-	extras := map[string]string{}
-	if v := os.Getenv("WAYSHARD_FAKE_SCENARIO"); v != "" {
-		extras["WAYSHARD_FAKE_SCENARIO"] = v
+
+	// A dedicated ProbePolicy confines the version probe and the ACP
+	// initialize: NetworkNone, synthetic HOME/TEMP, no project/SourceWorkspace,
+	// no Wayshard runtime/DB/vault, no SSH agent or display sockets. If the
+	// platform cannot enforce it, the probe is reported unavailable rather than
+	// run unrestricted.
+	probeDir, err := os.MkdirTemp("", "wayshard-probe-")
+	if err != nil {
+		classifyProbeError(inst, err)
+		return
 	}
-	probeEnv := sandbox.HarnessEnv("", "", extras)
+	defer os.RemoveAll(probeDir)
+	home := filepath.Join(probeDir, "home")
+	tmp := filepath.Join(probeDir, "tmp")
+	_ = os.MkdirAll(home, 0o700)
+	_ = os.MkdirAll(tmp, 0o700)
+	pol := sandbox.ProbePolicy(inst.Executable, home, tmp)
+
+	// The deterministic fake harness scenario knob is forwarded so its behavior
+	// is observable in tests; nothing else from the host environment survives.
+	extras := map[string]string{}
+	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_INIT_CANARY"} {
+		if v := os.Getenv(k); v != "" {
+			extras[k] = v
+		}
+	}
+	probeEnv := sandbox.HarnessEnv(home, tmp, extras)
 	spec.Env = probeEnv
-	ver := acp.ProbeVersionEnv(ctx, inst.Executable, nil, probeEnv)
-	inst.Version = ver
+
+	verTimeout := timeout
+	if verTimeout > 3*time.Second {
+		verTimeout = 3 * time.Second
+	}
+	out, verr := sandbox.RunConstrainedOutput(ctx, pol, verTimeout, 256<<10, inst.Executable, nil, probeEnv)
+	if errors.Is(verr, sandbox.ErrRequiredIsolation) {
+		classifyProbeError(inst, verr)
+		inst.Notes = append(inst.Notes, "probe isolation unavailable")
+		return
+	}
+	inst.Version = firstLine(out)
+
+	con := sandbox.AsConstrainer(sandbox.DefaultBackend())
+	if _, err := con.Compile(pol); err != nil {
+		classifyProbeError(inst, err)
+		return
+	}
+	spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, pol) }
+	spec.AfterStart = func(cmd *exec.Cmd) (func(), error) { return con.Attach(cmd, pol) }
 
 	res, err := acp.Probe(ctx, spec, timeout)
 	if res != nil {
@@ -288,6 +325,16 @@ func classifyProbeError(inst *Installation, err error) {
 		inst.Compatibility = domain.CompatIncompatible
 	}
 	inst.Notes = append(inst.Notes, err.Error())
+}
+
+func firstLine(b []byte) string {
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func lookInDirs(dirs []string, name string) []string {
@@ -413,10 +460,21 @@ func loginShellPATH(ctx context.Context, timeout time.Duration) (string, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, shell, "-lc", `printf '%s' "$PATH"`)
-	cmd.Stdin = nil
-	cmd.Env = os.Environ()
-	out, err := cmd.Output()
+	// The login shell is still a discovery probe: it runs under ProbePolicy
+	// (NetworkNone, synthetic TMP, secrets dropped) with read-only access to
+	// the user's home and /etc so shell profiles can still be sourced.
+	probeDir, derr := os.MkdirTemp("", "wayshard-loginpath-")
+	if derr != nil {
+		return "", derr
+	}
+	defer os.RemoveAll(probeDir)
+	pol := sandbox.ProbePolicy(shell, probeDir, probeDir)
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, "/etc")
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, h)
+	}
+	env := sandbox.HarnessEnv("", probeDir, nil)
+	out, err := sandbox.RunConstrainedOutput(ctx, pol, timeout, 64<<10, shell, []string{"-lc", `printf '%s' "$PATH"`}, env)
 	if err != nil {
 		return "", err
 	}

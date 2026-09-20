@@ -396,6 +396,23 @@ func (s *Store) UpdateIntegration(ctx context.Context, in *domain.Integration) e
 	})
 }
 
+// GetIntegrationByID returns one integration record.
+func (s *Store) GetIntegrationByID(ctx context.Context, id string) (*domain.Integration, error) {
+	var in domain.Integration
+	var created, updated string
+	err := s.DB.QueryRowContext(ctx, `SELECT id, run_id, project_id, status, base_snapshot, target_branch, current_branch, journal_hash, error, created_at, updated_at FROM integrations WHERE id = ?`, id).
+		Scan(&in.ID, &in.RunID, &in.ProjectID, &in.Status, &in.BaseSnapshot, &in.TargetBranch, &in.CurrentBranch, &in.JournalHash, &in.Error, &created, &updated)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	in.CreatedAt = parseTime(created)
+	in.UpdatedAt = parseTime(updated)
+	return &in, nil
+}
+
 func (s *Store) GetIntegrationByRun(ctx context.Context, runID string) (*domain.Integration, error) {
 	var in domain.Integration
 	var created, updated string

@@ -190,6 +190,16 @@ func (a *agent) onInitialize(req request) {
 	if a.scenario == "auth_required" {
 		auth = []any{map[string]any{"id": "fake", "name": "Fake auth"}}
 	}
+	// Test hook: if an initialize canary is configured, report whether it was
+	// readable. A confined ACP initialize probe must not be able to read it.
+	version := "0.0.0-dev"
+	if p := os.Getenv("WAYSHARD_FAKE_INIT_CANARY"); p != "" {
+		if b, err := os.ReadFile(p); err == nil {
+			version = "LEAK:" + strings.TrimSpace(string(b))
+		} else {
+			version = "confined"
+		}
+	}
 	a.initDone = true
 	a.reply(req, map[string]any{
 		"protocolVersion": 1,
@@ -201,7 +211,7 @@ func (a *agent) onInitialize(req request) {
 		"agentInfo": map[string]any{
 			"name":    "wayshard-fake-acp",
 			"title":   "Wayshard Fake ACP",
-			"version": "0.0.0-dev",
+			"version": version,
 		},
 		"authMethods": auth,
 	})
@@ -258,16 +268,25 @@ func (a *agent) onPrompt(req request) {
 		return
 	}
 
-	if a.scenario == "permission" {
-		outcome, err := a.requestPermission(p.SessionID)
+	if a.scenario == "permission" && a.effectiveStage() == getenv("WAYSHARD_FAKE_PERMISSION_STAGE", "execute") {
+		outcome, kind, err := a.requestPermission(p.SessionID)
 		if err != nil {
 			a.replyErr(req, -32603, err.Error())
 			return
 		}
-		if outcome != "selected" {
-			a.notifyUpdate(p.SessionID, "agent_message_chunk", "permission denied")
+		// A real ACP harness inspects the selected option's kind. A denial is
+		// reported as a selected reject option, not as an approval.
+		if outcome != "selected" || !strings.Contains(kind, "allow") {
+			a.notifyUpdate(p.SessionID, "agent_message_chunk", "permission denied; protected action not executed")
+			// Return a coherent stage artifact without performing the protected
+			// operation.
+			a.streamFinal(p.SessionID, artifactJSON(a.effectiveStage(), true))
 			a.reply(req, map[string]any{"stopReason": "end_turn"})
 			return
+		}
+		// Approved: perform the protected operation exactly once.
+		if canary := os.Getenv("WAYSHARD_FAKE_PERMISSION_CANARY"); canary != "" {
+			_ = os.WriteFile(canary, []byte("executed\n"), 0o644)
 		}
 	}
 
@@ -468,8 +487,19 @@ func (a *agent) notifyTool(sessionID, id, title, kind, status string) {
 	})
 }
 
-func (a *agent) requestPermission(sessionID string) (string, error) {
+// permissionOptions are the allow/reject choices the harness offers. The kind
+// is what a real ACP harness must inspect: Wayshard reports a denial by
+// selecting the reject option, not by cancelling.
+func permissionOptions() []map[string]any {
+	return []map[string]any{
+		{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+		{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
+	}
+}
+
+func (a *agent) requestPermission(sessionID string) (outcome, kind string, err error) {
 	a.notifyTool(sessionID, "call_perm", "write file", "edit", "pending")
+	opts := permissionOptions()
 	raw, err := a.callClient("session/request_permission", map[string]any{
 		"sessionId": sessionID,
 		"toolCall": map[string]any{
@@ -478,13 +508,10 @@ func (a *agent) requestPermission(sessionID string) (string, error) {
 			"kind":       "edit",
 			"status":     "pending",
 		},
-		"options": []map[string]any{
-			{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
-			{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
-		},
+		"options": opts,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var parsed struct {
 		Outcome struct {
@@ -494,9 +521,15 @@ func (a *agent) requestPermission(sessionID string) (string, error) {
 	}
 	_ = json.Unmarshal(raw, &parsed)
 	if parsed.Outcome.Outcome == "" {
-		return "cancelled", nil
+		return "cancelled", "", nil
 	}
-	return parsed.Outcome.Outcome, nil
+	for _, o := range opts {
+		if o["optionId"] == parsed.Outcome.OptionID {
+			k, _ := o["kind"].(string)
+			return parsed.Outcome.Outcome, k, nil
+		}
+	}
+	return parsed.Outcome.Outcome, "", nil
 }
 
 func (a *agent) callClient(method string, params any) (json.RawMessage, error) {

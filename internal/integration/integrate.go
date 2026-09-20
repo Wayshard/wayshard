@@ -83,6 +83,10 @@ type Request struct {
 	AutoCommit        bool
 	// CrashAfter is a test hook: stop after N verified writes.
 	CrashAfter int
+	// PublishStep is an injected publish-step callback for deterministic
+	// interruption tests. It is nil in production. Returning an error stops
+	// publication before applying entry index.
+	PublishStep func(index int) error
 }
 
 type Conflict struct {
@@ -282,7 +286,7 @@ func Integrate(ctx context.Context, req Request) (*Result, error) {
 		return res, nil
 	}
 
-	published, pubErr := publish(ctx, srcRoot, journal, req.CrashAfter)
+	published, pubErr := publish(ctx, srcRoot, journal, req.CrashAfter, req.PublishStep)
 	res.Published = published
 	if pubErr != nil && req.CrashAfter > 0 && errors.Is(pubErr, ErrIncomplete) {
 		res.Status = StatusIncomplete
@@ -449,12 +453,46 @@ func recheckSource(root string, entries []JournalEntry) error {
 	return nil
 }
 
+// safeTarget resolves a source-relative path and requires its deepest existing
+// ancestor to remain inside root after symlink resolution, so a symlinked
+// parent cannot redirect a publication write outside the source tree.
+func safeTarget(root, rel string) (string, error) {
+	rel, err := workspace.SafeRel(rel)
+	if err != nil {
+		return "", err
+	}
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	rootResolved := root
+	if rp, err := filepath.EvalSymlinks(root); err == nil {
+		rootResolved = rp
+	}
+	dir := filepath.Dir(full)
+	for {
+		rp, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			if rp != rootResolved && !strings.HasPrefix(rp, rootResolved+string(os.PathSeparator)) {
+				return "", fmt.Errorf("target parent escapes source: %s", rel)
+			}
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return full, nil
+}
+
 func hashAt(root, rel string) (workspace.FileMeta, error) {
 	rel, err := workspace.SafeRel(rel)
 	if err != nil {
 		return workspace.FileMeta{}, err
 	}
-	p := filepath.Join(root, filepath.FromSlash(rel))
+	p, err := safeTarget(root, rel)
+	if err != nil {
+		return workspace.FileMeta{}, err
+	}
 	fi, err := os.Lstat(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -492,13 +530,19 @@ func hashAt(root, rel string) (workspace.FileMeta, error) {
 	return m, nil
 }
 
-func publish(ctx context.Context, sourceRoot string, journal *Journal, crashAfter int) ([]string, error) {
+func publish(ctx context.Context, sourceRoot string, journal *Journal, crashAfter int, step func(index int) error) ([]string, error) {
 	var published []string
 	verified := 0
 	for i := range journal.Entries {
 		if err := ctx.Err(); err != nil {
 			_ = journal.Save()
 			return published, err
+		}
+		if step != nil {
+			if err := step(i); err != nil {
+				_ = journal.Save()
+				return published, fmt.Errorf("%w: publish step %d: %v", ErrIncomplete, i, err)
+			}
 		}
 		e := &journal.Entries[i]
 		if err := applyEntry(sourceRoot, journal, e); err != nil {
@@ -530,7 +574,10 @@ func applyEntry(sourceRoot string, journal *Journal, e *JournalEntry) error {
 	if err != nil {
 		return err
 	}
-	dst := filepath.Join(sourceRoot, filepath.FromSlash(rel))
+	dst, err := safeTarget(sourceRoot, rel)
+	if err != nil {
+		return err
+	}
 	switch e.Op {
 	case OpDelete:
 		if err := os.Remove(dst); err != nil && !errors.Is(err, os.ErrNotExist) {

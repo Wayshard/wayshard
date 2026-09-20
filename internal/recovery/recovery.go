@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
-	"github.com/Wayshard/wayshard/internal/integration"
 	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
@@ -284,6 +283,10 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 				_ = st.UpdateStageStatus(ctx, stg.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart")
 			}
 		}
+		// Any approval the interrupted attempt was waiting on can never be
+		// answered; invalidate it so it cannot be resolved later or leave a
+		// dangling attention item.
+		_ = st.CancelPendingApprovalsForRun(ctx, r.ID, "recovery")
 		log.Info("reconciled interrupted run", "run", r.ID, "status", r.Status)
 	}
 
@@ -317,45 +320,4 @@ func cleanupValidationWorkspaces(st *storage.Store, log *slog.Logger) {
 			}
 		}
 	}
-}
-
-// reconcileJournals finds on-disk publication journals and resumes or
-// classifies them so a crash during integration does not leave source in an
-// ambiguous state.
-func reconcileJournals(ctx context.Context, st *storage.Store, log *slog.Logger) {
-	root := filepath.Join(st.Root, "runtime", "journals")
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || d.Name() != "journal.json" {
-			return nil
-		}
-		j, err := integration.LoadJournal(path)
-		if err != nil {
-			log.Warn("load journal", "path", path, "err", err)
-			return nil
-		}
-		proj, err := st.GetProject(ctx, j.ProjectID)
-		if err != nil {
-			log.Warn("journal project missing", "journal", j.IntegrationID, "err", err)
-			return nil
-		}
-		src, err := workspace.Open(proj.Path)
-		if err != nil {
-			log.Warn("journal source missing", "journal", j.IntegrationID, "err", err)
-			return nil
-		}
-		rec, res, err := integration.RecoverPublication(ctx, src.SourcePath(), j)
-		if err != nil {
-			log.Warn("publication recovery", "journal", j.IntegrationID, "err", err)
-			return nil
-		}
-		status := ""
-		if rec != nil {
-			status = rec.Status
-		}
-		if res != nil {
-			status = res.Status
-		}
-		log.Info("publication recovery", "journal", j.IntegrationID, "status", status)
-		return nil
-	})
 }
