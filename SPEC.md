@@ -252,15 +252,17 @@ If Jev is unavailable after bounded retry/backoff, Wayshard uses a deterministic
 
 Wayshard uses coding harnesses already installed and available to the OS account running the server.
 
+Wayshard ships a versioned TOML catalog of supported harness definitions and automatically discovers installed members of the effective catalog. Users add, override, disable, or remove definitions by editing the user catalog (the CRUD interface); there is no catalog CRUD API or UI editor. A definition describes how Wayshard recognizes, probes, and invokes a harness family; an installation is an actual discovered executable. The catalog describes harness requirements and cannot weaken Wayshard containment (no host networking, sandbox disable, arbitrary filesystem roots, environment inheritance, approval bypass, `NetworkNone` bypass, or unverified transport trust). Definitions with a separate ACP bridge report CLI and bridge presence independently, so a present CLI whose bridge is missing is reported present with a specific reason. Adding an ordinary compatible ACP harness requires catalog TOML, not a code change.
+
 Wayshard never performs harness or bridge installation through package managers, installers, `npx`, shell downloads, privilege escalation, or similar mechanisms.
 
-Discovery may inspect daemon PATH, safely obtainable login-shell paths, well-known user bin directories, and explicitly configured executable paths. Multiple installations may coexist.
+Discovery may inspect daemon PATH, safely obtainable login-shell paths, well-known user bin directories (including definition-declared home-relative directories), and explicitly configured executable paths. Multiple installations may coexist. Project-controlled executable paths are never searched by default.
 
 A discovered executable is not routable until it passes version/protocol probing and ACP initialization.
 
 Discovery is untrusted execution: version, ACP-initialize, and login-shell PATH probes run under a dedicated ProbePolicy (NetworkNone, synthetic HOME/TEMP, allowlisted environment, read-only system and resolved-executable roots, bounded output, descendant cleanup) with no project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, or D-Bus access. If the platform cannot enforce the policy, the probe is reported unavailable rather than run unrestricted. Login-shell PATH discovery is a narrow exception that reads only the shell's required startup files and validates the returned PATH; it never receives blanket home or `/etc` access. Probes run only after startup recovery, and each probe process tree is durably owned so startup reconciliation terminates any surviving descendant. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
 
-Stable ACP v1 is the baseline protocol. Protocol mechanics are isolated behind an ACP driver; harness-specific quirks belong in harness adapters. Unknown but compliant agents use a Generic ACP adapter.
+Stable ACP v1 is the baseline protocol. Protocol mechanics are isolated behind an ACP driver; harness behavioral differences are declarative catalog properties (`acp`, command interposition, model selection, loopback requirement) rather than per-name code. A route whose definition is missing from the effective catalog fails closed.
 
 Optional features such as native session loading, dynamic model selection, extensions, and subagents are never assumed. Native resume is an optimization only; Wayshard reconstructs a new session from durable context/artifacts/workspace when necessary.
 

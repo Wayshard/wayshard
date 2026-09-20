@@ -87,7 +87,15 @@ Wayshard uses coding harnesses already installed and configured for the OS user 
 
 Examples may include OpenCode, Codex through an appropriate user-installed ACP bridge, and other ACP-compatible harnesses.
 
-**Wayshard never installs harnesses or ACP bridges for you.** It discovers available executables, probes ACP compatibility/capabilities, and reports whether a harness is ready, unauthenticated, degraded, incompatible, or unavailable. Discovery probes are untrusted execution and run isolated: no project, Wayshard-data, secret, or network access.
+Wayshard ships a versioned catalog of supported harness definitions (OpenCode, Codex, Claude, Grok, Gemini CLI, GitHub Copilot CLI, Cursor CLI, Kiro CLI, Junie, goose, Cline, Qwen Code, Qoder, Mistral Vibe, Devin CLI, Kilo Code, Factory Droid, Auggie CLI, Amp, Pi, Oh My Pi) and automatically discovers installed members. You can add, override, disable, or remove definitions by editing the user catalog — the CRUD interface — with no API or UI editor:
+
+- Linux: `$XDG_CONFIG_HOME/wayshard/harnesses.toml` (normally `~/.config/wayshard/harnesses.toml`)
+- macOS: `~/Library/Application Support/wayshard/harnesses.toml`
+- Windows: `%APPDATA%\wayshard\harnesses.toml`
+
+A user entry with the same `id` overrides shipped fields; `enabled = false` disables a shipped definition; deleting the override restores it; a new `id` creates a custom definition. Adding an ordinary compatible ACP harness needs only TOML. The catalog cannot weaken Wayshard's sandbox, network, filesystem, or approval guarantees. Changes apply after a server restart.
+
+**Wayshard never installs harnesses or ACP bridges for you.** It discovers available executables, probes ACP compatibility/capabilities, and reports whether a harness is ready, unauthenticated, degraded, incompatible, or unavailable — including a present CLI whose required ACP bridge is missing. Discovery probes are untrusted execution and run isolated: no project, Wayshard-data, secret, or network access.
 
 Provider authentication normally remains owned by the harness. Wayshard does not scrape OpenRouter/OpenAI/Anthropic/etc. credentials out of harness configuration.
 

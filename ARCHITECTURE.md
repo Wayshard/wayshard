@@ -304,29 +304,32 @@ The vault stores server identity private material, Jev/control-plane credentials
 
 If the vault cannot be unlocked, the server enters a restricted locked/recovery state rather than replacing the vault.
 
-## 13. Harness discovery
+## 13. Harness catalog and discovery
 
-The discovery service maintains two levels:
+The supported-harness inventory is configuration, not code. Two levels are kept distinct:
 
 ```text
-HarnessDefinition
-  display name
-  executable hints
-  launch recipe
-  known adapter/runtime profile
+HarnessDefinition (declarative catalog knowledge; never asserts an installation exists)
+  identity:  id, display name, homepage, enabled, platforms
+  discovery: executable aliases, bridge aliases, well-known home-relative dirs, version args
+  ACP:       native|bridge, acp args, bridge args, loopback requirement,
+             command interposition, model selection
+  config:    harness-owned home-relative config roots
+  provider:  whether provider network is required, declared transport requirement
 
-HarnessInstallation
-  definition/custom ID
-  executable path
-  executable version
-  ACP protocol/capabilities
-  auth status
-  advertised configuration/models
-  health
-  compatibility observations
+HarnessInstallation (an actual discovered installation)
+  definition id + source (shipped|user|overridden)
+  resolved executable path(s), bridge path and presence
+  version + version-probe result
+  ACP result, negotiated capabilities, auth status, isolation, resume
+  provider transport (Wayshard-verified), route viability, blocking reason
 ```
 
-Discovery sources may include daemon PATH, safely obtained login-shell PATH, well-known user bin directories, and explicit configured paths.
+A versioned TOML catalog ships embedded in the binaries (`internal/harness/harnesses.toml`, `schema_version = 1`). A user catalog at the platform config path (`$XDG_CONFIG_HOME/wayshard/harnesses.toml`, with the normal per-platform fallbacks) overrides or extends it. Merge is by stable `id`: user fields override shipped fields by key (arrays replace), `enabled = false` disables a shipped definition, deleting the override restores it, a user-only id creates a custom definition, and duplicate ids within one source are rejected. One invalid entry is isolated so it cannot destroy otherwise-valid definitions; malformed TOML and unsupported future schema versions are rejected with diagnostics. The catalog is loaded at server startup; a restart applies changes (there is no file-watcher subsystem).
+
+The catalog describes harness *requirements* and cannot weaken Wayshard containment. There is no field to disable the sandbox, request host networking, inherit arbitrary environment, grant arbitrary host filesystem roots, bypass approvals, bypass Tool/validation `NetworkNone`, or mark an unverified provider transport as trusted. Config and well-known paths must be home-relative (no absolute paths, no `..`), executable aliases must be bare names and never package-runner launchers (`npx`, `npm`, `bunx`, …), and unknown fields or unsupported enum values fail the entry closed. Wayshard remains the authority for security; the catalog only declares what a harness needs.
+
+Discovery searches the daemon PATH, safely obtained login-shell PATH, Wayshard's well-known bin dirs plus each definition's declared home-relative well-known dirs, and explicit configured paths. It never searches arbitrary project-controlled paths, never installs or updates a harness or bridge, and resolves symlinks and deduplicates physical installations. Adding an ordinary compatible ACP harness is a TOML addition, not a Go change: behavioral differences are declarative (`acp`, `interpose_commands`, `model_selection`, `acp_requires_loopback`). For a bridge definition the CLI and bridge are reported independently: a present CLI whose bridge is missing is reported as present with a specific blocking reason, not "harness not installed".
 
 Executable name alone is insufficient. A usable installation must pass launch/version and ACP initialization/capability probing.
 
@@ -349,7 +352,7 @@ Orchestrator
 
 The protocol driver owns JSON-RPC framing, initialize negotiation, session lifecycle, cancellation, permissions, filesystem/terminal callbacks, and extension-safe parsing.
 
-Known harness adapters map OpenCode/Codex-specific configuration and behavior into Wayshard capabilities. Generic ACP agents use a GenericACPAdapter.
+Harness behavior is resolved from the catalog definition (`acp`, `interpose_commands`, `model_selection`) rather than from per-name Go adapters; a route whose definition is missing from the effective catalog fails closed. The protocol driver remains the only ACP-speaking component.
 
 ### 14.2 Compatibility
 
@@ -373,7 +376,7 @@ Unknown extension metadata/methods are tolerated according to ACP semantics. Kno
 
 ### 14.4 Session continuity
 
-Adapters report session recovery capability such as none/reconstruct/native-resume. Correctness depends on server-owned durable context, artifacts, and workspace state, not hidden ACP memory.
+Installations report session recovery capability such as none/reconstruct/native-resume from negotiated capabilities. Correctness depends on server-owned durable context, artifacts, and workspace state, not hidden ACP memory.
 
 ## 15. Artifact protocol
 
