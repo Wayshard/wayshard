@@ -22,7 +22,7 @@ func newTestToolManager(t *testing.T, kind domain.StageKind) (*toolManager, stri
 	ws := t.TempDir()
 	home := t.TempDir()
 	req := orchestrator.StageRequest{Stage: domain.Stage{Kind: kind}}
-	return newToolManager(req, ws, home, nil), ws
+	return newToolManager(req, ws, home, nil, ""), ws
 }
 
 func runTool(t *testing.T, tm *toolManager, cmd string, args ...string) string {

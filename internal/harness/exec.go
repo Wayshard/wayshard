@@ -14,6 +14,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/artifacts"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
+	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
@@ -60,9 +61,19 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	_ = os.MkdirAll(tmp, 0o700)
 	realHome, _ := os.UserHomeDir()
 
+	// Per-attempt ownership token: inherited by every descendant so startup
+	// reconciliation can terminate stale process trees after a crash without
+	// relying on reused PIDs.
+	token, err := process.NewToken()
+	if err != nil {
+		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+	}
+
 	// The harness keeps its own HOME for provider auth, but Landlock only
 	// permits its owned config dirs plus the workspace and system roots.
-	spec.Env = sandbox.HarnessEnv(realHome, tmp, harnessExtras(req))
+	extras := harnessExtras(req)
+	extras[process.TokenEnv] = token
+	spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
 	if e.Sandbox != nil {
 		b := e.Sandbox.Backend
 		if b == nil {
@@ -90,18 +101,38 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	if e.Sandbox != nil {
 		sbe = e.Sandbox.Backend
 	}
-	tm := newToolManager(req, cwd, home, sbe)
+	tm := newToolManager(req, cwd, home, sbe, token)
 	hooks.CreateTerminal = tm.Create
 	hooks.TerminalOutput = tm.Output
 	hooks.ReleaseTerminal = tm.Release
 	hooks.WaitTerminalExit = tm.WaitExit
 	hooks.KillTerminal = tm.Kill
+
+	// Persist ownership before launching so a crash cannot orphan a process
+	// without a durable record. The record is registered first so its deferred
+	// reconciliation runs after the harness and tool trees are closed.
+	var owner *domain.ProcessOwner
+	if e.Store != nil {
+		owner = &domain.ProcessOwner{
+			RunID: req.Run.ID, StageID: req.Stage.ID, AttemptID: req.Attempt.ID,
+			TokenHash: process.HashToken(token), State: domain.ProcessOwnerActive,
+		}
+		if err := e.Store.InsertProcessOwner(ctx, owner); err != nil {
+			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+		}
+		defer e.finishProcessOwner(ctx, owner, token)
+	}
+
 	defer tm.CloseAll()
 	drv, err := acp.Launch(ctx, spec, acp.DefaultClientConfig(), hooks, acp.Limits{})
 	if err != nil {
 		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
 	}
 	defer drv.Close()
+	if owner != nil {
+		owner.PGID = drv.PID()
+		_ = e.Store.SetProcessOwnerPGID(context.WithoutCancel(ctx), owner.ID, owner.PGID)
+	}
 	init, err := drv.Handshake(ctx)
 	if err != nil {
 		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
@@ -136,12 +167,34 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	return orchestrator.StageResult{ArtifactJSON: text}, nil
 }
 
+// finishProcessOwner reconciles the attempt's process tree after the harness
+// and tool trees have been closed. If any owned process remains, the record
+// stays active so startup reconciliation retries it.
+func (e *ACPExec) finishProcessOwner(ctx context.Context, owner *domain.ProcessOwner, token string) {
+	if e.Store == nil || owner == nil {
+		return
+	}
+	bg := context.WithoutCancel(ctx)
+	_, remaining, supported, _ := process.ReconcileTokenHash(process.HashToken(token), owner.PGID, 3*time.Second)
+	if !supported {
+		// Ownership cannot be verified on this platform. Trust the normal close
+		// path so a completed attempt does not linger as active.
+		_ = e.Store.MarkProcessOwnerReconciled(bg, owner.ID)
+		return
+	}
+	if remaining == 0 {
+		_ = e.Store.MarkProcessOwnerReconciled(bg, owner.ID)
+	}
+}
+
 func (e *ACPExec) sandboxRoot(req orchestrator.StageRequest) string {
 	base := os.TempDir()
 	if e.Store != nil && e.Store.Root != "" {
 		base = e.Store.Root
 	}
-	dir := filepath.Join(base, "runtime", "sandbox", req.Run.ID)
+	// Per-attempt synthetic HOME/TEMP so a stale orphan from an earlier attempt
+	// cannot mutate resources reused by a later attempt.
+	dir := filepath.Join(base, "runtime", "sandbox", req.Run.ID, req.Attempt.ID)
 	_ = os.MkdirAll(dir, 0o700)
 	return dir
 }
@@ -199,6 +252,7 @@ func harnessExtras(req orchestrator.StageRequest) map[string]string {
 		"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_WRITE_FILE", "WAYSHARD_FAKE_READ_FILE", "WAYSHARD_FAKE_STAGE",
 		"WAYSHARD_FAKE_HANG_STAGE", "WAYSHARD_FAKE_SIGNAL_FILE", "WAYSHARD_FAKE_SUCCESS_MARKER",
 		"WAYSHARD_FAKE_PARTIAL_TRACKED", "WAYSHARD_FAKE_PARTIAL_FILE", "WAYSHARD_FAKE_TOOL_WRITE_FILE", "WAYSHARD_FAKE_REVIEW_REJECT",
+		"WAYSHARD_FAKE_TOOL_CMD",
 	} {
 		if v := os.Getenv(k); v != "" {
 			m[k] = v

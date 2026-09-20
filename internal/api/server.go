@@ -508,17 +508,17 @@ func (s *Server) cancelRun(w http.ResponseWriter, r *http.Request, _ *auth.Princ
 	if s.Sched != nil {
 		s.Sched.Cancel(id)
 	}
-	if run, err := s.Store.GetRun(r.Context(), id); err == nil && run.Status.Terminal() {
-		writeJSON(w, 200, map[string]any{"ok": true, "status": run.Status})
-		return
-	}
-	if err := s.Store.UpdateRunStatus(r.Context(), id, domain.RunCancelled, domain.BlockedUser, "cancelled by client"); err != nil {
+	changed, err := s.Store.CancelRun(r.Context(), id, "cancelled by client")
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	_ = s.Store.CancelPendingApprovalsForRun(r.Context(), id, "cancellation")
-	_ = s.Store.CancelRunningAttempts(r.Context(), id)
-	_ = s.Store.ResetStaleRunningStages(r.Context(), id)
+	if !changed {
+		if run, err := s.Store.GetRun(r.Context(), id); err == nil {
+			writeJSON(w, 200, map[string]any{"ok": true, "status": run.Status})
+			return
+		}
+	}
 	writeJSON(w, 200, map[string]any{"ok": true, "status": domain.RunCancelled})
 }
 

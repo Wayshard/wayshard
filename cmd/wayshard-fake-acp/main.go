@@ -350,6 +350,9 @@ func (a *agent) maybeHangAfterWrite(req request, sessionID string, cancelCh chan
 	if toolFile := os.Getenv("WAYSHARD_FAKE_TOOL_WRITE_FILE"); toolFile != "" {
 		a.runToolWrite(sessionID, toolFile)
 	}
+	if toolCmd := os.Getenv("WAYSHARD_FAKE_TOOL_CMD"); toolCmd != "" {
+		a.runToolRaw(sessionID, toolCmd)
+	}
 	if sig := os.Getenv("WAYSHARD_FAKE_SIGNAL_FILE"); sig != "" {
 		_ = os.WriteFile(sig, []byte(stage+"\n"), 0o644)
 		// Record our PID so a test controller can reap this hung process after
@@ -386,6 +389,27 @@ func (a *agent) runToolWrite(sessionID, rel string) {
 	}
 	_, _ = a.callClient("terminal/wait_for_exit", map[string]any{"sessionId": sessionID, "terminalId": res.TerminalID})
 	_, _ = a.callClient("terminal/release", map[string]any{"sessionId": sessionID, "terminalId": res.TerminalID})
+}
+
+// runToolRaw asks Wayshard to run a long-lived command through the ACP
+// terminal/tool callback without waiting for it to exit. Used by the crash
+// fixture to leave a backgrounded descendant that outlives the server.
+func (a *agent) runToolRaw(sessionID, script string) {
+	raw, err := a.callClient("terminal/create", map[string]any{
+		"sessionId": sessionID,
+		"command":   "/bin/sh",
+		"args":      []string{"-c", script},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fake-acp: terminal/create raw: %v\n", err)
+		return
+	}
+	var res struct {
+		TerminalID string `json:"terminalId"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	// Give the command a moment to background its writer and record its pid.
+	time.Sleep(1200 * time.Millisecond)
 }
 
 func markerExists() bool {

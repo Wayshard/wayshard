@@ -132,7 +132,8 @@ func (s *Server) storageGC(w http.ResponseWriter, r *http.Request, _ *auth.Princ
 		return
 	}
 	wsc, _ := s.Store.CleanupWorkspaces(r.Context(), 0)
-	writeJSON(w, 200, map[string]any{"objectsRemoved": n, "workspacesRemoved": wsc})
+	cps, _ := s.Store.ReclaimCheckpoints(r.Context(), 0)
+	writeJSON(w, 200, map[string]any{"objectsRemoved": n, "workspacesRemoved": wsc, "checkpointsReclaimed": cps})
 }
 
 func (s *Server) createBackup(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {

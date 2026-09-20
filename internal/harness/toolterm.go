@@ -12,6 +12,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/acp"
 	"github.com/Wayshard/wayshard/internal/id"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
+	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 )
 
@@ -24,6 +25,7 @@ type toolManager struct {
 	sessions  map[string]*toolSession
 	workspace string
 	home      string
+	token     string
 	readOnly  bool
 	backend   sandbox.Backend
 	timeout   time.Duration
@@ -44,7 +46,7 @@ type toolSession struct {
 	cancel    context.CancelFunc
 }
 
-func newToolManager(req orchestrator.StageRequest, workspace, home string, backend sandbox.Backend) *toolManager {
+func newToolManager(req orchestrator.StageRequest, workspace, home string, backend sandbox.Backend, token string) *toolManager {
 	if backend == nil {
 		backend = sandbox.DefaultBackend()
 	}
@@ -52,6 +54,7 @@ func newToolManager(req orchestrator.StageRequest, workspace, home string, backe
 		sessions:  map[string]*toolSession{},
 		workspace: workspace,
 		home:      home,
+		token:     token,
 		readOnly:  req.Stage.Kind.ReadOnly(),
 		backend:   backend,
 		timeout:   10 * time.Minute,
@@ -82,7 +85,11 @@ func (m *toolManager) Create(ctx context.Context, p acp.CreateTerminalParams) (a
 	writer := &boundedWriter{s: s}
 	cmd := exec.Command(p.Command, p.Args...)
 	cmd.Dir = dir
-	cmd.Env = sandbox.ToolEnv(m.home, m.home, nil)
+	scoped := map[string]string{}
+	if m.token != "" {
+		scoped[process.TokenEnv] = m.token
+	}
+	cmd.Env = sandbox.ToolEnv(m.home, m.home, scoped)
 	cmd.Stdout = writer
 	cmd.Stderr = writer
 	s.cmd = cmd

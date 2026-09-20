@@ -10,3 +10,6 @@ var migration002 string
 
 //go:embed migrations/003_checkpoint_hash_version.sql
 var migration003 string
+
+//go:embed migrations/004_process_owners_and_checkpoint_lifecycle.sql
+var migration004 string

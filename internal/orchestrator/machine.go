@@ -126,14 +126,11 @@ func (e *Engine) ProcessRun(ctx context.Context, runID string) error {
 }
 
 func (e *Engine) markCancelled(ctx context.Context, runID string) error {
-	// A cancellation may already have been recorded by the API path.
-	r, err := e.Store.GetRun(context.WithoutCancel(ctx), runID)
-	if err == nil && !r.Status.Terminal() {
-		_ = e.Store.UpdateRunStatus(context.WithoutCancel(ctx), runID, domain.RunCancelled, domain.BlockedUser, "cancelled")
-	}
-	_ = e.Store.CancelPendingApprovalsForRun(context.WithoutCancel(ctx), runID, "cancellation")
-	_ = e.Store.CancelRunningAttempts(context.WithoutCancel(ctx), runID)
-	_ = e.Store.ResetStaleRunningStages(context.WithoutCancel(ctx), runID)
+	// A cancellation may already have been recorded by the API path. CancelRun
+	// is transactional: run status, running attempts, running stages and
+	// pending approvals move together, so a crash cannot leave a cancelled run
+	// with a running attempt.
+	_, _ = e.Store.CancelRun(context.WithoutCancel(ctx), runID, "cancelled")
 	return nil
 }
 
