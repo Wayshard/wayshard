@@ -81,7 +81,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Required isolation never silently unrestricted | `LinuxBackend.Compile`/`Constrain` fail closed when Landlock unavailable; unsupported backends error | `TestRequiredIsolationNeverSilent`, `TestReducedSecurityStillDoesNotSilentlyUnrestrict`, `TestUnsupportedConstrainFailsClosed`, `TestProbeNeverClaimsUnrestricted` | done |
 | Harness and tool launch apply the compiled filesystem/env policy to the process and descendants | `sandbox` helper re-exec + `harness.ACPExec` + `validation.Runner` | confinement tests (host read/write denied, workspace allowed, child/grandchild confined) | done (Linux) |
 | Discovery probes use a confined environment (no ambient secrets) | `harness.probeOne` + `sandbox.HarnessEnv` | harness discovery tests | done; probe filesystem is not Landlock-confined (env only) |
-| ACP client callbacks: fs read/write scoped to run workspace; permission requests surface durable approvals | `harness.ACPExec` hooks | `TestApprovalLifecycle`; callback scoping via `withinRoot` | partial (terminal callbacks still method-not-found) |
+| ACP client callbacks: fs read/write scoped to run workspace; permission requests surface durable approvals; terminal/tool execution runs through the Tool Sandbox (NetworkNone, allowlisted env, workspace-scoped, server-owned process tree) | `harness.ACPExec` hooks, `harness.toolManager` | `TestToolRunsInSandbox`, `TestToolWritePermission`, `TestToolCancelKillsDescendants`; `TestApprovalLifecycle`; callback scoping via `withinRoot` | done (Linux process-boundary; approval deny E2E still unverified) |
 | Object GC, workspace retention, disk pressure gate | `internal/storage/gc.go`, `scheduler.tick` | `gc_test.go`; low-disk gate blocks write-heavy runs with `BlockedStorage` | done |
 | Backup excludes repos; optional secrets | `internal/backup` | `backup_test.go` | done |
 | Startup reconciliation of interrupted attempts/stages and incomplete publication journals; interrupted write attempts restore from a pre-attempt workspace checkpoint | `internal/recovery`, `orchestrator.checkpointBeforeWrite`, `workspace.RestoreSnapshot` | `TestRecoveryRestoresInterruptedWriteCheckpoint`, `TestRecoveryBlocksOnCorruptCheckpoint`, `TestWriteAttemptCreatesCheckpoint` | done (Linux); no orphan-process sweep; publication crash injection still not black-box tested |
@@ -153,7 +153,7 @@ Still partial or unverified after this pass:
 
 - Real installed ACP harness interoperability (no supported harness was installed; only the deterministic fake was exercised).
 - macOS/Windows runtime sandbox enforcement (code present; not executed natively here).
-- ACP terminal callbacks remain method-not-found; only fs read/write and permission callbacks are wired.
+- ACP terminal/tool callbacks are wired through the Tool Sandbox (Linux process-boundary verified); approval DENY end-to-end, publication crash proof, discovery ProbePolicy, and process-restart checkpoint recovery remain outstanding.
 - Context assembly is still not injected into orchestration stages; planner/reviewer receive only the task objective.
 - Web/Desktop/Android runtime parity and client completeness (see the Clients table).
 - Live Jev, model metadata enrichment, event retention/pruning, and publication-crash injection tests.

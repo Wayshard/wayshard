@@ -86,6 +86,17 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		ReadTextFile:      e.readHook(req),
 		WriteTextFile:     e.writeHook(req),
 	}
+	var sbe sandbox.Backend
+	if e.Sandbox != nil {
+		sbe = e.Sandbox.Backend
+	}
+	tm := newToolManager(req, cwd, home, sbe)
+	hooks.CreateTerminal = tm.Create
+	hooks.TerminalOutput = tm.Output
+	hooks.ReleaseTerminal = tm.Release
+	hooks.WaitTerminalExit = tm.WaitExit
+	hooks.KillTerminal = tm.Kill
+	defer tm.CloseAll()
 	drv, err := acp.Launch(ctx, spec, acp.DefaultClientConfig(), hooks, acp.Limits{})
 	if err != nil {
 		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
