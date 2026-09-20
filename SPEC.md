@@ -258,6 +258,8 @@ Discovery may inspect daemon PATH, safely obtainable login-shell paths, well-kno
 
 A discovered executable is not routable until it passes version/protocol probing and ACP initialization.
 
+Discovery is untrusted execution: version, ACP-initialize, and login-shell PATH probes run under a dedicated ProbePolicy (NetworkNone, synthetic HOME/TEMP, allowlisted environment, read-only system and resolved-executable roots, bounded output, descendant cleanup) with no project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, or D-Bus access. If the platform cannot enforce the policy, the probe is reported unavailable rather than run unrestricted. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
+
 Stable ACP v1 is the baseline protocol. Protocol mechanics are isolated behind an ACP driver; harness-specific quirks belong in harness adapters. Unknown but compliant agents use a Generic ACP adapter.
 
 Optional features such as native session loading, dynamic model selection, extensions, and subagents are never assumed. Native resume is an optimization only; Wayshard reconstructs a new session from durable context/artifacts/workspace when necessary.
@@ -317,6 +319,8 @@ The user may continue using the source working tree, Git CLI, IDEs, or other too
 
 A branch change between task intake and completion prevents silent automatic integration onto the newly checked-out branch. The user can explicitly choose an appropriate target or leave the result pending.
 
+Each write-stage attempt receives a durable pre-attempt checkpoint of the run workspace, identified by a canonical v3 tree digest and associated with that exact attempt. Recovery restores through verify-then-use private staging and an atomic workspace swap, never by re-reading the checkpoint after verification and never from "latest checkpoint for the stage/run". Checkpoint material for a non-terminal run is pinned; terminal-run material becomes reclaimable after retention and is marked reclaimed, which recovery refuses to restore. Per-attempt synthetic HOME/TEMP prevents a stale process from one attempt from mutating resources reused by another.
+
 Git and filesystem workspace backends are both required so non-Git/empty projects remain supported.
 
 ## 15. Integration
@@ -325,7 +329,9 @@ Integration is server-controlled and isolated from harnesses.
 
 Wayshard prepares the merge/application in a temporary integration workspace using the run starting snapshot as merge base, run final state as one side, and current source state as the other.
 
-Before publication it revalidates current source state. Publication is journaled with expected before/after hashes. After publication, Wayshard verifies resulting hashes and marks the integration published.
+Before publication it revalidates current source state. Publication is journaled with expected before/after hashes, operation, mode, and symlink target. After publication, Wayshard verifies resulting hashes and marks the integration published.
+
+Startup reconciliation of a durable journal classifies every target against the actual source: targets already at the intended after state are recognized, targets still at the before state may have their safe remainder resumed, and a target matching neither state blocks the integration without overwriting the user's file. A journal whose targets all match the intended state is finalized without destructive rewrite.
 
 Wayshard does not promise physically atomic multi-file filesystem publication. It does promise to avoid silent overwrite of divergent source and to detect/reconcile partial publication after interruption.
 
@@ -376,8 +382,11 @@ Sandboxing is layered:
 
 - **Harness Sandbox** constrains the ACP harness itself while permitting its required provider/config access.
 - **Tool Sandbox** provides stricter isolation for model-generated commands where the harness/integration supports native or adapter-mediated separation.
+- **ProbePolicy** constrains harness discovery/version/ACP-initialize probes, which are untrusted execution and never run unrestricted.
 
 Effective tool-execution isolation may be `native`, `adapter_bridge`, or `outer_only` and is part of route capability/health.
+
+ACP terminal/tool callbacks are interposed by the server; a harness never executes model-generated commands directly, and each stage attempt owns a per-attempt process tree that startup reconciliation can terminate after a crash without relying on reused PIDs.
 
 A common SandboxPolicy describes filesystem roots, environment, network policy, process/IPC restrictions, resource limits, and scoped secret leases. Platform backends compile that policy into suitable Linux, macOS, and Windows mechanisms.
 
@@ -421,9 +430,9 @@ Write stages receive a pre-attempt checkpoint. Interrupted write attempts remain
 
 Read-only stages can generally restart against unchanged durable inputs. Validation can rerun against the same checkpoint.
 
-Integration uses a publication journal and source hashes so startup recovery can distinguish complete, incomplete, or externally diverged publication.
+Integration uses a publication journal and source hashes so startup recovery can distinguish complete, incomplete, or externally diverged publication, resume only the safe remainder, and block on unexpected source state without overwriting it.
 
-Server startup reconciles unfinished runs, workspaces, integrations, and orphan processes before normal scheduling resumes.
+Server startup reconciles unfinished runs, workspaces, integrations, publication journals, and orphan processes before normal scheduling resumes. It first terminates stale server-owned process trees (identified by ownership token, not by PID), then restores interrupted write attempts, then reconciles publication journals, then reclaims checkpoint material for terminal runs past retention. A stale tree that cannot be terminated blocks its run rather than being raced. Harness discovery/probing is sandboxed and cannot access recovery state; the scheduler never starts before recovery completes.
 
 Critical database/object corruption enters safe/recovery mode rather than continuing orchestration.
 

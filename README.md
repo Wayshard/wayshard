@@ -87,7 +87,7 @@ Wayshard uses coding harnesses already installed and configured for the OS user 
 
 Examples may include OpenCode, Codex through an appropriate user-installed ACP bridge, and other ACP-compatible harnesses.
 
-**Wayshard never installs harnesses or ACP bridges for you.** It discovers available executables, probes ACP compatibility/capabilities, and reports whether a harness is ready, unauthenticated, degraded, incompatible, or unavailable.
+**Wayshard never installs harnesses or ACP bridges for you.** It discovers available executables, probes ACP compatibility/capabilities, and reports whether a harness is ready, unauthenticated, degraded, incompatible, or unavailable. Discovery probes are untrusted execution and run isolated: no project, Wayshard-data, secret, or network access.
 
 Provider authentication normally remains owned by the harness. Wayshard does not scrape OpenRouter/OpenAI/Anthropic/etc. credentials out of harness configuration.
 
@@ -106,6 +106,8 @@ Agents never experiment directly in the user's live source working tree.
 Each actionable run starts from an immutable snapshot that includes meaningful pre-existing dirty state. The agent works in an isolated run workspace. Its delta is calculated from that snapshot, so the user's existing modifications are never mislabeled as agent output.
 
 The user can keep editing, committing, rebasing, or using another IDE/Git client while Wayshard works. Integration later performs a conflict-aware three-way reconciliation against the current source state.
+
+If the server process dies mid-run, the next startup terminates any surviving run-owned process tree, verifies and restores the pre-attempt checkpoint, and reconciles any interrupted publication against the real source — recognizing already-published files, resuming only the safe remainder, and blocking (never overwriting) if the source changed underneath it.
 
 ## Validation and review
 

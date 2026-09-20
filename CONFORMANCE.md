@@ -163,4 +163,6 @@ Still partial or unverified after this pass:
 - Context assembly is injected into orchestration stages (P1); stage bundles and their durable manifest are verified.
 - Web/Desktop/Android runtime parity and client completeness (see the Clients table).
 - Live Jev, model metadata enrichment, and event retention/pruning.
-- Discovery `--version` probes are env-filtered but not filesystem-confined.
+- Discovery version/ACP-initialize probes are confined by ProbePolicy; the login-shell PATH probe additionally reads the user's home and `/etc` to source shell startup files (bounded least-privilege exception, never inherits ambient secrets, output used only as search directories).
+- Discovery/probing runs during server open before startup recovery; it is ProbePolicy-sandboxed and cannot read or mutate recovery state, and the scheduler still starts only after recovery.
+- Discovery probes are not registered with the per-attempt ownership-token reconciliation; timeout/cancellation kills the probe tree, but a session-detached probe grandchild could outlive a server SIGKILL with only ProbePolicy-bounded authority.

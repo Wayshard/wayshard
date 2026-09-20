@@ -50,6 +50,7 @@ internal/
   acp/
   validation/
   sandbox/
+  process/
   secrets/
   auth/
   events/
@@ -99,6 +100,7 @@ attachments
 workspaces
 workspace_snapshots
 workspace_checkpoints
+process_owners
 run_deltas
 integrations
 approvals
@@ -327,6 +329,8 @@ Discovery sources may include daemon PATH, safely obtained login-shell PATH, wel
 
 Executable name alone is insufficient. A usable installation must pass launch/version and ACP initialization/capability probing.
 
+Version and ACP-initialize probes execute under a dedicated `ProbePolicy`, not the writable HarnessPolicy: NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system roots plus the resolved executable directory, bounded output, and descendant cleanup. Probes are denied project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, and D-Bus access; a platform that cannot enforce the policy reports the probe unavailable rather than running unrestricted. The login-shell PATH probe uses the same policy with additional read-only access to the user's home and `/etc` so shell startup files can be sourced; it never inherits ambient secrets and its output is used only as search directories.
+
 Filesystem state is authoritative; discovered state is cached in SQLite for UI/history.
 
 Wayshard never installs a harness or bridge.
@@ -359,6 +363,10 @@ Operational compatibility may be classified internally as incompatible, core, ro
 A simple default is one ACP process per logical harness session. Process pooling/multiplexing may be added as an optimization, not a correctness assumption.
 
 ACP stdout is protocol-only; stderr is diagnostic. Frame size, pending request count, and buffer limits prevent unbounded memory use.
+
+ACP terminal/tool callbacks (`terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release`) are interposed by Wayshard: a harness never executes model-generated commands directly. The Tool manager runs each command in the Tool Sandbox (NetworkNone, run-workspace scoped, synthetic HOME/TEMP, allowlisted environment) and owns the resulting process tree.
+
+Each stage attempt also has a per-attempt ownership token inherited by its harness and Tool descendants. Only the token hash is persisted, before launch, so startup reconciliation can identify and terminate surviving descendants after a crash without relying on reused PIDs or process-group ids. Synthetic HOME/TEMP is per attempt so a stale process from one attempt cannot mutate resources reused by another.
 
 Unknown extension metadata/methods are tolerated according to ACP semantics. Known useful extensions may be adapter-specific but are not required by core orchestration.
 
@@ -479,6 +487,8 @@ At actionable intake, capture exact meaningful source state including branch/HEA
 
 Materialize HEAD/base plus user dirty baseline into a separate run workspace. Agents never write directly to the source workspace.
 
+Each write-stage attempt receives a durable pre-attempt checkpoint: a materialized filesystem tree with a canonical, length-prefixed v3 digest over path, entry type, executable bit, content, symlink target, and directory membership. Recovery uses verify-then-use staging: the checkpoint is copied into private trusted staging, the staged tree is hashed and compared against the persisted digest, and only then is it materialized into the run workspace through an atomic sibling-temp swap. Checkpoint lookup is scoped to the exact interrupted attempt, never to "latest checkpoint for the stage/run". Checkpoint material for a non-terminal run is pinned; terminal-run material becomes reclaimable after retention and is marked `material_state=reclaimed`, which recovery refuses.
+
 Internal checkpoints record known-good stage boundaries (S0, S1, S2, ...), potentially using hidden Git objects/refs rather than user-visible commits.
 
 ### 21.3 User activity
@@ -497,11 +507,9 @@ run = validated/reviewed run final state
 
 Prepare in a temporary integration workspace. If conflicts exist, source remains untouched and run becomes integration blocked.
 
-Before publication, verify source has not changed since preparation. Publication writes are journaled with file-level before/after hashes and verified afterward.
+Before publication, verify source has not changed since preparation. Publication writes are journaled with file-level before/after hashes, op, mode and symlink target, and verified afterward. Publication writes resolve their target through a containment check so a symlinked parent cannot redirect a write outside the source tree.
 
-Crash recovery uses the journal to classify completed, incomplete, or externally diverged publication.
-
-Do not claim universal physical atomicity for multi-file publication.
+Startup reconciles a durable journal by classifying every target against the actual source: targets already at the intended after state are recognized, targets still at the before state may have their safe remainder resumed, and a target matching neither state blocks the integration without overwriting the user's file. A journal whose targets all match the intended state is finalized without destructive rewrite. Reconciliation finalizes the run/integration or marks it integration-blocked, emits `publication.reconciled`, and never claims universal physical atomicity for multi-file publication.
 
 ## 23. File editing concurrency
 
@@ -602,6 +610,10 @@ The architecture intentionally avoids requiring Docker.
 
 Approved external files normally become immutable read-only snapshots inside the run workspace/object store. Direct external writes should be rare server-controlled publication operations.
 
+### 27.6 Discovery probe sandbox
+
+Harness discovery is itself untrusted execution and does not reuse the writable HarnessPolicy. Version, ACP-initialize and login-shell PATH probes run under a distinct `ProbePolicy`: NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system roots plus the resolved executable directory, bounded output, and descendant cleanup. Probes have no project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display or D-Bus access. The policy is Required: if the platform cannot enforce it, the probe is reported unavailable rather than run unrestricted. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
+
 ## 28. Network separation
 
 Harness control-plane network (for example OpenCode -> provider) is distinct from tool-command network (for example `npm` -> registry).
@@ -614,25 +626,31 @@ Every write-stage attempt starts from a durable pre-attempt checkpoint. Interrup
 
 Default recovery of an interrupted write attempt:
 
-1. preserve enough interrupted state for diagnostics;
-2. restore known-good pre-attempt checkpoint;
-3. create a new StageAttempt.
+1. terminate any surviving process tree owned by the attempt (ownership token), before touching the workspace;
+2. preserve enough interrupted state for diagnostics;
+3. restore the verified pre-attempt checkpoint (attempt-scoped, verify-then-use staging);
+4. create a new StageAttempt.
 
 Read-only stages generally restart. Validation reruns. Native harness session resume is used only when explicitly supported and safe.
 
 Server startup RecoveryManager:
 
-1. open/verify storage;
-2. reconcile active runs/stages;
-3. reconcile workspaces/checkpoints;
-4. reconcile integrations/publication journals;
-5. clean identifiable orphan run processes;
-6. restore runnable scheduler queue;
-7. accept normal work.
+1. open/verify storage and apply migrations;
+2. reconcile stale server-owned process trees by ownership token and wait for them to terminate; a live run whose tree cannot be terminated is blocked with a recovery reason and is never restored against;
+3. repair terminal-run consistency (a cancelled run's running attempts become cancelled; a terminal run's leftover pending approvals are invalidated);
+4. remove unreferenced checkpoint debris and restore-staging leftovers;
+5. restore interrupted write attempts from their verified pre-attempt checkpoint;
+6. reconcile publication journals (recognize already-published targets, resume the safe remainder, or block on unexpected source state) and finalize run/integration state;
+7. clean disposable validation workspaces;
+8. reclaim checkpoint material for terminal runs past retention.
+
+The scheduler starts only after this recovery completes. Harness discovery/probing runs during server open and is sandboxed by ProbePolicy, so it cannot read or mutate recovery state; no run is scheduled before recovery finishes.
 
 ## 30. Process supervision
 
 Launched harness/tool processes are associated with run/stage/attempt identity and an OS process-group/job abstraction so cancellation and crash cleanup target descendants, not only a parent PID.
+
+Each attempt also carries a per-attempt ownership token inherited by its harness and Tool descendants. The token hash is persisted before launch. Direct children are additionally given a parent-death signal so a server crash terminates them, but that does not cover backgrounded or session-detached grandchildren; startup reconciliation therefore scans for surviving processes whose environment carries the attempt's token, terminates them (and their proven-owned process group), and only then allows workspace restore. Ownership is matched by token hash, not by PID, so a reused PID or process-group id cannot cause an unrelated process to be killed. A tree that cannot be terminated blocks its run rather than being raced.
 
 Graceful shutdown stops new work, drains/checkpoints active runs where practical, marks interrupted attempts accurately, and then terminates managed processes.
 

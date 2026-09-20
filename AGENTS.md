@@ -122,7 +122,7 @@ When a harness lacks a native structured submission mechanism, use the universal
 
 ## Harness and routing rules
 
-- Discover installed harness executables; probe actual ACP behavior before marking them routable.
+- Discover installed harness executables; probe actual ACP behavior before marking them routable, always under the discovery ProbePolicy.
 - Capability negotiation is authoritative. Never assume optional ACP features from a harness name.
 - Separate protocol driver code from known-harness adapter code.
 - Generic ACP harnesses must remain usable when they satisfy the minimum core contract.
@@ -137,6 +137,9 @@ When a harness lacks a native structured submission mechanism, use the universal
 - Harness-owned credentials stay in the harness trust domain.
 - Separate outer Harness Sandbox and stricter Tool Sandbox where the integration supports it.
 - Known adapters may provide native or adapter-mediated tool isolation; generic harnesses may be outer-only. Report effective isolation honestly.
+- ACP terminal/tool callbacks are interposed by the server; a harness never executes model-generated commands directly.
+- Harness discovery, version, ACP-initialize, and login-shell PATH probes are untrusted execution and run under a dedicated ProbePolicy. If the platform cannot enforce it, report the probe unavailable rather than run unrestricted.
+- Startup reconciliation terminates stale server-owned process trees by ownership token before restoring any workspace; never match or kill by PID alone.
 - External file approvals should normally import immutable read-only inputs rather than widen host filesystem access.
 - Network for model/provider control traffic is distinct from tool-command network access.
 - Tool network is denied or brokered according to policy; server-owned credentials must not leak through network or process environment.
@@ -172,6 +175,11 @@ Every change must maintain tests appropriate to the affected layer. The intended
 - Go unit tests for routing, policy, context packing, permission decisions, state machines, knowledge discovery, and artifact validation.
 - SQLite/storage integration tests including migration behavior and atomic state/event transactions.
 - Workspace/Git integration tests including dirty baselines, branch movement, concurrent source edits, conflict handling, rollback, and interrupted publication recovery.
+- Checkpoint integrity and lifecycle tests: canonical v3 tree hash, verify-then-use restore staging, attempt-scoped lineage, component-based path ownership, retention/pinning, debris cleanup, and fail-closed corruption/version/reclaimed handling.
+- Real process-boundary recovery tests that launch a compiled server as an OS subprocess, SIGKILL it, and verify a different server process recovers the same durable state for Executor, Repair, orphan reconciliation, and publication; record distinct PIDs.
+- Publication crash-point tests: prepared-only, partial add/modify/delete, all-written/pre-final, user-edit conflict on processed and unprocessed targets, path/symlink escape, identity mismatch, and idempotent reconcile.
+- Discovery probe sandbox tests: a malicious version fixture and ACP-initialize fixture proving host/project/Wayshard-data/secret/network denial, timeout descendant cleanup, and bounded output.
+- Approval approve, deny, cancel-while-pending, and unauthenticated-resolution tests through the real ACP permission path, asserting a denied protected operation never executes.
 - Deterministic fake ACP harnesses covering successful runs, permissions, crashes, cancellation failures, malformed frames, invalid stage output, capability violations, auth-required states, and model/config disappearance.
 - Real harness compatibility tests only in deliberately provisioned environments; normal CI must not install those harnesses.
 - Client tests for API state, reconnect/resume, multi-device transitions, run timeline, approvals, and change provenance.

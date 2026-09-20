@@ -58,6 +58,14 @@ Do not make the product depend on harness subagents. Wayshard's own planner/exec
 
 Native session resume is useful but not a correctness dependency. Durable artifacts + workspace + context reconstruction must be enough to continue.
 
+ACP terminal/tool callbacks are interposed by Wayshard, not executed by the harness: model-generated commands run in the Tool Sandbox under server-owned process trees. Do not let an approval, a route, or a harness name imply a bypass of OS containment.
+
+## Discovery probe isolation
+
+Discovery executes installed binaries before they are trusted, so probes are sandboxed with a dedicated ProbePolicy rather than the writable HarnessPolicy. Probes get NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system and resolved-executable roots, bounded output and descendant cleanup, and no project/SourceWorkspace/Wayshard-runtime/SSH-agent/display access. Required isolation means an unenforceable platform reports the probe unavailable instead of running unrestricted.
+
+A probe cannot read real harness config, so auth state that cannot be determined is reported honestly (not assumed authenticated). The login-shell PATH probe necessarily reads the user's home and `/etc` to source shell startup files; that is a bounded exception, it never inherits ambient secrets, and its output is used only as search directories.
+
 ## OpenCode 2 client heritage
 
 Wayshard's Web/Desktop/Android graphical client foundation and CLI/TUI foundation may begin from a one-time import of selected MIT-licensed OpenCode 2 source.
@@ -228,6 +236,12 @@ A crash may interrupt work but must not corrupt source or erase task history.
 
 Write stages have pre-attempt checkpoints. Interrupted attempts stay visible; retry creates another attempt. Integration is journaled. Startup reconciliation occurs before normal scheduling.
 
+Checkpoint integrity is a cryptographic property, not a path property: the v3 tree digest is canonical and length-prefixed, and restore copies the checkpoint into private staging, hashes the staged tree, compares it to the persisted digest, and materializes only that verified staged state through an atomic swap. Checkpoint lookup is scoped to the exact interrupted attempt; there is no "latest checkpoint" shortcut. Material for a non-terminal run is pinned; terminal-run material is reclaimed after retention and marked reclaimed, which recovery refuses.
+
+A crash can outlive a direct child: parent-death signals cover only the immediate process, so each attempt carries a per-attempt ownership token (hash persisted before launch) inherited by harness and Tool descendants. Startup reconciliation terminates surviving owned trees before touching the workspace and never matches by PID alone. A tree that cannot be terminated blocks its run rather than racing it. Synthetic HOME/TEMP is per attempt.
+
+Publication recovery is driven by the actual source state, not by a trusted stale journal status: already-published targets are recognized, only the safe remainder is resumed, and a target matching neither before nor after state blocks the integration without overwriting user data.
+
 Ephemeral token/terminal stream loss is acceptable; durable state/artifacts/workspaces are not.
 
 ## CLI philosophy
@@ -275,3 +289,8 @@ The complete intended product is specified up front. Implementation should proce
 - OpenCode 2's current desktop wrapper is Electron; Wayshard Desktop is Tauri as specified. The imported graphical app is the shared Web/Desktop/Android UI foundation.
 - Default HTTP listen address is `127.0.0.1:7420`. Pairing invitations may advertise a different URL.
 - Fake ACP harness binary is `wayshard-fake-acp` (`WAYSHARD_FAKE_SCENARIO`, `WAYSHARD_FAKE_STAGE`).
+- SQLite schema version 4. Migration 004 adds `process_owners` (per-attempt process-tree ownership: run/stage/attempt, token hash, pgid, state) and `workspace_checkpoints.material_state` (`present`/`reclaimed`).
+- Process ownership token env var is `WAYSHARD_OWNER_TOKEN`; only its SHA-256 hash is stored. `internal/process` provides token creation and Linux token-hash reconciliation via procfs; non-Linux platforms report ownership unsupported and fail closed for a live run.
+- Checkpoint trees are materialized filesystem trees under `runtime/workspaces/<runID>/checkpoints/<stageID>/<ordinal>`; restore staging is `runtime/restore-staging`; publication journals are `runtime/journals/<runID>/<integrationID>/`.
+- Notable durable events: `checkpoint.created`/`checkpoint.restored`/`checkpoint.reclaimed`, `execution.orphan_reconciled`, `recovery.blocked`, `publication.reconciled`, `approval.requested`/`approval.resolved`, `notification.created`.
+- `integration.Request.CrashAfter` and `integration.Request.PublishStep` are internal test seams only; the production `IntegrateAdapter` never sets them and no HTTP/JSON path constructs an `integration.Request`.

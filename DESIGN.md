@@ -201,6 +201,8 @@ An approval should communicate:
 
 Examples include tool network access, imported external inputs, project secret use, Git push, or other policy boundaries.
 
+A denial is a real outcome, not an infrastructure failure: the protected operation must not execute and must not be automatically retried. Only the first resolution of an approval takes effect. Cancelling a run, or losing the server while an approval is pending, invalidates the approval rather than silently approving it.
+
 Reading a notification does not resolve the approval. Resolution changes the underlying attention item.
 
 ## 13. Validation and review presentation
@@ -382,7 +384,7 @@ Do not create a generic provider-credentials experience that suggests Wayshard o
 
 ### 19.1 Harnesses
 
-Show discovered executable path, version, ACP compatibility/capabilities, authentication state, model/options visibility, health, and diagnostics. Support rescan and explicitly configured custom ACP executable paths.
+Show discovered executable path, version, ACP compatibility/capabilities, authentication state, model/options visibility, health, and diagnostics. Support rescan and explicitly configured custom ACP executable paths. Discovery probes run in isolation and cannot read a harness's real configuration, so an authentication state that cannot be determined is shown as unknown rather than implied healthy or authenticated.
 
 ### 19.2 Models
 
