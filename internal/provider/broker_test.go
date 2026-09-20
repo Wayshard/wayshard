@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,9 +41,22 @@ func startEcho(t *testing.T) string {
 	return ln.Addr().String()
 }
 
+// shortDir returns a short temporary directory. Filesystem Unix socket paths are
+// limited (~104 bytes on macOS, ~108 on Linux), and t.TempDir embeds the full
+// test name, which can exceed that.
+func shortDir(t *testing.T) string {
+	t.Helper()
+	d, err := os.MkdirTemp("", "wsb-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(d) })
+	return d
+}
+
 func startTestBroker(t *testing.T, resolver Resolver, dialer Dialer) *Broker {
 	t.Helper()
-	dir := t.TempDir()
+	dir := shortDir(t)
 	b, err := StartBroker(
 		filepath.Join(dir, "s"), "test-bearer",
 		Policy{Allowed: []Destination{{Host: "provider.test", Port: 443}}},

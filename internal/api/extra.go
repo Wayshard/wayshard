@@ -11,7 +11,6 @@ import (
 	"github.com/Wayshard/wayshard/internal/ctxengine"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/knowledge"
-	"github.com/Wayshard/wayshard/internal/provider"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
@@ -163,7 +162,7 @@ func (s *Server) sandboxInfo(w http.ResponseWriter, r *http.Request, _ *auth.Pri
 		"features":        report.Features,
 		"missing":         report.Missing,
 		"detail":          report.Detail,
-		"providerNetwork": provider.Detect(),
+		"providerNetwork": s.ProviderNet,
 	})
 }
 

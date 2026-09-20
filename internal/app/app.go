@@ -136,16 +136,17 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 	}
 	sched := scheduler.New(st, orch, cfg.Log)
 	apiSrv := &api.Server{
-		Store:     st,
-		Auth:      authSvc,
-		Hub:       hub,
-		Sched:     sched,
-		Vault:     vault,
-		PTY:       ptym,
-		Log:       cfg.Log,
-		Listen:    cfg.Listen,
-		Advertise: cfg.Advertise,
-		DataDir:   cfg.DataDir,
+		Store:       st,
+		Auth:        authSvc,
+		Hub:         hub,
+		Sched:       sched,
+		Vault:       vault,
+		PTY:         ptym,
+		Log:         cfg.Log,
+		Listen:      cfg.Listen,
+		Advertise:   cfg.Advertise,
+		DataDir:     cfg.DataDir,
+		ProviderNet: providerCap,
 	}
 	a := &App{Store: st, Vault: vault, Auth: authSvc, Hub: hub, Engine: orch, Sched: sched, API: apiSrv, Log: cfg.Log}
 	// Startup recovery is a hard gate: the scheduler must never dispatch work

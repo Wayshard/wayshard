@@ -28,6 +28,13 @@ func TestMain(m *testing.M) {
 	if os.Getenv("GO_PROVIDER_HARNESS") == "1" {
 		os.Exit(providerHarnessHelper())
 	}
+	if len(os.Args) >= 2 && os.Args[1] == ShimArg {
+		code := 2
+		if len(os.Args) >= 3 {
+			code = ShimMain(os.Args[2])
+		}
+		os.Exit(code)
+	}
 	if os.Getenv("GO_PROVIDER_SHIM") == "1" {
 		os.Exit(ShimMain(os.Getenv("GO_PROVIDER_SHIM_CFG")))
 	}
@@ -176,7 +183,7 @@ func TestProviderNetnsEnforcement(t *testing.T) {
 	_, echoPort, _ := net.SplitHostPort(echo)
 
 	resolver := &fakeResolver{addrs: map[string][]netip.Addr{"provider.test": {netip.MustParseAddr("93.184.216.34")}}}
-	work := t.TempDir()
+	work := shortDir(t)
 	bearer, err := RandomBearer()
 	if err != nil {
 		t.Fatal(err)

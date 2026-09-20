@@ -18,7 +18,7 @@ func TestBrokerCrossRunIsolation(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	bA, err := StartBroker(
-		filepath.Join(t.TempDir(), "s"), "bearer-A",
+		filepath.Join(shortDir(t), "s"), "bearer-A",
 		Policy{Allowed: []Destination{{Host: "a.test", Port: 443}}},
 		&fakeResolver{addrs: map[string][]netip.Addr{"a.test": {pub}}}, mapDialer{target: echo}, log,
 	)
@@ -27,7 +27,7 @@ func TestBrokerCrossRunIsolation(t *testing.T) {
 	}
 	defer bA.Close()
 	bB, err := StartBroker(
-		filepath.Join(t.TempDir(), "s"), "bearer-B",
+		filepath.Join(shortDir(t), "s"), "bearer-B",
 		Policy{Allowed: []Destination{{Host: "b.test", Port: 443}}},
 		&fakeResolver{addrs: map[string][]netip.Addr{"b.test": {pub}}}, mapDialer{target: echo}, log,
 	)

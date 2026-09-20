@@ -42,7 +42,10 @@ type Server struct {
 	Listen    string
 	Advertise string
 	DataDir   string
-	http      *http.Server
+	// ProviderNet is the runtime-probed provider networking capability,
+	// resolved once at startup for diagnostics.
+	ProviderNet domain.ProviderNetworkCapability
+	http        *http.Server
 }
 
 func (s *Server) Handler() http.Handler {
