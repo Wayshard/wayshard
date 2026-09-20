@@ -36,11 +36,14 @@ func runHelper(args []string) bool {
 		_ = os.MkdirAll(p.SyntheticTemp, 0o700)
 	}
 	if p.ProcIsolation {
-		if err := setupProcIsolation(); err != nil {
-			// Best-effort: if a scoped procfs cannot be mounted, do not grant
-			// the host /proc. Existing (no-/proc) security is preserved.
+		if !p.ProcNamespaced {
+			// The backend did not create namespaces, so /proc cannot be scoped;
+			// never grant the host procfs.
 			p.ReadOnlyRoots = dropRoot(p.ReadOnlyRoots, "/proc")
-			fmt.Fprintln(os.Stderr, "wayshard-sandbox: scoped procfs unavailable:", err)
+		} else if err := setupProcIsolation(); err != nil {
+			// Best-effort: if a scoped procfs cannot be mounted, do not grant the
+			// host /proc. Existing (no-/proc) security is preserved.
+			p.ReadOnlyRoots = dropRoot(p.ReadOnlyRoots, "/proc")
 		}
 	}
 	if err := applyLandlock(p); err != nil {

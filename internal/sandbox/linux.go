@@ -140,6 +140,7 @@ func (b LinuxBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 			cmd.SysProcAttr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
 			cmd.SysProcAttr.GidMappingsEnableSetgroups = false
 		}
+		p.ProcNamespaced = true
 	}
 
 	helper := os.Getenv("WAYSHARD_SANDBOX_HELPER")

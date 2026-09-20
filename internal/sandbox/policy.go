@@ -44,6 +44,10 @@ type Policy struct {
 	// never exposes host processes. Used for harnesses/probes whose runtime
 	// (for example Bun) requires /proc. Never set for tool/validation policies.
 	ProcIsolation bool
+	// ProcNamespaced is set by the backend when the clone flags for
+	// ProcIsolation were actually applied, so the helper only mounts a procfs
+	// inside its own namespaces.
+	ProcNamespaced bool
 }
 
 type Backend interface {
