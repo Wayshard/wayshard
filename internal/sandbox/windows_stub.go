@@ -10,7 +10,7 @@ import (
 
 func (WindowsBackend) Compile(p Policy) (Compiled, error) {
 	c := Compiled{Backend: "windows", Unavailable: []string{"job_object", "appcontainer"}}
-	if err := compileCommon(p); err != nil {
+	if err := compileCommon(p, false); err != nil {
 		return c, err
 	}
 	return c, fmt.Errorf("%w: windows backend not compiled on this OS", ErrRequiredIsolation)

@@ -218,6 +218,35 @@ const (
 	NetworkProvider NetworkCapability = "provider"
 )
 
+// ProviderTransport is how a harness can be given provider connectivity. Only an
+// explicitly compatible transport may be used for a provider route; an unknown
+// transport keeps the route unavailable rather than assuming proxy support.
+type ProviderTransport string
+
+const (
+	TransportUnknown   ProviderTransport = "unknown"
+	TransportHTTPProxy ProviderTransport = "http_proxy"
+	TransportDirect    ProviderTransport = "direct"
+)
+
+// ProviderNetworkCapability reports whether the platform can enforce
+// provider-only networking and, if not, why. It is engine capability, distinct
+// from user permission and from harness transport compatibility.
+type ProviderNetworkCapability struct {
+	Available bool   `json:"available"`
+	Mode      string `json:"mode,omitempty"`
+	Platform  string `json:"platform,omitempty"`
+	Transport string `json:"transport,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ProviderDestination is one authorized provider endpoint (host plus explicit
+// port). Destination policy is separate from permission and capability.
+type ProviderDestination struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
 // NotificationKind is derived from durable domain events.
 type NotificationKind string
 

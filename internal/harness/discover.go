@@ -3,7 +3,6 @@ package harness
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/acp"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/id"
+	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 )
 
@@ -52,6 +52,10 @@ type DiscoverOptions struct {
 	Probe            bool
 	ProbeTimeout     time.Duration
 	LoginPATHTimeout time.Duration
+	// Owners, when non-nil, gives every probe process tree a durable ownership
+	// record so startup reconciliation can terminate surviving descendants
+	// after a server crash.
+	Owners ProbeOwnerSink
 }
 
 func DefaultDiscoverOptions() DiscoverOptions {
@@ -79,19 +83,18 @@ func (o DiscoverOptions) withDefaults() DiscoverOptions {
 // or otherwise bootstraps a missing harness.
 func Discover(ctx context.Context, opts DiscoverOptions) ([]Installation, error) {
 	opts = opts.withDefaults()
+	home := opts.Home
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
 	searchPATH := opts.PATH
 	if searchPATH == "" {
 		searchPATH = os.Getenv("PATH")
 	}
 	if opts.IncludeLoginPATH {
-		if lp, err := loginShellPATH(ctx, opts.LoginPATHTimeout); err == nil && lp != "" {
+		if lp, err := loginShellPATH(ctx, opts.LoginPATHTimeout, home, opts.Owners); err == nil && lp != "" {
 			searchPATH = mergePATH(searchPATH, lp)
 		}
-	}
-
-	home := opts.Home
-	if home == "" {
-		home, _ = os.UserHomeDir()
 	}
 
 	var searchDirs []string
@@ -134,7 +137,7 @@ func Discover(ctx context.Context, opts DiscoverOptions) ([]Installation, error)
 			seen[key] = struct{}{}
 			inst := baseInstallation(def, exe)
 			if opts.Probe {
-				probeOne(ctx, &inst, opts.ProbeTimeout)
+				probeOne(ctx, &inst, opts.ProbeTimeout, opts.Owners)
 			} else {
 				inst.Health = domain.HarnessUnavailable
 				inst.Notes = append(inst.Notes, "not probed")
@@ -181,7 +184,7 @@ func Discover(ctx context.Context, opts DiscoverOptions) ([]Installation, error)
 		def := Definition{ID: "custom", DisplayName: filepath.Base(p), Adapter: AdapterFor("", p).ID()}
 		inst := baseInstallation(def, p)
 		if opts.Probe {
-			probeOne(ctx, &inst, opts.ProbeTimeout)
+			probeOne(ctx, &inst, opts.ProbeTimeout, opts.Owners)
 		}
 		out = append(out, inst)
 	}
@@ -203,7 +206,7 @@ func baseInstallation(def Definition, exe string) Installation {
 	}
 }
 
-func probeOne(ctx context.Context, inst *Installation, timeout time.Duration) {
+func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, owners ProbeOwnerSink) {
 	ad := AdapterFor(inst.Adapter, inst.Executable)
 	spec := ad.LaunchSpec(*inst)
 
@@ -226,20 +229,29 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration) {
 
 	// The deterministic fake harness scenario knob is forwarded so its behavior
 	// is observable in tests; nothing else from the host environment survives.
-	extras := map[string]string{}
-	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_INIT_CANARY"} {
+	base := map[string]string{}
+	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_INIT_CANARY", "WAYSHARD_FAKE_PROBE_DAEMON", "WAYSHARD_FAKE_PROBE_DAEMON_HANG"} {
 		if v := os.Getenv(k); v != "" {
-			extras[k] = v
+			base[k] = v
 		}
 	}
-	probeEnv := sandbox.HarnessEnv(home, tmp, extras)
-	spec.Env = probeEnv
+
+	// Every probe process tree gets durable ownership before launch so startup
+	// reconciliation can terminate daemonized descendants after a server crash.
+	versionEnv, versionLease, lerr := beginProbeEnv(ctx, owners, "version", home, tmp, base)
+	if lerr != nil {
+		classifyProbeError(inst, lerr)
+		inst.Notes = append(inst.Notes, "probe ownership unavailable")
+		return
+	}
+	spec.Env = versionEnv
 
 	verTimeout := timeout
 	if verTimeout > 3*time.Second {
 		verTimeout = 3 * time.Second
 	}
-	out, verr := sandbox.RunConstrainedOutput(ctx, pol, verTimeout, 256<<10, inst.Executable, nil, probeEnv)
+	out, verr := sandbox.RunConstrainedOutputWithStart(ctx, pol, verTimeout, 256<<10, inst.Executable, nil, versionEnv, func(pgid int) { probeSetPGID(versionLease, pgid) })
+	probeDone(versionLease)
 	if errors.Is(verr, sandbox.ErrRequiredIsolation) {
 		classifyProbeError(inst, verr)
 		inst.Notes = append(inst.Notes, "probe isolation unavailable")
@@ -253,9 +265,23 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration) {
 		return
 	}
 	spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, pol) }
-	spec.AfterStart = func(cmd *exec.Cmd) (func(), error) { return con.Attach(cmd, pol) }
+
+	initEnv, initLease, lerr := beginProbeEnv(ctx, owners, "initialize", home, tmp, base)
+	if lerr != nil {
+		classifyProbeError(inst, lerr)
+		inst.Notes = append(inst.Notes, "probe ownership unavailable")
+		return
+	}
+	spec.Env = initEnv
+	spec.AfterStart = func(cmd *exec.Cmd) (func(), error) {
+		if cmd.Process != nil {
+			probeSetPGID(initLease, cmd.Process.Pid)
+		}
+		return con.Attach(cmd, pol)
+	}
 
 	res, err := acp.Probe(ctx, spec, timeout)
+	probeDone(initLease)
 	if res != nil {
 		for _, d := range res.Stderr {
 			if d.Source == "stderr" && d.Text != "" {
@@ -445,9 +471,12 @@ func forbiddenLauncher(path string) bool {
 	return ok
 }
 
-// loginShellPATH asks the user's login shell for PATH. The output is parsed as
-// a PATH string only; it is never executed. Bounded by timeout; stdin is unused.
-func loginShellPATH(ctx context.Context, timeout time.Duration) (string, error) {
+// loginShellPATH asks the user's login shell for PATH. The output is parsed and
+// validated as a PATH string only; it is never executed. The probe runs under
+// LoginShellPolicy (NetworkNone, synthetic TMP, secrets dropped) with read-only
+// access only to the shell executable directory and the specific per-shell
+// startup files required to compute PATH, never the home directory itself.
+func loginShellPATH(ctx context.Context, timeout time.Duration, home string, owners ProbeOwnerSink) (string, error) {
 	if runtime.GOOS == "windows" {
 		return "", errors.New("login-shell PATH not used on windows")
 	}
@@ -460,27 +489,53 @@ func loginShellPATH(ctx context.Context, timeout time.Duration) (string, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	// The login shell is still a discovery probe: it runs under ProbePolicy
-	// (NetworkNone, synthetic TMP, secrets dropped) with read-only access to
-	// the user's home and /etc so shell profiles can still be sourced.
+
 	probeDir, derr := os.MkdirTemp("", "wayshard-loginpath-")
 	if derr != nil {
 		return "", derr
 	}
 	defer os.RemoveAll(probeDir)
-	pol := sandbox.ProbePolicy(shell, probeDir, probeDir)
-	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, "/etc")
-	if h, err := os.UserHomeDir(); err == nil && h != "" {
-		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, h)
+	pol := sandbox.LoginShellPolicy(shell, home, "/etc", probeDir, probeDir)
+
+	env, lease, lerr := beginProbeEnv(ctx, owners, "login_path", home, probeDir, nil)
+	if lerr != nil {
+		return "", lerr
 	}
-	env := sandbox.HarnessEnv("", probeDir, nil)
-	out, err := sandbox.RunConstrainedOutput(ctx, pol, timeout, 64<<10, shell, []string{"-lc", `printf '%s' "$PATH"`}, env)
+	out, err := sandbox.RunConstrainedOutputWithStart(ctx, pol, timeout, 64<<10, shell, []string{"-lc", `printf '%s' "$PATH"`}, env, func(pgid int) { probeSetPGID(lease, pgid) })
+	probeDone(lease)
 	if err != nil {
 		return "", err
 	}
-	s := strings.TrimSpace(string(out))
-	if s == "" || strings.ContainsAny(s, "\n\r") {
-		return "", fmt.Errorf("login-shell PATH output rejected")
+	return sandbox.SanitizeLoginPATH(strings.TrimSpace(string(out)))
+}
+
+// beginProbeEnv resolves a durable ownership lease (when owners is non-nil),
+// injects the raw token into the probe environment and returns the built
+// environment. A nil sink yields no lease and an unmodified environment.
+func beginProbeEnv(ctx context.Context, owners ProbeOwnerSink, kind, home, tmp string, base map[string]string) ([]string, ProbeLease, error) {
+	add := map[string]string{}
+	for k, v := range base {
+		add[k] = v
 	}
-	return s, nil
+	if owners == nil {
+		return sandbox.HarnessEnv(home, tmp, add), nil, nil
+	}
+	lease, err := owners.BeginProbe(ctx, kind)
+	if err != nil {
+		return nil, nil, err
+	}
+	add[process.TokenEnv] = lease.Token()
+	return sandbox.HarnessEnv(home, tmp, add), lease, nil
+}
+
+func probeSetPGID(l ProbeLease, pgid int) {
+	if l != nil {
+		l.SetPGID(pgid)
+	}
+}
+
+func probeDone(l ProbeLease) {
+	if l != nil {
+		l.Done()
+	}
 }

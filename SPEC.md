@@ -258,7 +258,7 @@ Discovery may inspect daemon PATH, safely obtainable login-shell paths, well-kno
 
 A discovered executable is not routable until it passes version/protocol probing and ACP initialization.
 
-Discovery is untrusted execution: version, ACP-initialize, and login-shell PATH probes run under a dedicated ProbePolicy (NetworkNone, synthetic HOME/TEMP, allowlisted environment, read-only system and resolved-executable roots, bounded output, descendant cleanup) with no project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, or D-Bus access. If the platform cannot enforce the policy, the probe is reported unavailable rather than run unrestricted. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
+Discovery is untrusted execution: version, ACP-initialize, and login-shell PATH probes run under a dedicated ProbePolicy (NetworkNone, synthetic HOME/TEMP, allowlisted environment, read-only system and resolved-executable roots, bounded output, descendant cleanup) with no project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, or D-Bus access. If the platform cannot enforce the policy, the probe is reported unavailable rather than run unrestricted. Login-shell PATH discovery is a narrow exception that reads only the shell's required startup files and validates the returned PATH; it never receives blanket home or `/etc` access. Probes run only after startup recovery, and each probe process tree is durably owned so startup reconciliation terminates any surviving descendant. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
 
 Stable ACP v1 is the baseline protocol. Protocol mechanics are isolated behind an ACP driver; harness-specific quirks belong in harness adapters. Unknown but compliant agents use a Generic ACP adapter.
 
@@ -393,6 +393,8 @@ A common SandboxPolicy describes filesystem roots, environment, network policy, 
 Failure to establish required containment never silently becomes unrestricted execution. Reduced/unsafe modes, if exposed, are explicit advanced policy choices.
 
 Tool network is denied or brokered by default according to project/run policy. Harness/provider control network is distinct from tool-command network.
+
+Where the platform can enforce it, a provider-capable harness receives a **provider-only** network capability rather than raw host networking: the harness runs in an isolated network environment whose only reachable endpoint is a per-attempt Wayshard-controlled broker, and the broker admits only authorized, validated provider destinations. Discovering the capability is runtime-probed; unsupported platforms fail closed. A provider route requires all of user/policy permission, platform capability, harness transport compatibility, and a destination policy; permission alone never enables it. Tool commands and validation remain `NetworkNone` even while the outer harness has provider connectivity.
 
 External file access normally imports a read-only immutable input snapshot rather than widening sandbox access to arbitrary host paths.
 

@@ -10,7 +10,7 @@ import (
 
 func (DarwinBackend) Compile(p Policy) (Compiled, error) {
 	c := Compiled{Backend: "darwin", Unavailable: []string{"seatbelt", "process_group"}}
-	if err := compileCommon(p); err != nil {
+	if err := compileCommon(p, false); err != nil {
 		return c, err
 	}
 	if p.Required {

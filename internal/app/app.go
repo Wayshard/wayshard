@@ -19,6 +19,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/notifications"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/paths"
+	"github.com/Wayshard/wayshard/internal/provider"
 	"github.com/Wayshard/wayshard/internal/pty"
 	"github.com/Wayshard/wayshard/internal/recovery"
 	"github.com/Wayshard/wayshard/internal/routing"
@@ -29,6 +30,16 @@ import (
 	"github.com/Wayshard/wayshard/internal/validation"
 )
 
+// startupObserver is nil in production. Tests set it to observe the durable
+// startup step ordering (recovery before discovery) without timing sleeps.
+var startupObserver func(step string)
+
+func observeStartup(step string) {
+	if startupObserver != nil {
+		startupObserver(step)
+	}
+}
+
 type Config struct {
 	DataDir   string
 	Listen    string
@@ -37,6 +48,11 @@ type Config struct {
 	JevKey    string
 	JevModel  string
 	Log       *slog.Logger
+	// AllowProviderNetwork is user/policy permission for provider-backed
+	// harness routes. It defaults to false (fail closed).
+	AllowProviderNetwork bool
+	// ProviderDestinations is the authorized provider endpoint policy.
+	ProviderDestinations []domain.ProviderDestination
 }
 
 type App struct {
@@ -95,24 +111,28 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		engine = jev.NewHTTP(cfg.JevURL, key, cfg.JevModel)
 	}
 	ptym := pty.New(st)
+	providerCap := provider.Detect()
+	cfg.Log.Info("provider network capability", "available", providerCap.Available, "mode", providerCap.Mode, "reason", providerCap.Reason)
+	exec := &harness.ACPExec{Store: st, Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}, ProviderLog: cfg.Log}
 	orch := &orchestrator.Engine{
-		Store:     st,
-		Jev:       engine,
-		Router:    &routing.Router{Engine: engine},
-		Exec:      &harness.ACPExec{Store: st, Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}},
-		Workspace: &orchestrator.WorkspaceAdapter{Store: st, DataDir: cfg.DataDir},
-		Integrate: &orchestrator.IntegrateAdapter{Store: st},
-		Validate:  &validation.Runner{Store: st, DataDir: cfg.DataDir},
-		Budget:    orchestrator.DefaultBudgets(),
-		Log:       cfg.Log,
+		Store:                st,
+		Jev:                  engine,
+		Router:               &routing.Router{Engine: engine},
+		Exec:                 exec,
+		Workspace:            &orchestrator.WorkspaceAdapter{Store: st, DataDir: cfg.DataDir},
+		Integrate:            &orchestrator.IntegrateAdapter{Store: st},
+		Validate:             &validation.Runner{Store: st, DataDir: cfg.DataDir},
+		Budget:               orchestrator.DefaultBudgets(),
+		Log:                  cfg.Log,
+		AllowProviderNetwork: cfg.AllowProviderNetwork,
+		ProviderNet:          providerCap,
+		ProviderDestinations: cfg.ProviderDestinations,
 	}
 	if os.Getenv("WAYSHARD_SYNTHETIC_ROUTE") == "1" {
 		orch.Candidates = syntheticCandidates{}
 		orch.Exec = nil // deterministic in-process artifacts
 	} else {
-		src := &storeCandidates{Store: st}
-		_ = src.Refresh(ctx)
-		orch.Candidates = src
+		orch.Candidates = &storeCandidates{Store: st}
 	}
 	sched := scheduler.New(st, orch, cfg.Log)
 	apiSrv := &api.Server{
@@ -136,6 +156,18 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		_ = st.Close()
 		return nil, fmt.Errorf("startup recovery: %w", err)
 	}
+	observeStartup("recovery")
+	// Harness discovery and probing run only after recovery: startup
+	// reconciliation must first terminate any stale probe descendant left by a
+	// previous server, and a probe is untrusted execution that must never run
+	// before recovery state is consistent.
+	if src, ok := orch.Candidates.(*storeCandidates); ok {
+		observeStartup("discovery.start")
+		if err := src.Refresh(ctx); err != nil {
+			cfg.Log.Warn("harness discovery", "err", err)
+		}
+		observeStartup("discovery.done")
+	}
 	return a, nil
 }
 
@@ -154,7 +186,10 @@ func (a *App) Handler() http.Handler { return a.API.Handler() }
 type storeCandidates struct{ Store *storage.Store }
 
 func (s *storeCandidates) Refresh(ctx context.Context) error {
-	found, err := harness.Discover(ctx, harness.DiscoverOptions{Probe: true})
+	found, err := harness.Discover(ctx, harness.DiscoverOptions{
+		Probe:  true,
+		Owners: harness.StoreProbeOwnerSink{Store: s.Store},
+	})
 	if err != nil {
 		return err
 	}
@@ -178,7 +213,12 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 	}
 	var out []routing.Candidate
 	for _, h := range list {
-		out = append(out, routing.Candidate{Harness: h, Isolation: h.Isolation, Network: harnessNetwork(h.DefinitionID, h.Adapter)})
+		out = append(out, routing.Candidate{
+			Harness:           h,
+			Isolation:         h.Isolation,
+			Network:           harnessNetwork(h.DefinitionID, h.Adapter),
+			ProviderTransport: harnessTransport(h.DefinitionID, h.Adapter),
+		})
 	}
 	return out, nil
 }
@@ -198,6 +238,19 @@ func harnessNetwork(definitionID, adapter string) domain.NetworkCapability {
 	default:
 		return domain.NetworkProvider
 	}
+}
+
+// harnessTransport reports how a harness can be given provider connectivity.
+// Only explicitly compatible transports are accepted; an unknown transport
+// keeps the provider route unavailable rather than assuming proxy support.
+// Real-harness transport compatibility is established in a provisioned pass,
+// not guessed from an executable name.
+func harnessTransport(definitionID, adapter string) domain.ProviderTransport {
+	switch definitionID {
+	case "wayshard-fake-acp":
+		return domain.TransportHTTPProxy
+	}
+	return domain.TransportUnknown
 }
 
 type syntheticCandidates struct{}

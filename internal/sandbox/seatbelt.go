@@ -10,7 +10,7 @@ import (
 // SeatbeltProfile compiles SandboxPolicy into a macOS sandbox-exec profile.
 // This is pure policy compilation and is tested on every OS.
 func SeatbeltProfile(p Policy) (string, error) {
-	if err := compileCommon(p); err != nil {
+	if err := compileCommon(p, false); err != nil {
 		return "", err
 	}
 	var b strings.Builder

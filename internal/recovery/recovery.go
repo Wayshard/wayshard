@@ -214,10 +214,41 @@ func reconcileTerminalRuns(ctx context.Context, st *storage.Store, log *slog.Log
 	}
 }
 
+// reconcileProbeOwners terminates surviving discovery-probe process trees left
+// by a previous server. Probes are server-owned but not tied to a run, so they
+// have their own ownership records. Any descendant that daemonized/setsid away
+// from the direct child is still found by token hash and killed before
+// discovery runs again.
+func reconcileProbeOwners(ctx context.Context, st *storage.Store, log *slog.Logger) {
+	owners, err := st.ListActiveProbeOwners(ctx)
+	if err != nil {
+		log.Error("list probe owners", "err", err)
+		return
+	}
+	for _, o := range owners {
+		observed, remaining, supported, _ := process.ReconcileTokenHash(o.TokenHash, o.PGID, 3*time.Second)
+		if !supported {
+			// Leave the record active: a platform that cannot verify ownership
+			// must not claim the probe tree is gone.
+			log.Warn("probe ownership cannot be verified on this platform", "kind", o.Kind)
+			continue
+		}
+		if remaining == 0 {
+			_ = st.MarkProbeOwnerReconciled(ctx, o.ID)
+			if observed > 0 {
+				_ = st.EmitEvent(ctx, "discovery.probe_reconciled", "", map[string]any{"kind": o.Kind, "terminated": observed})
+				log.Info("reconciled stale probe process tree", "kind", o.Kind, "terminated", observed)
+			}
+			continue
+		}
+		log.Error("probe descendant could not be terminated", "kind", o.Kind, "remaining", remaining)
+	}
+}
+
 // Reconcile runs at startup before the scheduler accepts new work. Ordering is
-// deliberate: stale process trees are terminated before any workspace restore,
-// then interrupted attempts are recovered, then reclaimable checkpoint material
-// and debris are cleaned.
+// deliberate: stale process trees (including discovery probes) are terminated
+// before any workspace restore, then interrupted attempts are recovered, then
+// reclaimable checkpoint material and debris are cleaned.
 func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 	if log == nil {
 		log = slog.Default()
@@ -227,8 +258,12 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 		return err
 	}
 
-	// 1. Terminate stale process trees from a previous server before touching
-	//    any workspace, so an old writer cannot race a restore.
+	// 1. Terminate stale discovery-probe descendants from a previous server
+	//    before anything else, so a daemonized probe cannot race new discovery.
+	reconcileProbeOwners(ctx, st, log)
+
+	// 1b. Terminate stale process trees from a previous server before touching
+	//     any workspace, so an old writer cannot race a restore.
 	unsafe, err := reconcileProcesses(ctx, st, log)
 	if err != nil {
 		return fmt.Errorf("process reconciliation: %w", err)
@@ -292,6 +327,7 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 
 	reconcileJournals(ctx, st, log)
 	cleanupValidationWorkspaces(st, log)
+	cleanupProviderDirs(st, log)
 
 	// 5. Reclaim checkpoint material for terminal runs past retention. Active
 	//    and recoverable checkpoints are pinned by the query.
@@ -318,6 +354,23 @@ func cleanupValidationWorkspaces(st *storage.Store, log *slog.Logger) {
 			if err := os.RemoveAll(vdir); err != nil {
 				log.Warn("cleanup validation workspace", "dir", vdir, "err", err)
 			}
+		}
+	}
+}
+
+// cleanupProviderDirs removes per-attempt provider broker sockets and shim
+// configs left by an interrupted run. The broker itself is in-process and dies
+// with the server; only its private directory and socket file can remain.
+func cleanupProviderDirs(st *storage.Store, log *slog.Logger) {
+	root := filepath.Join(st.Root, "runtime", "p")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		pdir := filepath.Join(root, e.Name())
+		if err := os.RemoveAll(pdir); err != nil {
+			log.Warn("cleanup provider dir", "dir", pdir, "err", err)
 		}
 	}
 }

@@ -9,15 +9,19 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/jev"
+	"github.com/Wayshard/wayshard/internal/provider"
 )
 
 type Candidate struct {
-	Harness      domain.HarnessInstallation
-	ModelID      string
-	Effort       string
-	Isolation    domain.IsolationMode
-	Network      domain.NetworkCapability
-	DynamicModel bool
+	Harness   domain.HarnessInstallation
+	ModelID   string
+	Effort    string
+	Isolation domain.IsolationMode
+	Network   domain.NetworkCapability
+	// ProviderTransport is how this harness can be given provider
+	// connectivity. A provider route needs an explicitly compatible transport.
+	ProviderTransport domain.ProviderTransport
+	DynamicModel      bool
 }
 
 type Config struct {
@@ -31,12 +35,14 @@ type Config struct {
 	ForceModel       string
 	Pool             []string // automatic routing pool of model ids
 	// AllowProviderNetwork is user/policy permission to use model/provider
-	// network. It is not capability.
+	// network. It is not capability and is not transport compatibility.
 	AllowProviderNetwork bool
-	// ProviderNetworkAvailable reports whether the platform can actually
-	// enforce provider-only isolation. A route needs both permission and
-	// capability to be viable.
-	ProviderNetworkAvailable bool
+	// ProviderNet reports whether the platform can actually enforce
+	// provider-only isolation. A route needs permission, capability, a
+	// compatible transport and a destination policy to be viable.
+	ProviderNet domain.ProviderNetworkCapability
+	// ProviderDestinations is the authorized provider endpoint policy.
+	ProviderDestinations []domain.ProviderDestination
 }
 
 type Decision struct {
@@ -46,6 +52,9 @@ type Decision struct {
 	Degraded  bool
 	Blocked   domain.BlockedReason
 	Detail    string
+	// Evidence records the hard constraints applied to a provider route for
+	// durable, replayable RouteDecision history.
+	Evidence string
 }
 
 type Router struct {
@@ -53,7 +62,7 @@ type Router struct {
 }
 
 func (r *Router) Route(ctx context.Context, stage domain.StageKind, cfg Config, cands []Candidate, assess *jev.Assessment) Decision {
-	viable, providerDropped := hardFilter(stage, cfg, cands)
+	viable, fr := hardFilter(stage, cfg, cands)
 	if cfg.ForceHarness != "" || cfg.ForceModel != "" {
 		forced := filterForced(viable, cfg)
 		if len(forced) == 0 {
@@ -62,8 +71,8 @@ func (r *Router) Route(ctx context.Context, stage domain.StageKind, cfg Config, 
 		viable = forced
 	}
 	if len(viable) == 0 {
-		if providerDropped && !(cfg.AllowProviderNetwork && cfg.ProviderNetworkAvailable) {
-			return Decision{Blocked: domain.BlockedNoViableRoute, Detail: "secure provider network isolation unavailable"}
+		if d := fr.detail(); d != "" {
+			return Decision{Blocked: domain.BlockedNoViableRoute, Detail: d}
 		}
 		return Decision{Blocked: domain.BlockedNoViableRoute, Detail: "no harness/model satisfies stage requirements"}
 	}
@@ -84,12 +93,42 @@ func (r *Router) Route(ctx context.Context, stage domain.StageKind, cfg Config, 
 	if degraded {
 		reason = "deterministic fallback (jev unavailable)"
 	}
-	return Decision{Candidate: primary, Fallbacks: fb, Reason: reason, Degraded: degraded}
+	evidence := ""
+	if primary.Network == domain.NetworkProvider {
+		evidence = fmt.Sprintf("provider{permission:%t capability:%t transport:%s destinations:%d}",
+			cfg.AllowProviderNetwork, cfg.ProviderNet.Available, primary.ProviderTransport, len(cfg.ProviderDestinations))
+	}
+	return Decision{Candidate: primary, Fallbacks: fb, Reason: reason, Degraded: degraded, Evidence: evidence}
 }
 
-func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) ([]Candidate, bool) {
+// filterOutcome records why provider candidates were dropped so the block reason
+// can distinguish permission, capability, transport compatibility and
+// destination policy.
+type filterOutcome struct {
+	providerPermissionDenied  bool
+	providerCapabilityDenied  bool
+	providerTransportDenied   bool
+	providerDestinationDenied bool
+}
+
+func (f filterOutcome) detail() string {
+	switch {
+	case f.providerCapabilityDenied:
+		return "secure provider network isolation unavailable"
+	case f.providerPermissionDenied:
+		return "provider network permission not granted"
+	case f.providerTransportDenied:
+		return "harness incompatible with available provider transport"
+	case f.providerDestinationDenied:
+		return "provider destination policy unavailable or invalid"
+	default:
+		return ""
+	}
+}
+
+func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) ([]Candidate, filterOutcome) {
 	var out []Candidate
-	providerDropped := false
+	var fr filterOutcome
 	for _, c := range cands {
 		if c.Harness.Health == domain.HarnessUnavailable || c.Harness.Health == domain.HarnessIncompatible {
 			continue
@@ -100,9 +139,25 @@ func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) ([]Candid
 		if c.Harness.Health == domain.HarnessUnauth {
 			continue
 		}
-		if c.Network == domain.NetworkProvider && !(cfg.AllowProviderNetwork && cfg.ProviderNetworkAvailable) {
-			providerDropped = true
-			continue
+		if c.Network == domain.NetworkProvider {
+			// Permission, platform capability, harness transport compatibility
+			// and destination policy are all required and all distinct.
+			if !cfg.AllowProviderNetwork {
+				fr.providerPermissionDenied = true
+				continue
+			}
+			if !cfg.ProviderNet.Available {
+				fr.providerCapabilityDenied = true
+				continue
+			}
+			if c.ProviderTransport != domain.TransportHTTPProxy {
+				fr.providerTransportDenied = true
+				continue
+			}
+			if provider.ValidateDomains(cfg.ProviderDestinations) != nil {
+				fr.providerDestinationDenied = true
+				continue
+			}
 		}
 		if len(cfg.AllowedHarnesses) > 0 && !contains(cfg.AllowedHarnesses, c.Harness.ID) && !contains(cfg.AllowedHarnesses, c.Harness.DisplayName) {
 			continue
@@ -123,7 +178,7 @@ func hardFilter(stage domain.StageKind, cfg Config, cands []Candidate) ([]Candid
 		}
 		out = append(out, c)
 	}
-	return out, providerDropped
+	return out, fr
 }
 
 func filterForced(cands []Candidate, cfg Config) []Candidate {

@@ -32,6 +32,9 @@ type StageRequest struct {
 	Route     routing.Candidate
 	Workspace *domain.WorkspaceRecord
 	Bundle    string
+	// ProviderDestinations is the authorized provider endpoint policy for a
+	// provider-backed route. It is empty for NetworkNone routes.
+	ProviderDestinations []domain.ProviderDestination
 }
 
 type StageResult struct {
@@ -66,6 +69,12 @@ type Engine struct {
 	ContextBudget int
 	Log           *slog.Logger
 	Budget        Budgets
+	// Provider networking policy. Permission, platform capability and
+	// destination policy are resolved by the router; the destinations are
+	// passed to the executor for the per-attempt broker.
+	AllowProviderNetwork bool
+	ProviderNet          domain.ProviderNetworkCapability
+	ProviderDestinations []domain.ProviderDestination
 }
 
 func (e *Engine) budgets() Budgets { return e.Budget.withDefaults() }
@@ -322,7 +331,12 @@ func (e *Engine) runStage(ctx context.Context, run *domain.Run, task *domain.Tas
 	if e.Candidates != nil {
 		cands, _ = e.Candidates.Candidates(ctx)
 	}
-	cfg := routing.Config{Profile: run.Profile}
+	cfg := routing.Config{
+		Profile:              run.Profile,
+		AllowProviderNetwork: e.AllowProviderNetwork,
+		ProviderNet:          e.ProviderNet,
+		ProviderDestinations: e.ProviderDestinations,
+	}
 	var assess *jev.Assessment
 	if list, err := e.Store.ListAssessments(ctx, run.ID); err == nil && len(list) > 0 {
 		a := list[len(list)-1]
@@ -538,6 +552,9 @@ func (e *Engine) insertRouteDecision(ctx context.Context, run *domain.Run, st *d
 		Reason:        dec.Reason,
 		Degraded:      dec.Degraded || run.DegradedRouting,
 	}
+	if dec.Evidence != "" {
+		rd.Reason = dec.Reason + " | " + dec.Evidence
+	}
 	_ = e.Store.InsertRouteDecision(ctx, rd)
 }
 
@@ -547,7 +564,7 @@ func (e *Engine) execAttempt(ctx context.Context, run *domain.Run, task *domain.
 		return StageResult{ArtifactJSON: body, Err: err}, routing.Decision{Candidate: cand}
 	}
 	ws, _ := e.Store.GetWorkspaceByRun(ctx, run.ID)
-	return mustExec(ctx, e.Exec, StageRequest{Run: *run, Task: *task, Stage: *st, Attempt: *att, Route: cand, Workspace: ws, Bundle: bundle}), routing.Decision{Candidate: cand}
+	return mustExec(ctx, e.Exec, StageRequest{Run: *run, Task: *task, Stage: *st, Attempt: *att, Route: cand, Workspace: ws, Bundle: bundle, ProviderDestinations: e.ProviderDestinations}), routing.Decision{Candidate: cand}
 }
 
 func (e *Engine) persistArtifact(ctx context.Context, runID, stageID, attemptID string, kind domain.StageKind, raw string) (any, error) {

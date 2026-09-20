@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/process"
+	"github.com/Wayshard/wayshard/internal/provider"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
@@ -23,17 +25,16 @@ import (
 type ACPExec struct {
 	Store   *storage.Store
 	Sandbox *sandbox.Manager
+	// ProviderResolver and ProviderDialer are test seams. Production leaves them
+	// nil, which selects the real host resolver and dialer.
+	ProviderResolver provider.Resolver
+	ProviderDialer   provider.Dialer
+	ProviderLog      *slog.Logger
 }
 
 func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (orchestrator.StageResult, error) {
 	if req.Stage.Kind == domain.StageValidate || req.Stage.Kind == domain.StageIntegrate {
 		return orchestrator.StageResult{Err: fmt.Errorf("stage %s is server-owned", req.Stage.Kind)}, nil
-	}
-	// Defense in depth: a route that requires provider network must never be
-	// launched, because secure provider-only isolation is not implemented.
-	if req.Route.Network == domain.NetworkProvider {
-		err := fmt.Errorf("secure provider network isolation unavailable")
-		return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
 	}
 	cwd := ""
 	if req.Workspace != nil {
@@ -74,7 +75,86 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	extras := harnessExtras(req)
 	extras[process.TokenEnv] = token
 	spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
-	if e.Sandbox != nil {
+
+	var providerCleanup func()
+	if req.Route.Network == domain.NetworkProvider {
+		// Defense in depth: the harness must declare a transport compatible
+		// with the secure broker, and a valid destination policy must exist.
+		if req.Route.ProviderTransport != domain.TransportHTTPProxy {
+			err := fmt.Errorf("harness incompatible with available provider transport")
+			return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
+		}
+		pcfg := provider.PolicyFromDomains(req.ProviderDestinations)
+		if err := pcfg.CheckConfigured(); err != nil {
+			err = fmt.Errorf("provider destination policy invalid: %w", err)
+			return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
+		}
+		pol := e.policyFor(req, cwd, tmp, realHome)
+		pol.Network = sandbox.NetProvider
+		if inst.Executable != "" {
+			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(inst.Executable))
+		}
+		proxyPort, err := provider.RandomPort()
+		if err != nil {
+			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+		}
+		bearer, err := provider.RandomBearer()
+		if err != nil {
+			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+		}
+		pdir := provider.BrokerDir(e.providerRoot(), req.Run.ID+"/"+req.Attempt.ID)
+		plog := e.ProviderLog
+		if plog == nil {
+			plog = slog.Default()
+		}
+		broker, err := provider.StartBroker(filepath.Join(pdir, "s"), bearer, pcfg, e.ProviderResolver, e.ProviderDialer, plog)
+		if err != nil {
+			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+		}
+		providerCleanup = func() { _ = broker.Close() }
+		proxyAddr := fmt.Sprintf("127.0.0.1:%d", proxyPort)
+		extras["HTTPS_PROXY"] = "http://" + proxyAddr
+		extras["HTTP_PROXY"] = "http://" + proxyAddr
+		extras["NO_PROXY"] = ""
+		spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
+
+		cfg := provider.ShimConfig{
+			BrokerSocket:   broker.SocketPath(),
+			Bearer:         bearer,
+			ProxyPort:      proxyPort,
+			Policy:         pol,
+			HarnessCommand: spec.Command,
+			HarnessArgs:    spec.Args,
+			HarnessDir:     cwd,
+		}
+		cfgPath, err := provider.WriteShimConfig(pdir, cfg)
+		if err != nil {
+			providerCleanup()
+			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+		}
+		self, err := os.Executable()
+		if err != nil {
+			providerCleanup()
+			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+		}
+		// The shim (not the harness) is the direct child; it creates the
+		// user+network namespace, raises loopback, launches the harness under
+		// the compiled policy, and bridges harness TCP to the broker.
+		spec = acp.Spec{
+			Command: self,
+			Args:    []string{provider.ShimArg, cfgPath},
+			Env:     spec.Env,
+			Dir:     cwd,
+			SetupCmd: func(cmd *exec.Cmd) error {
+				attr, aerr := provider.NewUserNetNSAttr()
+				if aerr != nil {
+					return aerr
+				}
+				cmd.SysProcAttr = attr
+				return nil
+			},
+		}
+	} else if e.Sandbox != nil {
 		b := e.Sandbox.Backend
 		if b == nil {
 			b = sandbox.DefaultBackend()
@@ -90,6 +170,9 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		}
 		spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, pol) }
 		spec.AfterStart = func(cmd *exec.Cmd) (func(), error) { return con.Attach(cmd, pol) }
+	}
+	if providerCleanup != nil {
+		defer providerCleanup()
 	}
 
 	hooks := acp.Hooks{
@@ -197,6 +280,15 @@ func (e *ACPExec) sandboxRoot(req orchestrator.StageRequest) string {
 	dir := filepath.Join(base, "runtime", "sandbox", req.Run.ID, req.Attempt.ID)
 	_ = os.MkdirAll(dir, 0o700)
 	return dir
+}
+
+// providerRoot is the server runtime root used for short per-attempt provider
+// broker directories.
+func (e *ACPExec) providerRoot() string {
+	if e.Store != nil && e.Store.Root != "" {
+		return e.Store.Root
+	}
+	return os.TempDir()
 }
 
 // policyFor builds the harness policy. Read-only stages get a read-only view of

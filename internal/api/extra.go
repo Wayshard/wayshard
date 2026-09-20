@@ -11,6 +11,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/ctxengine"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/knowledge"
+	"github.com/Wayshard/wayshard/internal/provider"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
@@ -154,7 +155,16 @@ func (s *Server) createBackup(w http.ResponseWriter, r *http.Request, _ *auth.Pr
 
 func (s *Server) sandboxInfo(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
 	_ = r
-	writeJSON(w, 200, sandbox.Probe())
+	report := sandbox.Probe()
+	writeJSON(w, 200, map[string]any{
+		"backend":         report.Backend,
+		"available":       report.Available,
+		"mode":            report.Mode,
+		"features":        report.Features,
+		"missing":         report.Missing,
+		"detail":          report.Detail,
+		"providerNetwork": provider.Detect(),
+	})
 }
 
 func (s *Server) listTerminals(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {

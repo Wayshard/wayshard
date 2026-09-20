@@ -23,6 +23,7 @@ import (
 const jsonrpc = "2.0"
 
 func main() {
+	maybeSpawnProbeDaemon()
 	for _, a := range os.Args[1:] {
 		if a == "--version" || a == "-version" || a == "-v" {
 			fmt.Println("wayshard-fake-acp 0.0.0-dev")

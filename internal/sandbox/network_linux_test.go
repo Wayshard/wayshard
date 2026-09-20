@@ -140,12 +140,18 @@ func TestExplicitUnsafeHostNetworkWorks(t *testing.T) {
 	}
 }
 
-// TestProviderNetworkFailsClosed proves provider-only network isolation is not
-// silently downgraded to unrestricted.
-func TestProviderNetworkFailsClosed(t *testing.T) {
+// TestProviderNetworkPolicyNeverSilentlyUnrestricted proves provider mode either
+// compiles with the provider seccomp feature or fails closed; it never becomes
+// unrestricted.
+func TestProviderNetworkPolicyNeverSilentlyUnrestricted(t *testing.T) {
 	c := AsConstrainer(DefaultBackend())
-	if _, err := c.Compile(ToolPolicy(t.TempDir(), t.TempDir(), NetProvider)); err == nil {
-		t.Fatal("provider network policy did not fail closed")
+	pol := ToolPolicy(t.TempDir(), t.TempDir(), NetProvider)
+	comp, err := c.Compile(pol)
+	if err != nil {
+		return // fail closed on an unsupported architecture/platform
+	}
+	if !comp.has("seccomp_provider_tcp") {
+		t.Fatalf("provider policy compiled without provider seccomp: %+v", comp)
 	}
 }
 

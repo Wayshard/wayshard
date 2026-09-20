@@ -73,6 +73,14 @@ func (b *boundedBuffer) Bytes() []byte { return b.buf }
 // and a timeout, killing the whole owned process tree on timeout or
 // cancellation. It returns the captured output even when the command fails.
 func RunConstrainedOutput(ctx context.Context, p Policy, timeout time.Duration, maxOutput int, name string, args, env []string) ([]byte, error) {
+	return RunConstrainedOutputWithStart(ctx, p, timeout, maxOutput, name, args, env, nil)
+}
+
+// RunConstrainedOutputWithStart is RunConstrainedOutput with an onStart hook that
+// receives the started process group id (the process is a group leader because
+// the sandbox constrainer sets Setpgid). It is used to record durable probe
+// ownership once the probe has actually started.
+func RunConstrainedOutputWithStart(ctx context.Context, p Policy, timeout time.Duration, maxOutput int, name string, args, env []string, onStart func(pgid int)) ([]byte, error) {
 	c := AsConstrainer(DefaultBackend())
 	if _, err := c.Compile(p); err != nil {
 		return nil, err
@@ -93,6 +101,12 @@ func RunConstrainedOutput(ctx context.Context, p Policy, timeout time.Duration, 
 	}
 	cmd.Cancel = func() error { return c.KillTree(cmd) }
 	cmd.WaitDelay = 2 * time.Second
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return buf.Bytes(), err
+	}
+	if onStart != nil && cmd.Process != nil {
+		onStart(cmd.Process.Pid)
+	}
+	err := cmd.Wait()
 	return buf.Bytes(), err
 }

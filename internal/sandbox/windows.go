@@ -14,7 +14,7 @@ import (
 )
 
 func (WindowsBackend) Compile(p Policy) (Compiled, error) {
-	if err := compileCommon(p); err != nil {
+	if err := compileCommon(p, false); err != nil {
 		return Compiled{Backend: "windows"}, err
 	}
 	c := Compiled{Backend: "windows", Features: []string{"job_object", "process_tree", "env_filter"}}

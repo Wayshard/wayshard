@@ -138,10 +138,11 @@ When a harness lacks a native structured submission mechanism, use the universal
 - Separate outer Harness Sandbox and stricter Tool Sandbox where the integration supports it.
 - Known adapters may provide native or adapter-mediated tool isolation; generic harnesses may be outer-only. Report effective isolation honestly.
 - ACP terminal/tool callbacks are interposed by the server; a harness never executes model-generated commands directly.
-- Harness discovery, version, ACP-initialize, and login-shell PATH probes are untrusted execution and run under a dedicated ProbePolicy. If the platform cannot enforce it, report the probe unavailable rather than run unrestricted.
+- Harness discovery, version, ACP-initialize, and login-shell PATH probes are untrusted execution and run under a dedicated ProbePolicy. If the platform cannot enforce it, report the probe unavailable rather than run unrestricted. Login-shell PATH discovery reads only required per-shell startup files. Probes run only after startup recovery and each probe tree is durably owned for reconciliation.
 - Startup reconciliation terminates stale server-owned process trees by ownership token before restoring any workspace; never match or kill by PID alone.
 - External file approvals should normally import immutable read-only inputs rather than widen host filesystem access.
 - Network for model/provider control traffic is distinct from tool-command network access.
+- A provider-capable harness must receive provider-only network capability where the platform can enforce it (isolated network environment plus a Wayshard-controlled broker that admits only authorized, validated provider destinations); never raw host networking. Provider routes require permission, real capability, harness transport compatibility, and a destination policy. Tool and validation network remain denied by default.
 - Tool network is denied or brokered according to policy; server-owned credentials must not leak through network or process environment.
 - Symlinks must not bypass filesystem boundaries.
 - Resource limits and process-tree cleanup are part of execution safety.

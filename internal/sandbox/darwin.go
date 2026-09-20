@@ -24,7 +24,7 @@ func sandboxExecPath() string {
 }
 
 func (DarwinBackend) Compile(p Policy) (Compiled, error) {
-	if err := compileCommon(p); err != nil {
+	if err := compileCommon(p, false); err != nil {
 		return Compiled{Backend: "darwin"}, err
 	}
 	profile, err := SeatbeltProfile(p)

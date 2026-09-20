@@ -25,14 +25,15 @@ func (c Compiled) has(feature string) bool {
 	return false
 }
 
-func compileCommon(p Policy) error {
+func compileCommon(p Policy, allowProvider bool) error {
 	if p.Required && len(p.ReadWriteRoots) == 0 {
 		return fmt.Errorf("%w: no writable roots in policy", ErrRequiredIsolation)
 	}
 	switch p.Network {
 	case NetProvider:
-		// A genuinely enforceable provider-only boundary is not implemented.
-		return fmt.Errorf("%w: secure provider network isolation is unavailable", ErrRequiredIsolation)
+		if !allowProvider {
+			return fmt.Errorf("%w: secure provider network isolation is unavailable", ErrRequiredIsolation)
+		}
 	case NetAllowlist, NetBrokered:
 		return fmt.Errorf("%w: network mode %q is not implemented", ErrRequiredIsolation, p.Network)
 	case NetUnrestricted:

@@ -28,6 +28,21 @@ type ProcessOwner struct {
 	ReconciledAt *time.Time `json:"reconciledAt,omitempty"`
 }
 
+// ProbeOwner records that a server-launched discovery probe process tree (for
+// example a version, ACP-initialize or login-shell PATH probe) belongs to the
+// server. Probes are not tied to a run/stage/attempt, so they have their own
+// ownership table. Like ProcessOwner, only the token hash is persisted and
+// startup reconciliation terminates surviving descendants by token.
+type ProbeOwner struct {
+	ID           string     `json:"id"`
+	Kind         string     `json:"kind"`
+	TokenHash    string     `json:"tokenHash"`
+	PGID         int        `json:"pgid"`
+	State        string     `json:"state"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	ReconciledAt *time.Time `json:"reconciledAt,omitempty"`
+}
+
 // Checkpoint material states. A checkpoint row may outlive its material tree
 // once retention reclaims it; recovery must never treat a reclaimed checkpoint
 // as restorable.

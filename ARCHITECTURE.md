@@ -101,6 +101,7 @@ workspaces
 workspace_snapshots
 workspace_checkpoints
 process_owners
+probe_owners
 run_deltas
 integrations
 approvals
@@ -329,7 +330,7 @@ Discovery sources may include daemon PATH, safely obtained login-shell PATH, wel
 
 Executable name alone is insufficient. A usable installation must pass launch/version and ACP initialization/capability probing.
 
-Version and ACP-initialize probes execute under a dedicated `ProbePolicy`, not the writable HarnessPolicy: NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system roots plus the resolved executable directory, bounded output, and descendant cleanup. Probes are denied project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, and D-Bus access; a platform that cannot enforce the policy reports the probe unavailable rather than running unrestricted. The login-shell PATH probe uses the same policy with additional read-only access to the user's home and `/etc` so shell startup files can be sourced; it never inherits ambient secrets and its output is used only as search directories.
+Version and ACP-initialize probes execute under a dedicated `ProbePolicy`, not the writable HarnessPolicy: NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system roots plus the resolved executable directory, bounded output, and descendant cleanup. Probes are denied project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, and D-Bus access; a platform that cannot enforce the policy reports the probe unavailable rather than running unrestricted. The login-shell PATH probe is a narrower exception: it reads only the shell executable directory and the specific per-shell startup files required to compute PATH (never the home directory or a blanket `/etc`), and its output is validated as an absolute-only, deduplicated, bounded PATH. Discovery/probing runs only after startup recovery, and every probe process tree is registered in `probe_owners` (token hash persisted before launch) so startup reconciliation terminates a daemonized probe descendant by token before discovery runs again. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
 
 Filesystem state is authoritative; discovered state is cached in SQLite for UI/history.
 
@@ -614,6 +615,16 @@ Approved external files normally become immutable read-only snapshots inside the
 
 Harness discovery is itself untrusted execution and does not reuse the writable HarnessPolicy. Version, ACP-initialize and login-shell PATH probes run under a distinct `ProbePolicy`: NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system roots plus the resolved executable directory, bounded output, and descendant cleanup. Probes have no project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display or D-Bus access. The policy is Required: if the platform cannot enforce it, the probe is reported unavailable rather than run unrestricted. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
 
+The login-shell PATH probe additionally narrows filesystem access to the shell executable directory and the specific per-shell startup files needed to compute PATH, and validates the returned PATH before use. Each probe process tree is durably registered (`probe_owners`) before launch and startup reconciliation terminates surviving descendants by ownership token before discovery runs again.
+
+### 27.7 Provider-only network capability
+
+A provider-capable harness may be given model/provider connectivity only through a real enforcement mechanism, never raw host networking.
+
+On Linux the mechanism is a per-attempt user+network namespace. The attempt's harness is launched by a small shim that raises loopback in the namespace, listens on a loopback port, and bridges harness TCP to a per-attempt Wayshard broker over a private filesystem Unix socket. The broker speaks HTTPS `CONNECT` only (TLS stays end-to-end; no MITM CA is installed), authorizes the requested `host:port` against the run's configured destination policy, resolves the hostname on the trusted side, and revalidates every resolved address on every connection. Loopback, private, link-local, multicast, unspecified, broadcast, IPv4-mapped, 6to4 and Teredo addresses are refused, which closes DNS rebinding and SSRF. Because the namespace, not the proxy variables, is the boundary, direct sockets from the harness (including children and setsid grandchildren) cannot reach localhost, the LAN, the Internet, `AF_UNIX`/Docker, `AF_NETLINK` or `AF_PACKET`; only the broker is reachable. Each attempt has its own namespace, broker socket, destination policy and bearer capability, so runs are isolated from one another. Tool callbacks and validation continue to run under the Tool Sandbox with `NetworkNone`.
+
+A provider route is viable only when user/policy permission, actual runtime-probed platform capability, harness transport compatibility, and a valid destination policy all hold. Unsupported platforms and unverified transports fail closed.
+
 ## 28. Network separation
 
 Harness control-plane network (for example OpenCode -> provider) is distinct from tool-command network (for example `npm` -> registry).
@@ -636,15 +647,15 @@ Read-only stages generally restart. Validation reruns. Native harness session re
 Server startup RecoveryManager:
 
 1. open/verify storage and apply migrations;
-2. reconcile stale server-owned process trees by ownership token and wait for them to terminate; a live run whose tree cannot be terminated is blocked with a recovery reason and is never restored against;
+2. reconcile stale discovery-probe trees (`probe_owners`) and stale server-owned run process trees by ownership token, waiting for them to terminate; a live run whose tree cannot be terminated is blocked with a recovery reason and is never restored against;
 3. repair terminal-run consistency (a cancelled run's running attempts become cancelled; a terminal run's leftover pending approvals are invalidated);
-4. remove unreferenced checkpoint debris and restore-staging leftovers;
+4. remove unreferenced checkpoint debris, restore-staging leftovers and per-attempt provider broker directories;
 5. restore interrupted write attempts from their verified pre-attempt checkpoint;
 6. reconcile publication journals (recognize already-published targets, resume the safe remainder, or block on unexpected source state) and finalize run/integration state;
 7. clean disposable validation workspaces;
 8. reclaim checkpoint material for terminal runs past retention.
 
-The scheduler starts only after this recovery completes. Harness discovery/probing runs during server open and is sandboxed by ProbePolicy, so it cannot read or mutate recovery state; no run is scheduled before recovery finishes.
+The scheduler starts only after this recovery completes. Harness discovery/probing runs only after recovery and is sandboxed by ProbePolicy, so it cannot read or mutate recovery state and any stale probe descendant has already been terminated; no run is scheduled before recovery finishes.
 
 ## 30. Process supervision
 

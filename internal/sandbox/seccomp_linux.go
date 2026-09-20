@@ -72,6 +72,68 @@ func applyNetworkNone() error {
 		// 8: allow
 		{Code: unix.BPF_RET | unix.BPF_K, K: allow},
 	}
+	return installSeccompFilter(filter)
+}
+
+// applyNetworkProvider installs a seccomp filter for provider-only networking.
+//
+// The process is already inside a dedicated network namespace whose only
+// interface is loopback and whose only listener is the Wayshard broker. This
+// filter permits TCP over AF_INET/AF_INET6 (so the harness can reach the broker)
+// and denies:
+//   - every other socket domain (AF_UNIX filesystem/abstract, AF_NETLINK,
+//     AF_PACKET, AF_VSOCK, ...),
+//   - UDP and raw socket types (no unbrokered DNS or QUIC),
+//   - io_uring_setup(2), which can create sockets without socket(2).
+//
+// socketpair(2) remains permitted: it creates an anonymous, unreachable pair.
+func applyNetworkProvider() error {
+	arch, err := seccompAuditArch()
+	if err != nil {
+		return err
+	}
+	deny := seccompRet(unix.SECCOMP_RET_ERRNO, uint32(unix.EPERM))
+	kill := uint32(unix.SECCOMP_RET_KILL_PROCESS)
+	allow := uint32(unix.SECCOMP_RET_ALLOW)
+
+	const (
+		dataArch = 4  // seccomp_data.arch
+		dataNr   = 0  // seccomp_data.nr
+		dataArg0 = 16 // seccomp_data.args[0] (socket domain)
+		dataArg1 = 24 // seccomp_data.args[1] (socket type)
+	)
+	filter := []unix.SockFilter{
+		// 0: load arch; kill on mismatch.
+		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: dataArch},
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, Jf: 0, K: arch},
+		{Code: unix.BPF_RET | unix.BPF_K, K: kill},
+		// 3: load syscall number.
+		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: dataNr},
+		// 4: io_uring_setup -> deny (target 12)
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 7, Jf: 0, K: uint32(unix.SYS_IO_URING_SETUP)},
+		// 5: socket(2) -> inspect domain (target 6); anything else -> allow (13)
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 0, Jf: 7, K: uint32(unix.SYS_SOCKET)},
+		// 6: load domain.
+		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: dataArg0},
+		// 7: AF_INET -> type check (9); else 8
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, Jf: 0, K: uint32(unix.AF_INET)},
+		// 8: AF_INET6 -> type check (9); else deny (12)
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 0, Jf: 3, K: uint32(unix.AF_INET6)},
+		// 9: load type.
+		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: dataArg1},
+		// 10: mask off SOCK_NONBLOCK/SOCK_CLOEXEC.
+		{Code: unix.BPF_ALU | unix.BPF_AND | unix.BPF_K, K: 0xf},
+		// 11: SOCK_STREAM -> allow (13); else deny (12)
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, Jf: 0, K: uint32(unix.SOCK_STREAM)},
+		// 12: deny
+		{Code: unix.BPF_RET | unix.BPF_K, K: deny},
+		// 13: allow
+		{Code: unix.BPF_RET | unix.BPF_K, K: allow},
+	}
+	return installSeccompFilter(filter)
+}
+
+func installSeccompFilter(filter []unix.SockFilter) error {
 	prog := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
 	if err := unix.Prctl(unix.PR_SET_SECCOMP, unix.SECCOMP_MODE_FILTER, uintptr(unsafe.Pointer(&prog)), 0, 0); err != nil {
 		return fmt.Errorf("seccomp filter: %w", err)

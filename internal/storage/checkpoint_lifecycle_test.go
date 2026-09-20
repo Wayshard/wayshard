@@ -16,8 +16,8 @@ import (
 // material lifecycle additions.
 func TestUpgradeFromPriorVersions(t *testing.T) {
 	ctx := context.Background()
-	scripts := map[int]string{1: migration001, 2: migration002, 3: migration003}
-	for _, target := range []int{1, 2, 3} {
+	scripts := map[int]string{1: migration001, 2: migration002, 3: migration003, 4: migration004}
+	for _, target := range []int{1, 2, 3, 4} {
 		t.Run(fmt.Sprintf("v%d", target), func(t *testing.T) {
 			dir := t.TempDir()
 			raw, err := openRawDB(ctx, filepath.Join(dir, "app.db"))
@@ -54,6 +54,9 @@ func TestUpgradeFromPriorVersions(t *testing.T) {
 			}
 			if _, err := s.DB.ExecContext(ctx, `SELECT token_hash FROM process_owners LIMIT 1`); err != nil {
 				t.Fatalf("process_owners table missing: %v", err)
+			}
+			if _, err := s.DB.ExecContext(ctx, `SELECT token_hash FROM probe_owners LIMIT 1`); err != nil {
+				t.Fatalf("probe_owners table missing: %v", err)
 			}
 		})
 	}

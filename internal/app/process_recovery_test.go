@@ -68,7 +68,7 @@ func startServer(t *testing.T, bin, dataDir string, port int, extraEnv []string)
 	}
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	cmd := exec.Command(bin, "--listen", fmt.Sprintf("127.0.0.1:%d", port), "--data", dataDir)
-	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Env = mergeEnv(os.Environ(), extraEnv)
 	cmd.Stdout = f
 	cmd.Stderr = f
 	if err := cmd.Start(); err != nil {

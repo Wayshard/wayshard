@@ -10,7 +10,7 @@ import (
 
 func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 	c := Compiled{Backend: "linux", Unavailable: []string{"namespaces", "process_group"}}
-	if err := compileCommon(p); err != nil {
+	if err := compileCommon(p, false); err != nil {
 		return c, err
 	}
 	return c, fmt.Errorf("%w: linux backend not compiled on this OS", ErrRequiredIsolation)

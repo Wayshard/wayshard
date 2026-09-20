@@ -12,7 +12,7 @@ import (
 )
 
 func (LinuxBackend) Compile(p Policy) (Compiled, error) {
-	if err := compileCommon(p); err != nil {
+	if err := compileCommon(p, true); err != nil {
 		return Compiled{Backend: "linux"}, err
 	}
 	c := Compiled{Backend: "linux", Features: []string{"process_group", "pdeathsig", "env_filter"}}
@@ -34,6 +34,19 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 			}
 		} else {
 			c.Features = append(c.Features, "seccomp_network_deny")
+		}
+	}
+	if p.Network == NetProvider {
+		// Provider mode allows TCP to the in-namespace broker only. The address
+		// isolation comes from the network namespace; seccomp enforces the
+		// domain/type restriction (no UDP, no AF_UNIX/AF_NETLINK/AF_PACKET).
+		if _, err := seccompAuditArch(); err != nil {
+			c.Unavailable = append(c.Unavailable, "network_provider")
+			if p.Required {
+				return c, fmt.Errorf("%w: %v", ErrRequiredIsolation, err)
+			}
+		} else {
+			c.Features = append(c.Features, "seccomp_provider_tcp")
 		}
 	}
 	if p.SyntheticHome != "" || p.SyntheticTemp != "" {

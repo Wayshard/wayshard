@@ -49,6 +49,16 @@ func runHelper(args []string) bool {
 				os.Exit(125)
 			}
 		}
+	case NetProvider:
+		// Provider mode: the process is already inside its isolated network
+		// namespace. Seccomp permits TCP to the in-namespace broker and denies
+		// UDP, AF_UNIX, AF_NETLINK, AF_PACKET and io_uring.
+		if err := applyNetworkProvider(); err != nil {
+			if p.Required {
+				fmt.Fprintln(os.Stderr, "wayshard-sandbox: required provider network confinement failed:", err)
+				os.Exit(125)
+			}
+		}
 	case NetUnrestricted:
 		if !p.AllowUnsafeHostNetwork {
 			if p.Required {
