@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,11 +85,38 @@ func approvalSetup(t *testing.T) (base, cred, runID, canary string, a *App) {
 	return base, cred, runID, canary, a
 }
 
+// approvalHTTPJSON is a platform-neutral helper so this test compiles on every
+// Go CI target.
+func approvalHTTPJSON(t *testing.T, method, url, body, cred string) (int, []byte) {
+	t.Helper()
+	var r io.Reader
+	if body != "" {
+		r = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if cred != "" {
+		req.Header.Set("Authorization", "Bearer "+cred)
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, b
+}
+
 func waitApproval(t *testing.T, base, cred string) domain.Approval {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		code, body := httpJSON(t, http.MethodGet, base+"/v1/approvals", "", cred)
+		code, body := approvalHTTPJSON(t, http.MethodGet, base+"/v1/approvals", "", cred)
 		if code == 200 {
 			var list []domain.Approval
 			_ = json.Unmarshal(body, &list)
@@ -109,7 +137,7 @@ func waitRunSettled(t *testing.T, base, cred, runID string, timeout time.Duratio
 	deadline := time.Now().Add(timeout)
 	var last domain.Run
 	for time.Now().Before(deadline) {
-		code, body := httpJSON(t, http.MethodGet, base+"/v1/runs/"+runID, "", cred)
+		code, body := approvalHTTPJSON(t, http.MethodGet, base+"/v1/runs/"+runID, "", cred)
 		if code == 200 {
 			_ = json.Unmarshal(body, &last)
 			if last.Status.Terminal() || last.Status == domain.RunIntegrationBlocked {
@@ -130,7 +158,7 @@ func TestApprovalDenyEndToEnd(t *testing.T) {
 	if ap.RunID != runID {
 		t.Fatalf("approval run %s != %s", ap.RunID, runID)
 	}
-	code, body := httpJSON(t, http.MethodPost, base+"/v1/approvals/"+ap.ID+"/resolve", `{"status":"denied"}`, cred)
+	code, body := approvalHTTPJSON(t, http.MethodPost, base+"/v1/approvals/"+ap.ID+"/resolve", `{"status":"denied"}`, cred)
 	if code != 200 {
 		t.Fatalf("resolve deny %d %s", code, body)
 	}
@@ -139,7 +167,7 @@ func TestApprovalDenyEndToEnd(t *testing.T) {
 		t.Fatal("protected operation executed despite DENY")
 	}
 	// No pending approval remains.
-	code, body = httpJSON(t, http.MethodGet, base+"/v1/approvals", "", cred)
+	code, body = approvalHTTPJSON(t, http.MethodGet, base+"/v1/approvals", "", cred)
 	if code != 200 {
 		t.Fatalf("list approvals %d", code)
 	}
@@ -157,7 +185,7 @@ func TestApprovalDenyEndToEnd(t *testing.T) {
 func TestApprovalApproveEndToEnd(t *testing.T) {
 	base, cred, runID, canary, _ := approvalSetup(t)
 	ap := waitApproval(t, base, cred)
-	code, body := httpJSON(t, http.MethodPost, base+"/v1/approvals/"+ap.ID+"/resolve", `{"status":"allowed"}`, cred)
+	code, body := approvalHTTPJSON(t, http.MethodPost, base+"/v1/approvals/"+ap.ID+"/resolve", `{"status":"allowed"}`, cred)
 	if code != 200 {
 		t.Fatalf("resolve allow %d %s", code, body)
 	}
@@ -191,7 +219,7 @@ func TestApprovalResolveRequiresAuth(t *testing.T) {
 	if err := a.Store.InsertApproval(ctx, ap); err != nil {
 		t.Fatal(err)
 	}
-	code, _ := httpJSON(t, http.MethodPost, ts.URL+"/v1/approvals/"+ap.ID+"/resolve", `{"status":"denied"}`, "")
+	code, _ := approvalHTTPJSON(t, http.MethodPost, ts.URL+"/v1/approvals/"+ap.ID+"/resolve", `{"status":"denied"}`, "")
 	if code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated resolve = %d, want 401", code)
 	}
@@ -207,7 +235,7 @@ func TestApprovalResolveRequiresAuth(t *testing.T) {
 func TestApprovalCancelWhilePending(t *testing.T) {
 	base, cred, runID, canary, _ := approvalSetup(t)
 	waitApproval(t, base, cred)
-	code, body := httpJSON(t, http.MethodPost, base+"/v1/runs/"+runID+"/cancel", `{}`, cred)
+	code, body := approvalHTTPJSON(t, http.MethodPost, base+"/v1/runs/"+runID+"/cancel", `{}`, cred)
 	if code != 200 {
 		t.Fatalf("cancel %d %s", code, body)
 	}
@@ -218,7 +246,7 @@ func TestApprovalCancelWhilePending(t *testing.T) {
 	if _, err := os.Stat(canary); err == nil {
 		t.Fatal("protected operation executed after cancellation")
 	}
-	code, body = httpJSON(t, http.MethodGet, base+"/v1/approvals", "", cred)
+	code, body = approvalHTTPJSON(t, http.MethodGet, base+"/v1/approvals", "", cred)
 	if code != 200 {
 		t.Fatalf("list approvals %d", code)
 	}
