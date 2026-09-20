@@ -52,6 +52,10 @@ func setupInterruptedWrite(t *testing.T) (st *storage.Store, runID, runPath stri
 	if err != nil {
 		t.Fatal(err)
 	}
+	canon, err := workspace.CanonicalTreeHash(snap.TreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	stg := &domain.Stage{RunID: run.ID, Kind: domain.StageExecute, Ordinal: 1, Status: domain.AttemptRunning}
 	if err := st.AppendStage(ctx, stg); err != nil {
 		t.Fatal(err)
@@ -60,7 +64,7 @@ func setupInterruptedWrite(t *testing.T) (st *storage.Store, runID, runPath stri
 	if err := st.AppendAttempt(ctx, att); err != nil {
 		t.Fatal(err)
 	}
-	cp := &domain.WorkspaceCheckpoint{WorkspaceID: rec.ID, RunID: run.ID, StageID: stg.ID, AttemptID: att.ID, Name: "pre-attempt", TreeHash: snap.TreeHash, TreePath: cpDir}
+	cp := &domain.WorkspaceCheckpoint{WorkspaceID: rec.ID, RunID: run.ID, StageID: stg.ID, AttemptID: att.ID, Name: "pre-attempt", TreeHash: canon, HashVersion: 2, TreePath: cpDir}
 	if err := st.InsertCheckpoint(ctx, cp); err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +106,30 @@ func TestRecoveryRestoresInterruptedWriteCheckpoint(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no checkpoint.restored event")
+	}
+}
+
+func TestRecoveryDetectsCheckpointTreeCorruption(t *testing.T) {
+	st, runID, runPath := setupInterruptedWrite(t)
+	cps, _ := st.ListCheckpointsByRun(context.Background(), runID)
+	if len(cps) != 1 {
+		t.Fatalf("expected 1 checkpoint, got %d", len(cps))
+	}
+	// Corrupt a file inside the checkpoint tree (metadata untouched).
+	target := filepath.Join(cps[0].TreePath, "tree", "tracked.txt")
+	if err := os.WriteFile(target, []byte("corrupted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(context.Background(), st, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := st.GetRun(context.Background(), runID)
+	if run.Status != domain.RunBlocked || run.BlockedReason != domain.BlockedRecovery {
+		t.Fatalf("expected blocked recovery on corrupt tree, got %s %s", run.Status, run.BlockedReason)
+	}
+	// Partial workspace must not have been trusted or restored.
+	if got, _ := os.ReadFile(filepath.Join(runPath, "tracked.txt")); string(got) != "half-written" {
+		t.Fatalf("corrupt checkpoint unexpectedly changed workspace: %q", got)
 	}
 }
 

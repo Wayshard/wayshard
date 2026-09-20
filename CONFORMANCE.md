@@ -85,7 +85,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Object GC, workspace retention, disk pressure gate | `internal/storage/gc.go`, `scheduler.tick` | `gc_test.go`; low-disk gate blocks write-heavy runs with `BlockedStorage` | done |
 | Backup excludes repos; optional secrets | `internal/backup` | `backup_test.go` | done |
 | Startup reconciliation of interrupted attempts/stages and incomplete publication journals; interrupted write attempts restore from a pre-attempt workspace checkpoint | `internal/recovery`, `orchestrator.checkpointBeforeWrite`, `workspace.RestoreSnapshot` | `TestRecoveryRestoresInterruptedWriteCheckpoint`, `TestRecoveryBlocksOnCorruptCheckpoint`, `TestWriteAttemptCreatesCheckpoint` | done (Linux); no orphan-process sweep; publication crash injection still not black-box tested |
-| Durable pre-attempt workspace checkpoints (schema v2) for Executor/Repair; corruption fails closed | `internal/storage/checkpoints.go`, `internal/orchestrator/checkpoint.go` | `TestWriteAttemptCreatesCheckpoint`, `TestRecoveryBlocksOnCorruptCheckpoint`, `TestUpgradeFromV1` | done |
+| Durable pre-attempt workspace checkpoints (schema v3) for Executor/Repair with canonical tree hash (version 2), verify-before-restore, and fail-closed corruption handling | `internal/storage/checkpoints.go`, `internal/orchestrator/checkpoint.go`, `internal/workspace/treehash.go`, `internal/recovery` | `TestCanonicalTreeHashVectors`, `TestRecoveryRestoresInterruptedWriteCheckpoint`, `TestRecoveryDetectsCheckpointTreeCorruption`, `TestRecoveryBlocksOnCorruptCheckpoint`, `TestWriteAttemptCreatesCheckpoint`, `TestUpgradeFromV1` | done (integration); true server SIGKILL/restart process proof and GC pinning still outstanding |
 
 ## Clients
 

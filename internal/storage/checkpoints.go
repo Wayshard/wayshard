@@ -19,9 +19,9 @@ func (s *Store) InsertCheckpoint(ctx context.Context, cp *domain.WorkspaceCheckp
 		cp.CreatedAt = time.Now().UTC()
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_checkpoints(id, workspace_id, name, object_hash, created_at, run_id, stage_id, attempt_id, tree_hash, tree_path)
-			VALUES (?,?,?,?,?,?,?,?,?,?)`,
-			cp.ID, cp.WorkspaceID, cp.Name, "", cp.CreatedAt.Format(time.RFC3339Nano), cp.RunID, cp.StageID, cp.AttemptID, cp.TreeHash, cp.TreePath); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_checkpoints(id, workspace_id, name, object_hash, created_at, run_id, stage_id, attempt_id, tree_hash, tree_path, hash_version)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+			cp.ID, cp.WorkspaceID, cp.Name, "", cp.CreatedAt.Format(time.RFC3339Nano), cp.RunID, cp.StageID, cp.AttemptID, cp.TreeHash, cp.TreePath, cp.HashVersion); err != nil {
 			return err
 		}
 		_, err := InsertEventJSON(ctx, tx, "checkpoint.created", "", "", cp.RunID, map[string]any{
@@ -34,7 +34,7 @@ func (s *Store) InsertCheckpoint(ctx context.Context, cp *domain.WorkspaceCheckp
 func scanCheckpoint(row scanner) (*domain.WorkspaceCheckpoint, error) {
 	var cp domain.WorkspaceCheckpoint
 	var created string
-	if err := row.Scan(&cp.ID, &cp.WorkspaceID, &cp.RunID, &cp.StageID, &cp.AttemptID, &cp.Name, &cp.TreeHash, &cp.TreePath, &created); err != nil {
+	if err := row.Scan(&cp.ID, &cp.WorkspaceID, &cp.RunID, &cp.StageID, &cp.AttemptID, &cp.Name, &cp.TreeHash, &cp.TreePath, &cp.HashVersion, &created); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
 		}
@@ -44,7 +44,7 @@ func scanCheckpoint(row scanner) (*domain.WorkspaceCheckpoint, error) {
 	return &cp, nil
 }
 
-const checkpointCols = `id, workspace_id, run_id, stage_id, attempt_id, name, tree_hash, tree_path, created_at`
+const checkpointCols = `id, workspace_id, run_id, stage_id, attempt_id, name, tree_hash, tree_path, hash_version, created_at`
 
 // EmitEvent records a durable high-level event outside a domain mutation.
 func (s *Store) EmitEvent(ctx context.Context, typ, runID string, payload any) error {

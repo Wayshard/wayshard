@@ -29,13 +29,19 @@ func (e *Engine) checkpointBeforeWrite(ctx context.Context, run *domain.Run, st 
 	if err != nil {
 		return err
 	}
+	canon, err := workspace.CanonicalTreeHash(snap.TreePath)
+	if err != nil {
+		_ = os.RemoveAll(cpDir)
+		return err
+	}
 	cp := &domain.WorkspaceCheckpoint{
 		WorkspaceID: ws.ID,
 		RunID:       run.ID,
 		StageID:     st.ID,
 		AttemptID:   att.ID,
 		Name:        "pre-attempt",
-		TreeHash:    snap.TreeHash,
+		TreeHash:    canon,
+		HashVersion: 2,
 		TreePath:    cpDir,
 	}
 	if err := e.Store.InsertCheckpoint(ctx, cp); err != nil {

@@ -13,6 +13,7 @@ type WorkspaceCheckpoint struct {
 	AttemptID   string    `json:"attemptId"`
 	Name        string    `json:"name"`
 	TreeHash    string    `json:"treeHash"`
+	HashVersion int       `json:"hashVersion"`
 	TreePath    string    `json:"treePath"`
 	CreatedAt   time.Time `json:"createdAt"`
 }

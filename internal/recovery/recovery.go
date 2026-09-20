@@ -28,8 +28,15 @@ func restoreWriteCheckpoint(ctx context.Context, st *storage.Store, r domain.Run
 	if err != nil {
 		return fmt.Errorf("load checkpoint: %w", err)
 	}
-	if snap.TreeHash != "" && cp.TreeHash != "" && snap.TreeHash != cp.TreeHash {
-		return fmt.Errorf("checkpoint hash mismatch")
+	if cp.HashVersion != 2 {
+		return fmt.Errorf("checkpoint hash version %d is not verifiable", cp.HashVersion)
+	}
+	canon, err := workspace.CanonicalTreeHash(snap.TreePath)
+	if err != nil {
+		return fmt.Errorf("hash checkpoint tree: %w", err)
+	}
+	if canon != cp.TreeHash {
+		return fmt.Errorf("checkpoint tree hash mismatch")
 	}
 	ws, err := st.GetWorkspaceByRun(ctx, r.ID)
 	if err != nil {
