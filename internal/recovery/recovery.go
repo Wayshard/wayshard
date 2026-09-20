@@ -6,12 +6,36 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/integration"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
 )
+
+// validateCheckpointPath ensures a persisted checkpoint tree path stays inside
+// the Wayshard runtime workspace root and belongs to the expected run, so a
+// stored path cannot redirect restoration outside trusted state.
+func validateCheckpointPath(st *storage.Store, runID string, cp *domain.WorkspaceCheckpoint) error {
+	root := filepath.Join(st.Root, "runtime", "workspaces")
+	clean := filepath.Clean(cp.TreePath)
+	resolved := clean
+	if rp, err := filepath.EvalSymlinks(clean); err == nil {
+		resolved = rp
+	}
+	rootResolved := root
+	if rp, err := filepath.EvalSymlinks(root); err == nil {
+		rootResolved = rp
+	}
+	if resolved != rootResolved && !strings.HasPrefix(resolved, rootResolved+string(os.PathSeparator)) {
+		return fmt.Errorf("checkpoint path escapes runtime root")
+	}
+	if !strings.Contains(clean, runID) {
+		return fmt.Errorf("checkpoint path does not belong to run %s", runID)
+	}
+	return nil
+}
 
 // restoreWriteCheckpoint restores the authoritative run workspace from the
 // pre-attempt checkpoint of an interrupted write attempt, discarding partial
@@ -28,10 +52,13 @@ func restoreWriteCheckpoint(ctx context.Context, st *storage.Store, r domain.Run
 	if err != nil {
 		return fmt.Errorf("load checkpoint: %w", err)
 	}
-	if cp.HashVersion != 2 {
+	if cp.HashVersion != 3 {
 		return fmt.Errorf("checkpoint hash version %d is not verifiable", cp.HashVersion)
 	}
-	canon, err := workspace.CanonicalTreeHash(snap.TreePath)
+	if err := validateCheckpointPath(st, r.ID, cp); err != nil {
+		return err
+	}
+	canon, err := workspace.CanonicalTreeHashV3(snap.TreePath)
 	if err != nil {
 		return fmt.Errorf("hash checkpoint tree: %w", err)
 	}

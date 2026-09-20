@@ -84,3 +84,52 @@ func TestCanonicalTreeHashVectors(t *testing.T) {
 	})
 	check("empty dir add", func(r string) { _ = os.MkdirAll(filepath.Join(r, "empty"), 0o755) })
 }
+
+// TestCanonicalTreeHashV3Adversarial proves the v3 length-prefixed encoding
+// distinguishes trees that differ only by delimiter-like characters in names or
+// symlink targets, and remains independent of the absolute root path.
+func TestCanonicalTreeHashV3Adversarial(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX filename characters")
+	}
+	names := []string{"a b", "a\tb", "a\nb", "a#b", "f a b", "a b f", "d/a"}
+	seen := map[string]string{}
+	for _, n := range names {
+		r := t.TempDir()
+		mustWrite(t, filepath.Join(r, filepath.FromSlash(n)), "x", 0o644)
+		h, err := CanonicalTreeHashV3(r)
+		if err != nil {
+			t.Fatalf("name %q: %v", n, err)
+		}
+		if prev, ok := seen[h]; ok {
+			t.Fatalf("v3 collision between %q and %q", prev, n)
+		}
+		seen[h] = n
+	}
+	// Symlink targets containing delimiters must differ.
+	t1 := t.TempDir()
+	_ = os.Symlink("x y", filepath.Join(t1, "l"))
+	t2 := t.TempDir()
+	_ = os.Symlink("x\ny", filepath.Join(t2, "l"))
+	h1, _ := CanonicalTreeHashV3(t1)
+	h2, _ := CanonicalTreeHashV3(t2)
+	if h1 == h2 {
+		t.Fatal("v3 did not distinguish symlink targets with delimiters")
+	}
+	// Path independence for v3.
+	r1 := t.TempDir()
+	buildBaseline(t, r1)
+	r2 := t.TempDir()
+	buildBaseline(t, r2)
+	a, err := CanonicalTreeHashV3(r1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := CanonicalTreeHashV3(r2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Fatal("v3 depends on absolute root path")
+	}
+}

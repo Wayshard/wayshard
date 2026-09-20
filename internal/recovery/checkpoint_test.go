@@ -47,15 +47,6 @@ func setupInterruptedWrite(t *testing.T) (st *storage.Store, runID, runPath stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	cpDir := filepath.Join(t.TempDir(), "cp")
-	snap, err := b.CaptureSnapshot(ctx, workspace.CaptureOptions{SnapshotDir: cpDir, ID: "cp1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	canon, err := workspace.CanonicalTreeHash(snap.TreePath)
-	if err != nil {
-		t.Fatal(err)
-	}
 	stg := &domain.Stage{RunID: run.ID, Kind: domain.StageExecute, Ordinal: 1, Status: domain.AttemptRunning}
 	if err := st.AppendStage(ctx, stg); err != nil {
 		t.Fatal(err)
@@ -64,7 +55,16 @@ func setupInterruptedWrite(t *testing.T) (st *storage.Store, runID, runPath stri
 	if err := st.AppendAttempt(ctx, att); err != nil {
 		t.Fatal(err)
 	}
-	cp := &domain.WorkspaceCheckpoint{WorkspaceID: rec.ID, RunID: run.ID, StageID: stg.ID, AttemptID: att.ID, Name: "pre-attempt", TreeHash: canon, HashVersion: 2, TreePath: cpDir}
+	cpDir := filepath.Join(st.Root, "runtime", "workspaces", run.ID, "checkpoints", stg.ID, "1")
+	snap, err := b.CaptureSnapshot(ctx, workspace.CaptureOptions{SnapshotDir: cpDir, ID: "cp1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canon, err := workspace.CanonicalTreeHashV3(snap.TreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp := &domain.WorkspaceCheckpoint{WorkspaceID: rec.ID, RunID: run.ID, StageID: stg.ID, AttemptID: att.ID, Name: "pre-attempt", TreeHash: canon, HashVersion: 3, TreePath: cpDir}
 	if err := st.InsertCheckpoint(ctx, cp); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +130,31 @@ func TestRecoveryDetectsCheckpointTreeCorruption(t *testing.T) {
 	// Partial workspace must not have been trusted or restored.
 	if got, _ := os.ReadFile(filepath.Join(runPath, "tracked.txt")); string(got) != "half-written" {
 		t.Fatalf("corrupt checkpoint unexpectedly changed workspace: %q", got)
+	}
+}
+
+func TestRecoveryRejectsCheckpointOutsideRuntimeRoot(t *testing.T) {
+	st, runID, _ := setupInterruptedWrite(t)
+	ctx := context.Background()
+	stages, _ := st.ListStages(ctx, runID)
+	atts, _ := st.ListAttempts(ctx, stages[0].ID)
+	ws, err := st.GetWorkspaceByRun(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := &domain.WorkspaceCheckpoint{
+		WorkspaceID: ws.ID, RunID: runID, StageID: stages[0].ID, AttemptID: atts[0].ID,
+		Name: "bad", TreeHash: "deadbeef", HashVersion: 3, TreePath: t.TempDir(),
+	}
+	if err := st.InsertCheckpoint(ctx, bad); err != nil {
+		t.Fatal(err)
+	}
+	if err := Reconcile(ctx, st, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	run, _ := st.GetRun(ctx, runID)
+	if run.Status != domain.RunBlocked || run.BlockedReason != domain.BlockedRecovery {
+		t.Fatalf("expected blocked recovery for out-of-root checkpoint, got %s %s", run.Status, run.BlockedReason)
 	}
 }
 
