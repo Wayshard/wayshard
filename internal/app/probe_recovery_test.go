@@ -138,14 +138,14 @@ func TestProcessBoundaryProbeDescendantReconciled(t *testing.T) {
 		}
 	})
 
-	// SIGKILL server A and confirm the descendant survived it.
+	// SIGKILL server A. With a private PID namespace (ProcIsolation), killing the
+	// probe (namespace init) tears down the whole namespace, so the descendant
+	// may already be gone; otherwise it must be reconciled by server B.
 	_ = cmdA.Process.Kill()
 	_ = cmdA.Wait()
 	time.Sleep(500 * time.Millisecond)
-	if !procAlive(probePid) {
-		t.Fatalf("probe descendant %d did not survive server SIGKILL", probePid)
-	}
-	t.Logf("probe crash path: server A=%d server B pending probe=%d unrelated=%d", cmdA.Process.Pid, probePid, unrelated)
+	survived := procAlive(probePid)
+	t.Logf("probe crash path: server A=%d probe=%d survivedSIGKILL=%v unrelated=%d", cmdA.Process.Pid, probePid, survived, unrelated)
 
 	// Server B: no daemon knob, so discovery cannot spawn a replacement. Startup
 	// reconciliation must terminate the surviving probe descendant.

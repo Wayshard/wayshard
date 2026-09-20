@@ -35,6 +35,14 @@ func runHelper(args []string) bool {
 	if p.SyntheticTemp != "" {
 		_ = os.MkdirAll(p.SyntheticTemp, 0o700)
 	}
+	if p.ProcIsolation {
+		if err := setupProcIsolation(); err != nil {
+			// Best-effort: if a scoped procfs cannot be mounted, do not grant
+			// the host /proc. Existing (no-/proc) security is preserved.
+			p.ReadOnlyRoots = dropRoot(p.ReadOnlyRoots, "/proc")
+			fmt.Fprintln(os.Stderr, "wayshard-sandbox: scoped procfs unavailable:", err)
+		}
+	}
 	if err := applyLandlock(p); err != nil {
 		if p.Required {
 			fmt.Fprintln(os.Stderr, "wayshard-sandbox: required confinement failed:", err)
@@ -79,4 +87,15 @@ func runHelper(args []string) bool {
 		os.Exit(127)
 	}
 	return true
+}
+
+// dropRoot removes a single path from a Landlock root list.
+func dropRoot(roots []string, drop string) []string {
+	out := roots[:0]
+	for _, r := range roots {
+		if r != drop {
+			out = append(out, r)
+		}
+	}
+	return out
 }

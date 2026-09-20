@@ -17,6 +17,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/provider"
+	"github.com/Wayshard/wayshard/internal/routing"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
@@ -74,6 +75,9 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	// permits its owned config dirs plus the workspace and system roots.
 	extras := harnessExtras(req)
 	extras[process.TokenEnv] = token
+	if p := harnessEnvPATH(inst.Executable, os.Getenv("PATH")); p != os.Getenv("PATH") {
+		extras["PATH"] = p
+	}
 	spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
 
 	var providerCleanup func()
@@ -115,7 +119,11 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		proxyAddr := fmt.Sprintf("127.0.0.1:%d", proxyPort)
 		extras["HTTPS_PROXY"] = "http://" + proxyAddr
 		extras["HTTP_PROXY"] = "http://" + proxyAddr
-		extras["NO_PROXY"] = ""
+		// The provider namespace has no host route: "localhost" is the isolated
+		// namespace loopback (the sanctioned shim and the harness's own local
+		// server). Allowing NO_PROXY for loopback does not weaken the boundary,
+		// while forcing loopback through the proxy would break harness-local IPC.
+		extras["NO_PROXY"] = providerNoProxy
 		spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
 
 		cfg := provider.ShimConfig{
@@ -180,6 +188,12 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		ReadTextFile:      e.readHook(req),
 		WriteTextFile:     e.writeHook(req),
 	}
+	if e.ProviderLog != nil {
+		// Bounded, already-redacted harness diagnostics; debug-level only.
+		hooks.OnDiagnostic = func(d acp.Diagnostic) {
+			e.ProviderLog.Debug("harness diagnostic", "source", d.Source, "text", d.Text)
+		}
+	}
 	var sbe sandbox.Backend
 	if e.Sandbox != nil {
 		sbe = e.Sandbox.Backend
@@ -225,18 +239,28 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	}
 	sess, err := drv.NewSession(ctx, acp.NewSessionRequest{CWD: cwd, MCPServers: []acp.MCPServer{}})
 	if err != nil {
-		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
+		return orchestrator.StageResult{Class: classifyHarnessError(err), Err: err}, err
+	}
+	if req.Route.ModelID != "" {
+		if merr := selectSessionModel(ctx, drv, sess.SessionID, req.Route); merr != nil {
+			if e.ProviderLog != nil {
+				e.ProviderLog.Debug("harness model selection", "model", req.Route.ModelID, "err", merr)
+			}
+		}
 	}
 	prompt := req.Task.Objective
 	if req.Bundle != "" {
 		prompt = req.Bundle + "\n\n" + prompt
+	}
+	if instr := artifactInstruction(req.Stage.Kind); instr != "" {
+		prompt += "\n\n" + instr
 	}
 	_, err = drv.Prompt(ctx, acp.PromptRequest{
 		SessionID: sess.SessionID,
 		Prompt:    []acp.ContentBlock{acp.TextBlock(prompt)},
 	})
 	if err != nil {
-		class := domain.FailInfrastructure
+		class := classifyHarnessError(err)
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			class = domain.FailUser
 		}
@@ -306,6 +330,10 @@ func (e *ACPExec) policyFor(req orchestrator.StageRequest, cwd, tmp, realHome st
 	for _, r := range harnessConfigRoots(req.Route.Harness.DefinitionID, req.Route.Harness.Adapter, realHome) {
 		pol.ReadWriteRoots = append(pol.ReadWriteRoots, r)
 	}
+	// A script/symlink harness needs its package tree and interpreter readable
+	// (read-only) to launch; this is scoped to the harness's own package.
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessClosureFor(req.Route.Harness.Executable).Roots...)
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessProcRoots()...)
 	if extra := os.Getenv("WAYSHARD_HARNESS_EXTRA_ROOTS"); extra != "" {
 		pol.ReadWriteRoots = append(pol.ReadWriteRoots, filepath.SplitList(extra)...)
 	}
@@ -522,3 +550,69 @@ func fakeStage(k domain.StageKind) string {
 
 // Compile-time assertion that storage is referenced (kept for API clarity).
 var _ = storage.ErrNotFound
+
+// providerNoProxy keeps harness-local loopback IPC off the proxy. The provider
+// namespace has no host route, so this does not restore host/localhost access.
+const providerNoProxy = "127.0.0.1,localhost,::1"
+
+// selectSessionModel applies the route's model to a freshly created session
+// using the method the harness adapter uses. Agents differ: OpenCode exposes a
+// "model" config option while Codex uses session/set_model.
+func selectSessionModel(ctx context.Context, drv *acp.Driver, sessionID string, cand routing.Candidate) error {
+	switch cand.Harness.Adapter {
+	case AdapterOpenCode:
+		return drv.SetConfigOption(ctx, sessionID, "model", cand.ModelID)
+	case AdapterCodex:
+		return drv.SetModel(ctx, sessionID, cand.ModelID)
+	default:
+		if err := drv.SetConfigOption(ctx, sessionID, "model", cand.ModelID); err == nil {
+			return nil
+		}
+		return drv.SetModel(ctx, sessionID, cand.ModelID)
+	}
+}
+
+// artifactInstruction is the universal structured final-response contract for a
+// real harness that has no native structured submission channel. The server
+// still validates the artifact schema.
+func artifactInstruction(kind domain.StageKind) string {
+	switch kind {
+	case domain.StagePlan, domain.StageReplan:
+		return "When you are finished, reply with ONLY a single JSON object (no prose, no code fences) of the form:\n" +
+			`{"kind":"plan","objective":"<one line>","constraints":["..."],"acceptanceCriteria":["..."],"expectedPaths":["..."],"validationPlan":["..."],"risks":["..."],"assumptions":["..."],"artifactOnly":false}` +
+			"\nDo not include any text before or after the JSON."
+	case domain.StageExecute, domain.StageRepair:
+		return "Perform the work in the current working directory. When you are finished, reply with ONLY a single JSON object (no prose, no code fences) of the form:\n" +
+			`{"kind":"implementation","summary":"<what changed>","filesChanged":["relative/path"],"deviations":["..."],"expectedValidation":["..."]}` +
+			"\nDo not include any text before or after the JSON."
+	case domain.StageReview:
+		return "Review the run delta against the acceptance criteria. Reply with ONLY a single JSON object (no prose, no code fences) of the form:\n" +
+			`{"kind":"review","verdict":"pass|fail|insufficient","criteria":[{"id":"...","status":"pass|fail|not_verified","evidence":"..."}],"findings":[{"severity":"blocking|major|minor|info","path":"...","explanation":"...","requiredFix":"..."}]}` +
+			"\nDo not include any text before or after the JSON."
+	case domain.StageExplore:
+		return "When you are finished, reply with ONLY a single JSON object (no prose, no code fences) of the form:\n" +
+			`{"kind":"investigation","question":"...","findings":["..."],"openQuestions":["..."]}` +
+			"\nDo not include any text before or after the JSON."
+	default:
+		return ""
+	}
+}
+
+// classifyHarnessError maps an ACP error to a failure class. Authentication and
+// provider-account/quota failures are policy outcomes so the orchestrator does
+// not retry them as infrastructure; everything else is infrastructure.
+func classifyHarnessError(err error) domain.FailureClass {
+	var rpc *acp.Error
+	if errors.As(err, &rpc) {
+		if rpc.AuthRequired() {
+			return domain.FailPolicy
+		}
+		blob := strings.ToLower(rpc.Message + " " + string(rpc.Data))
+		for _, s := range []string{"usagelimitexceeded", "usage limit", "insufficient_quota", "quota", "billing"} {
+			if strings.Contains(blob, s) {
+				return domain.FailPolicy
+			}
+		}
+	}
+	return domain.FailInfrastructure
+}

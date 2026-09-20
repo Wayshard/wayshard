@@ -8,8 +8,62 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
+
+// setupProcIsolation mounts a procfs scoped to this process's PID namespace.
+// It must run after the helper was created with CLONE_NEWPID|CLONE_NEWNS (and a
+// user namespace when unprivileged), and before Landlock/seccomp.
+func setupProcIsolation() error {
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		return fmt.Errorf("make mount propagation private: %w", err)
+	}
+	if err := unix.Mount("proc", "/proc", "proc", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, ""); err != nil {
+		return fmt.Errorf("mount scoped procfs: %w", err)
+	}
+	return nil
+}
+
+// procProbeExit mounts a scoped procfs in the current (already cloned) PID and
+// mount namespace. Used as the capability probe body.
+func procProbeExit() int {
+	if err := setupProcIsolation(); err != nil {
+		return 1
+	}
+	return 0
+}
+
+var (
+	procOnce sync.Once
+	procOK   bool
+)
+
+// procIsolationSupported probes once whether this platform can mount a procfs
+// scoped to a private PID namespace. When it cannot, ProcIsolation is skipped
+// and /proc is not granted, rather than exposing the host procfs or failing
+// every harness/probe launch.
+func procIsolationSupported() bool {
+	procOnce.Do(func() {
+		exe, err := os.Executable()
+		if err != nil {
+			return
+		}
+		attr := &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWPID | unix.CLONE_NEWNS}
+		if os.Geteuid() != 0 {
+			attr.Cloneflags |= unix.CLONE_NEWUSER
+			attr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Geteuid(), Size: 1}}
+			attr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
+			attr.GidMappingsEnableSetgroups = false
+		}
+		cmd := exec.Command(exe, ProcProbeArg)
+		cmd.SysProcAttr = attr
+		procOK = cmd.Run() == nil
+	})
+	return procOK
+}
 
 func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 	if err := compileCommon(p, true); err != nil {
@@ -75,6 +129,18 @@ func (b LinuxBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 	}
 	cmd.SysProcAttr.Setpgid = true
 	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
+	if p.ProcIsolation && procIsolationSupported() {
+		// A private PID + mount namespace lets the helper mount a procfs scoped
+		// to this process and its descendants, so /proc never exposes host
+		// processes. A user namespace is needed to mount it unprivileged.
+		cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWPID | unix.CLONE_NEWNS
+		if os.Geteuid() != 0 {
+			cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWUSER
+			cmd.SysProcAttr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Geteuid(), Size: 1}}
+			cmd.SysProcAttr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
+			cmd.SysProcAttr.GidMappingsEnableSetgroups = false
+		}
+	}
 
 	helper := os.Getenv("WAYSHARD_SANDBOX_HELPER")
 	if helper == "" {

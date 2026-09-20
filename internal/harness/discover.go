@@ -226,6 +226,12 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	_ = os.MkdirAll(home, 0o700)
 	_ = os.MkdirAll(tmp, 0o700)
 	pol := sandbox.ProbePolicy(inst.Executable, home, tmp)
+	// A script/symlink harness (for example a Node ACP adapter) needs its
+	// package tree and interpreter available to launch at all. These are
+	// read-only and scoped to the harness's own package, never the home dir.
+	closure := harnessClosureFor(inst.Executable)
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, closure.Roots...)
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessProcRoots()...)
 
 	// The deterministic fake harness scenario knob is forwarded so its behavior
 	// is observable in tests; nothing else from the host environment survives.
@@ -234,6 +240,9 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 		if v := os.Getenv(k); v != "" {
 			base[k] = v
 		}
+	}
+	if p := harnessEnvPATH(inst.Executable, os.Getenv("PATH")); p != os.Getenv("PATH") {
+		base["PATH"] = p
 	}
 
 	// Every probe process tree gets durable ownership before launch so startup
@@ -250,7 +259,7 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	if verTimeout > 3*time.Second {
 		verTimeout = 3 * time.Second
 	}
-	out, verr := sandbox.RunConstrainedOutputWithStart(ctx, pol, verTimeout, 256<<10, inst.Executable, nil, versionEnv, func(pgid int) { probeSetPGID(versionLease, pgid) })
+	out, verr := sandbox.RunConstrainedOutputWithStart(ctx, pol, verTimeout, 256<<10, inst.Executable, probeVersionArgs(ad), versionEnv, func(pgid int) { probeSetPGID(versionLease, pgid) })
 	probeDone(versionLease)
 	if errors.Is(verr, sandbox.ErrRequiredIsolation) {
 		classifyProbeError(inst, verr)
@@ -317,10 +326,18 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	}
 
 	if len(init.AuthMethods) > 0 {
-		inst.Health = domain.HarnessUnauth
-		inst.AuthStatus = "unauthenticated"
-		inst.Compatibility = domain.CompatCore
-		inst.Notes = append(inst.Notes, "agent advertised auth methods; session creation may require authenticate")
+		// Many agents advertise auth methods even when they are already
+		// authenticated. The probe runs without real harness configuration, so it
+		// cannot determine auth state; report it honestly as unknown rather than
+		// assuming unauthenticated. Authentication stays harness-owned and is
+		// resolved when the harness actually runs with its config roots.
+		inst.AuthStatus = "unknown"
+		inst.Health = domain.HarnessReady
+		inst.Compatibility = domain.CompatRoutable
+		if init.AgentCapabilities.HasNativeResume() || ad.InterposeCommands() {
+			inst.Compatibility = domain.CompatEnhanced
+		}
+		inst.Notes = append(inst.Notes, "agent advertises auth methods; authentication is harness-owned and not verified by the probe")
 		return
 	}
 	inst.AuthStatus = "none"
@@ -328,6 +345,17 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	inst.Compatibility = domain.CompatRoutable
 	if init.AgentCapabilities.HasNativeResume() || ad.InterposeCommands() {
 		inst.Compatibility = domain.CompatEnhanced
+	}
+}
+
+// probeVersionArgs returns the argv used to ask a known harness for its version.
+// Unknown/generic harnesses keep the no-argument probe.
+func probeVersionArgs(ad HarnessAdapter) []string {
+	switch ad.ID() {
+	case AdapterOpenCode, AdapterCodex:
+		return []string{"--version"}
+	default:
+		return nil
 	}
 }
 

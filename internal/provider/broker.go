@@ -110,18 +110,26 @@ func (b *Broker) handle(c net.Conn) {
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
 
-	br := bufio.NewReader(c)
+	// Bound the CONNECT/bearer header phase so a malicious client cannot feed
+	// unbounded data into http.ReadRequest buffering. Only the header phase is
+	// bounded; once the tunnel is established the raw connection is used.
+	hr := &headerLimitReader{r: c, max: maxConnectHeaderBytes}
+	br := bufio.NewReader(hr)
 	line, err := br.ReadString('\n')
 	if err != nil {
 		return
 	}
-	if strings.TrimSpace(line) != b.bearer {
+	if len(line) > maxBearerLine || strings.TrimSpace(line) != b.bearer {
 		writeStatus(c, http.StatusUnauthorized)
 		return
 	}
 	req, err := http.ReadRequest(br)
 	if err != nil {
-		writeStatus(c, http.StatusBadRequest)
+		if hr.exceeded {
+			writeStatus(c, http.StatusRequestHeaderFieldsTooLarge)
+		} else {
+			writeStatus(c, http.StatusBadRequest)
+		}
 		return
 	}
 	if req.Method != http.MethodConnect {
@@ -140,15 +148,19 @@ func (b *Broker) handle(c net.Conn) {
 		writeStatus(c, http.StatusForbidden)
 		return
 	}
+	// Bound resolve+dial so a stalled destination cannot hold a goroutine
+	// indefinitely.
+	dctx, cancel := context.WithTimeout(context.Background(), upstreamDialTimeout)
+	defer cancel()
 	// Revalidate on every connection: a hostname that later resolves to a
 	// private/loopback address is refused (DNS rebinding).
-	addr, err := ResolveValidated(context.Background(), b.resolver, dest.Host)
+	addr, err := ResolveValidated(dctx, b.resolver, dest.Host)
 	if err != nil {
 		b.log.Warn("provider destination refused", "host", dest.Host, "port", dest.Port, "reason", "disallowed_address")
 		writeStatus(c, http.StatusForbidden)
 		return
 	}
-	upstream, err := b.dialer.DialContext(context.Background(), "tcp", net.JoinHostPort(addr.String(), strconv.Itoa(dest.Port)))
+	upstream, err := b.dialer.DialContext(dctx, "tcp", net.JoinHostPort(addr.String(), strconv.Itoa(dest.Port)))
 	if err != nil {
 		b.log.Warn("provider upstream dial failed", "host", dest.Host, "port", dest.Port, "reason", "dial_error")
 		writeStatus(c, http.StatusBadGateway)
@@ -199,7 +211,35 @@ func (b *Broker) Close() error {
 	return err
 }
 
-const maxConnectTargetLen = 512
+const (
+	maxConnectTargetLen   = 512
+	maxConnectHeaderBytes = 64 << 10
+	maxBearerLine         = 256
+	upstreamDialTimeout   = 30 * time.Second
+)
+
+// headerLimitReader bounds only the CONNECT/bearer header phase. Once the
+// tunnel is established the broker reads the raw connection, so the limit does
+// not truncate tunneled data.
+type headerLimitReader struct {
+	r        io.Reader
+	n        int
+	max      int
+	exceeded bool
+}
+
+func (h *headerLimitReader) Read(p []byte) (int, error) {
+	if h.n >= h.max {
+		h.exceeded = true
+		return 0, fmt.Errorf("provider connect header too large")
+	}
+	if len(p) > h.max-h.n {
+		p = p[:h.max-h.n]
+	}
+	n, err := h.r.Read(p)
+	h.n += n
+	return n, err
+}
 
 func splitConnectTarget(target string) (string, int, error) {
 	if target == "" || len(target) > maxConnectTargetLen {

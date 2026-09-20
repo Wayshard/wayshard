@@ -189,8 +189,8 @@ func TestDiscoverAuthAndMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Health != domain.HarnessUnauth {
-		t.Fatalf("auth health=%v %+v", got[0].Health, got)
+	if len(got) != 1 || got[0].Health != domain.HarnessReady || got[0].AuthStatus != "unknown" {
+		t.Fatalf("advertised-auth should be ready/unknown, health=%v auth=%v %+v", got[0].Health, got[0].AuthStatus, got)
 	}
 
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "malformed")

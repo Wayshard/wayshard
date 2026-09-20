@@ -109,25 +109,27 @@ func applyNetworkProvider() error {
 		{Code: unix.BPF_RET | unix.BPF_K, K: kill},
 		// 3: load syscall number.
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: dataNr},
-		// 4: io_uring_setup -> deny (target 12)
+		// 4: reject x32 ABI syscalls (nr has bit 0x40000000 set) -> deny (13)
+		{Code: bpfJSET, Jt: 8, Jf: 0, K: x32SyscallBit},
+		// 5: io_uring_setup -> deny (13)
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 7, Jf: 0, K: uint32(unix.SYS_IO_URING_SETUP)},
-		// 5: socket(2) -> inspect domain (target 6); anything else -> allow (13)
+		// 6: socket(2) -> inspect domain (7); anything else -> allow (14)
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 0, Jf: 7, K: uint32(unix.SYS_SOCKET)},
-		// 6: load domain.
+		// 7: load domain.
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: dataArg0},
-		// 7: AF_INET -> type check (9); else 8
+		// 8: AF_INET -> type check (10); else 9
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, Jf: 0, K: uint32(unix.AF_INET)},
-		// 8: AF_INET6 -> type check (9); else deny (12)
+		// 9: AF_INET6 -> type check (10); else deny (13)
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 0, Jf: 3, K: uint32(unix.AF_INET6)},
-		// 9: load type.
+		// 10: load type.
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: dataArg1},
-		// 10: mask off SOCK_NONBLOCK/SOCK_CLOEXEC.
+		// 11: mask off SOCK_NONBLOCK/SOCK_CLOEXEC.
 		{Code: unix.BPF_ALU | unix.BPF_AND | unix.BPF_K, K: 0xf},
-		// 11: SOCK_STREAM -> allow (13); else deny (12)
+		// 12: SOCK_STREAM -> allow (14); else deny (13)
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, Jf: 0, K: uint32(unix.SOCK_STREAM)},
-		// 12: deny
+		// 13: deny
 		{Code: unix.BPF_RET | unix.BPF_K, K: deny},
-		// 13: allow
+		// 14: allow
 		{Code: unix.BPF_RET | unix.BPF_K, K: allow},
 	}
 	return installSeccompFilter(filter)

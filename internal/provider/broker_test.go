@@ -157,3 +157,47 @@ func TestBrokerTunnelsAuthorizedConnect(t *testing.T) {
 	}
 	_ = fmt.Sprint()
 }
+
+// brokerStatusRaw writes a raw request (tolerating a write error when the broker
+// closes early) and returns the first response line.
+func brokerStatusRaw(t *testing.T, b *Broker, bearer, req string) string {
+	t.Helper()
+	c, err := net.Dial("unix", b.SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = io.WriteString(c, bearer+"\n"+req)
+	line, _ := bufio.NewReader(c).ReadString('\n')
+	return strings.TrimSpace(line)
+}
+
+// TestBrokerBoundsConnectHeaders proves the CONNECT/bearer header phase is
+// bounded: normal requests succeed while oversized single or aggregate headers
+// are rejected without harming the broker.
+func TestBrokerBoundsConnectHeaders(t *testing.T) {
+	pub := netip.MustParseAddr("93.184.216.34")
+	res := &fakeResolver{addrs: map[string][]netip.Addr{"provider.test": {pub}}}
+	b := startTestBroker(t, res, mapDialer{target: startEcho(t)})
+
+	if got := brokerRoundTrip(t, b, "test-bearer", "CONNECT provider.test:443 HTTP/1.1\r\nHost: provider.test:443\r\nX-Normal: 1\r\n\r\n"); !strings.Contains(got, "200") {
+		t.Fatalf("normal CONNECT with headers rejected: %q", got)
+	}
+	if got := brokerStatusRaw(t, b, "test-bearer", "CONNECT provider.test:443 HTTP/1.1\r\nX-Big: "+strings.Repeat("A", 128<<10)+"\r\n\r\n"); !strings.Contains(got, "431") {
+		t.Fatalf("oversized single header not rejected: %q", got)
+	}
+	var agg strings.Builder
+	agg.WriteString("CONNECT provider.test:443 HTTP/1.1\r\n")
+	for i := 0; i < 4000; i++ {
+		fmt.Fprintf(&agg, "X-%d: %s\r\n", i, strings.Repeat("b", 64))
+	}
+	agg.WriteString("\r\n")
+	if got := brokerStatusRaw(t, b, "test-bearer", agg.String()); !strings.Contains(got, "431") {
+		t.Fatalf("excessive aggregate headers not rejected: %q", got)
+	}
+	// Broker remains healthy.
+	if got := brokerRoundTrip(t, b, "test-bearer", "CONNECT provider.test:443 HTTP/1.1\r\n\r\n"); !strings.Contains(got, "200") {
+		t.Fatalf("broker unhealthy after oversized headers: %q", got)
+	}
+}

@@ -43,6 +43,7 @@ func ProbePolicy(exePath, syntheticHome, syntheticTemp string) Policy {
 		MaxProcesses:   64,
 		MaxOutputBytes: 1 << 20,
 		Required:       true,
+		ProcIsolation:  true,
 	}
 }
 

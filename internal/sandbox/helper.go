@@ -7,12 +7,18 @@ import "os"
 // and all of its descendants inherit the confinement.
 const HelperArg = "__wayshard-sandbox-exec"
 
+// ProcProbeArg is the hidden argv marker for the scoped-procfs capability probe.
+const ProcProbeArg = "__wayshard-proc-probe"
+
 // init makes the helper dispatch available in every binary that links this
 // package (server, CLI, and test binaries), so os.Executable() is always a
 // valid helper target.
 func init() {
 	if MaybeRunHelper(os.Args) {
 		os.Exit(0)
+	}
+	if len(os.Args) >= 2 && os.Args[1] == ProcProbeArg {
+		os.Exit(procProbeExit())
 	}
 }
 

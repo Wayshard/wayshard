@@ -242,16 +242,26 @@ func harnessNetwork(definitionID, adapter string) domain.NetworkCapability {
 }
 
 // harnessTransport reports how a harness can be given provider connectivity.
-// Only explicitly compatible transports are accepted; an unknown transport
+// Only transports with empirical evidence are accepted; an unknown transport
 // keeps the provider route unavailable rather than assuming proxy support.
-// Real-harness transport compatibility is established in a provisioned pass,
-// not guessed from an executable name.
+// Real-harness transport compatibility is established by observing the harness
+// reach an authorized destination through the broker, not by executable name.
 func harnessTransport(definitionID, adapter string) domain.ProviderTransport {
-	switch definitionID {
-	case "wayshard-fake-acp":
+	switch {
+	case definitionID == "wayshard-fake-acp":
 		return domain.TransportHTTPProxy
+	case definitionID == "codex" || adapter == "codex":
+		// Verified: codex-acp's Codex app-server honors HTTPS_PROXY and its
+		// provider request traversed the Wayshard broker to the authorized
+		// destination (see the guarded real-harness provider test).
+		return domain.TransportHTTPProxy
+	case definitionID == "opencode" || adapter == "opencode":
+		// Verified: OpenCode honors HTTPS_PROXY and its provider request
+		// traversed the Wayshard broker to opencode.ai/models.opencode.ai.
+		return domain.TransportHTTPProxy
+	default:
+		return domain.TransportUnknown
 	}
-	return domain.TransportUnknown
 }
 
 type syntheticCandidates struct{}

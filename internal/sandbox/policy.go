@@ -39,6 +39,11 @@ type Policy struct {
 	MaxOutputBytes         int64
 	MaxDiskBytes           int64
 	Required               bool
+	// ProcIsolation runs the process in its own PID and mount namespace with a
+	// private procfs, so /proc is scoped to the process and its descendants and
+	// never exposes host processes. Used for harnesses/probes whose runtime
+	// (for example Bun) requires /proc. Never set for tool/validation policies.
+	ProcIsolation bool
 }
 
 type Backend interface {
@@ -142,8 +147,9 @@ func HarnessPolicy(runWorkspace, syntheticTemp string) Policy {
 		// Harnesses that require model/provider network are not launched under
 		// raw host networking. Secure provider-only isolation is not yet
 		// implemented, so required-isolation harnesses run with no network.
-		Network:  NetNone,
-		Required: true,
+		Network:       NetNone,
+		Required:      true,
+		ProcIsolation: true,
 	}
 }
 
@@ -156,5 +162,6 @@ func ReadOnlyViewPolicy(viewPath, syntheticTemp string) Policy {
 		SyntheticTemp:  syntheticTemp,
 		Network:        NetNone,
 		Required:       true,
+		ProcIsolation:  true,
 	}
 }

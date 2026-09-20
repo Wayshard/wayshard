@@ -310,6 +310,24 @@ func (d *Driver) NewSession(ctx context.Context, req NewSessionRequest) (*NewSes
 	return &resp, nil
 }
 
+// SetConfigOption sets an agent session config option (for example the "model"
+// option advertised by some agents). It returns an error when the agent does
+// not support the method.
+func (d *Driver) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
+	var resp json.RawMessage
+	return d.call(ctx, "session/set_config_option", map[string]any{
+		"sessionId": sessionID, "configId": configID, "value": value,
+	}, &resp)
+}
+
+// SetModel sets the session model using the method used by agents such as Codex.
+func (d *Driver) SetModel(ctx context.Context, sessionID, modelID string) error {
+	var resp json.RawMessage
+	return d.call(ctx, "session/set_model", map[string]any{
+		"sessionId": sessionID, "modelId": modelID,
+	}, &resp)
+}
+
 func (d *Driver) LoadSession(ctx context.Context, req LoadSessionRequest) (*LoadSessionResponse, error) {
 	if req.MCPServers == nil {
 		req.MCPServers = []MCPServer{}
