@@ -149,6 +149,11 @@ func TestRecoveryRejectsCheckpointOutsideRuntimeRoot(t *testing.T) {
 	if err := st.InsertCheckpoint(ctx, bad); err != nil {
 		t.Fatal(err)
 	}
+	// Associate the out-of-root checkpoint with the interrupted attempt: a
+	// stored path must never be able to redirect restoration elsewhere.
+	if err := st.SetAttemptCheckpoint(ctx, atts[0].ID, bad.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := Reconcile(ctx, st, slog.Default()); err != nil {
 		t.Fatal(err)
 	}

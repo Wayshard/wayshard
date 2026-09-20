@@ -423,6 +423,33 @@ func (s *Store) PendingApprovalCount(ctx context.Context, runID string) (int, er
 	return n, err
 }
 
+// CancelRunningAttempts marks any still-running attempt of a cancelled run as
+// cancelled. This keeps explicit cancellation durable and distinct from a
+// crash-interrupted attempt, so restart recovery never reactivates it.
+func (s *Store) CancelRunningAttempts(ctx context.Context, runID string) error {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id FROM stage_attempts WHERE run_id = ? AND status IN ('running','pending')`, runID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		_ = s.UpdateAttemptStatus(ctx, id, domain.AttemptCancelled, domain.FailUser, "cancelled")
+	}
+	return nil
+}
+
 // ResetStaleRunningStages marks any stage still running at startup as interrupted.
 func (s *Store) ResetStaleRunningStages(ctx context.Context, runID string) error {
 	stages, err := s.ListStages(ctx, runID)

@@ -37,20 +37,38 @@ func validateCheckpointPath(st *storage.Store, runID string, cp *domain.Workspac
 	return nil
 }
 
+// restoreOptionsForTest is nil in production. Tests may set it to inject
+// deterministic seams (source mutation during staging, abort before swap) into
+// the verified restore without adding a production crash switch.
+var restoreOptionsForTest func(*workspace.RestoreOptions)
+
+// checkpointForAttempt resolves the checkpoint explicitly associated with one
+// interrupted attempt. It never falls back to "latest checkpoint for the
+// stage/run", so a legacy attempt with no checkpoint fails closed instead of
+// silently restoring a different attempt's tree.
+func checkpointForAttempt(ctx context.Context, st *storage.Store, a domain.StageAttempt) (*domain.WorkspaceCheckpoint, error) {
+	if a.CheckpointID != "" {
+		cp, err := st.GetCheckpoint(ctx, a.CheckpointID)
+		if err != nil || cp == nil {
+			return nil, fmt.Errorf("checkpoint %s referenced by attempt %s is unavailable", a.CheckpointID, a.ID)
+		}
+		return cp, nil
+	}
+	cp, err := st.LatestCheckpointForAttempt(ctx, a.ID)
+	if err != nil || cp == nil {
+		return nil, fmt.Errorf("no checkpoint for interrupted write attempt %s", a.ID)
+	}
+	return cp, nil
+}
+
 // restoreWriteCheckpoint restores the authoritative run workspace from the
 // pre-attempt checkpoint of an interrupted write attempt, discarding partial
-// writes. It never trusts the current partially-written workspace.
+// writes. It never trusts the current partially-written workspace, and it
+// restores only from the exact bytes it cryptographically verified.
 func restoreWriteCheckpoint(ctx context.Context, st *storage.Store, r domain.Run, stg domain.Stage, a domain.StageAttempt, log *slog.Logger) error {
-	cp, err := st.LatestCheckpointForAttempt(ctx, a.ID)
+	cp, err := checkpointForAttempt(ctx, st, a)
 	if err != nil {
-		cp, err = st.LatestCheckpointForStage(ctx, stg.ID)
-	}
-	if err != nil || cp == nil {
-		return fmt.Errorf("no checkpoint for interrupted write attempt")
-	}
-	snap, err := workspace.LoadSnapshot(cp.TreePath)
-	if err != nil {
-		return fmt.Errorf("load checkpoint: %w", err)
+		return err
 	}
 	if cp.HashVersion != 3 {
 		return fmt.Errorf("checkpoint hash version %d is not verifiable", cp.HashVersion)
@@ -58,12 +76,9 @@ func restoreWriteCheckpoint(ctx context.Context, st *storage.Store, r domain.Run
 	if err := validateCheckpointPath(st, r.ID, cp); err != nil {
 		return err
 	}
-	canon, err := workspace.CanonicalTreeHashV3(snap.TreePath)
+	snap, err := workspace.LoadSnapshot(cp.TreePath)
 	if err != nil {
-		return fmt.Errorf("hash checkpoint tree: %w", err)
-	}
-	if canon != cp.TreeHash {
-		return fmt.Errorf("checkpoint tree hash mismatch")
+		return fmt.Errorf("load checkpoint: %w", err)
 	}
 	ws, err := st.GetWorkspaceByRun(ctx, r.ID)
 	if err != nil {
@@ -73,13 +88,20 @@ func restoreWriteCheckpoint(ctx context.Context, st *storage.Store, r domain.Run
 	if err != nil {
 		return err
 	}
-	if err := workspace.RestoreSnapshot(ctx, b, snap, ws.RunPath); err != nil {
+	opts := workspace.RestoreOptions{
+		ExpectedHash: cp.TreeHash,
+		StagingRoot:  filepath.Join(st.Root, "runtime", "restore-staging"),
+	}
+	if restoreOptionsForTest != nil {
+		restoreOptionsForTest(&opts)
+	}
+	if err := workspace.RestoreVerified(ctx, b, snap, ws.RunPath, opts); err != nil {
 		return err
 	}
 	if log != nil {
 		log.Info("restored workspace from checkpoint", "run", r.ID, "stage", stg.ID, "checkpoint", cp.ID)
 	}
-	_ = st.EmitEvent(ctx, "checkpoint.restored", r.ID, map[string]any{"checkpointId": cp.ID, "stageId": stg.ID})
+	_ = st.EmitEvent(ctx, "checkpoint.restored", r.ID, map[string]any{"checkpointId": cp.ID, "stageId": stg.ID, "attemptId": a.ID})
 	return nil
 }
 
@@ -102,16 +124,27 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 		for _, stg := range stages {
 			atts, _ := st.ListAttempts(ctx, stg.ID)
 			for _, a := range atts {
-				if a.Status == domain.AttemptRunning || a.Status == domain.AttemptPending {
-					_ = st.UpdateAttemptStatus(ctx, a.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart")
-					if stg.Kind.WritesWorkspace() {
-						if err := restoreWriteCheckpoint(ctx, st, r, stg, a, log); err != nil {
-							log.Error("checkpoint restore failed", "run", r.ID, "stage", stg.ID, "err", err)
-							_ = st.UpdateRunStatus(ctx, r.ID, domain.RunBlocked, domain.BlockedRecovery, "checkpoint restore failed: "+err.Error())
-							_ = st.EmitEvent(ctx, "recovery.blocked", r.ID, map[string]any{"stageId": stg.ID, "attemptId": a.ID, "reason": err.Error()})
+				if a.Status != domain.AttemptRunning && a.Status != domain.AttemptPending {
+					continue
+				}
+				// Restore the checkpoint before recording the attempt as
+				// interrupted. If recovery crashes mid-restore the attempt is
+				// still durable as running, so the next startup repeats the
+				// idempotent verify-and-restore instead of trusting a partial
+				// workspace.
+				if stg.Kind.WritesWorkspace() {
+					if err := restoreWriteCheckpoint(ctx, st, r, stg, a, log); err != nil {
+						log.Error("checkpoint restore failed", "run", r.ID, "stage", stg.ID, "attempt", a.ID, "err", err)
+						_ = st.UpdateAttemptStatus(ctx, a.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart")
+						_ = st.UpdateRunStatus(ctx, r.ID, domain.RunBlocked, domain.BlockedRecovery, "checkpoint restore failed: "+err.Error())
+						_ = st.EmitEvent(ctx, "recovery.blocked", r.ID, map[string]any{"stageId": stg.ID, "attemptId": a.ID, "reason": err.Error()})
+						if stg.Status == domain.AttemptRunning {
+							_ = st.UpdateStageStatus(ctx, stg.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart")
 						}
+						continue
 					}
 				}
+				_ = st.UpdateAttemptStatus(ctx, a.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart")
 			}
 			if stg.Status == domain.AttemptRunning {
 				_ = st.UpdateStageStatus(ctx, stg.ID, domain.AttemptInterrupted, domain.FailInfrastructure, "server restart")

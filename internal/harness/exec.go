@@ -195,7 +195,11 @@ func harnessExtras(req orchestrator.StageRequest) map[string]string {
 		"WAYSHARD_STAGE": fmt.Sprintf("%d", req.Stage.Ordinal),
 	}
 	// Test/fixture knobs for the deterministic fake harness only.
-	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_WRITE_FILE", "WAYSHARD_FAKE_READ_FILE", "WAYSHARD_FAKE_STAGE"} {
+	for _, k := range []string{
+		"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_WRITE_FILE", "WAYSHARD_FAKE_READ_FILE", "WAYSHARD_FAKE_STAGE",
+		"WAYSHARD_FAKE_HANG_STAGE", "WAYSHARD_FAKE_SIGNAL_FILE", "WAYSHARD_FAKE_SUCCESS_MARKER",
+		"WAYSHARD_FAKE_PARTIAL_TRACKED", "WAYSHARD_FAKE_PARTIAL_FILE", "WAYSHARD_FAKE_TOOL_WRITE_FILE", "WAYSHARD_FAKE_REVIEW_REJECT",
+	} {
 		if v := os.Getenv(k); v != "" {
 			m[k] = v
 		}
@@ -356,8 +360,10 @@ func withinRoot(root, p string) (string, error) {
 
 func fakeStage(k domain.StageKind) string {
 	switch k {
-	case domain.StageExecute, domain.StageRepair:
+	case domain.StageExecute:
 		return "execute"
+	case domain.StageRepair:
+		return "repair"
 	case domain.StageReview:
 		return "review"
 	case domain.StageExplore:

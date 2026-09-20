@@ -254,6 +254,10 @@ func (a *agent) onPrompt(req request) {
 	cancelCh := a.cancel[p.SessionID]
 	a.mu.Unlock()
 
+	if a.maybeHangAfterWrite(req, p.SessionID, cancelCh) {
+		return
+	}
+
 	if a.scenario == "permission" {
 		outcome, err := a.requestPermission(p.SessionID)
 		if err != nil {
@@ -316,6 +320,81 @@ func (a *agent) onPrompt(req request) {
 	}
 	a.streamFinal(p.SessionID, body)
 	a.reply(req, map[string]any{"stopReason": "end_turn"})
+}
+
+// maybeHangAfterWrite implements the deterministic crash fixture: for the
+// configured hang stage it makes real workspace mutations (direct file write
+// plus an ACP terminal/tool callback), signals the controller, then hangs until
+// the server process is killed. Once the success marker exists it behaves
+// normally, so a recovered retry can complete.
+func (a *agent) maybeHangAfterWrite(req request, sessionID string, cancelCh chan struct{}) bool {
+	if a.scenario != "hang_after_write" {
+		return false
+	}
+	stage := a.effectiveStage()
+	if markerExists() {
+		return false
+	}
+	if stage == "review" && getenv("WAYSHARD_FAKE_REVIEW_REJECT", "") == "1" {
+		a.streamFinal(sessionID, artifactJSON("review", false))
+		a.reply(req, map[string]any{"stopReason": "end_turn"})
+		return true
+	}
+	if stage != getenv("WAYSHARD_FAKE_HANG_STAGE", "execute") {
+		return false
+	}
+	cwd, _ := os.Getwd()
+	tracked := getenv("WAYSHARD_FAKE_PARTIAL_TRACKED", "tracked.txt")
+	_ = os.WriteFile(filepath.Join(cwd, tracked), []byte("partial-"+stage+"\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(cwd, getenv("WAYSHARD_FAKE_PARTIAL_FILE", "partial.txt")), []byte("partial\n"), 0o644)
+	if toolFile := os.Getenv("WAYSHARD_FAKE_TOOL_WRITE_FILE"); toolFile != "" {
+		a.runToolWrite(sessionID, toolFile)
+	}
+	if sig := os.Getenv("WAYSHARD_FAKE_SIGNAL_FILE"); sig != "" {
+		_ = os.WriteFile(sig, []byte(stage+"\n"), 0o644)
+		// Record our PID so a test controller can reap this hung process after
+		// the server is SIGKILLed (SIGKILL does not propagate to children).
+		_ = os.WriteFile(sig+".pid", []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
+	}
+	select {
+	case <-cancelCh:
+	case <-time.After(24 * time.Hour):
+	}
+	a.reply(req, map[string]any{"stopReason": "cancelled"})
+	return true
+}
+
+// runToolWrite asks Wayshard to run a command through the ACP terminal/tool
+// callback, so the mutation happens through the Tool Sandbox rather than the
+// harness process itself.
+func (a *agent) runToolWrite(sessionID, rel string) {
+	raw, err := a.callClient("terminal/create", map[string]any{
+		"sessionId": sessionID,
+		"command":   "/bin/sh",
+		"args":      []string{"-c", "printf tool-partial > " + rel},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fake-acp: terminal/create: %v\n", err)
+		return
+	}
+	var res struct {
+		TerminalID string `json:"terminalId"`
+	}
+	_ = json.Unmarshal(raw, &res)
+	if res.TerminalID == "" {
+		return
+	}
+	_, _ = a.callClient("terminal/wait_for_exit", map[string]any{"sessionId": sessionID, "terminalId": res.TerminalID})
+	_, _ = a.callClient("terminal/release", map[string]any{"sessionId": sessionID, "terminalId": res.TerminalID})
+}
+
+func markerExists() bool {
+	p := os.Getenv("WAYSHARD_FAKE_SUCCESS_MARKER")
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func (a *agent) effectiveStage() string {

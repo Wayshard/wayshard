@@ -128,8 +128,13 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		DataDir:   cfg.DataDir,
 	}
 	a := &App{Store: st, Vault: vault, Auth: authSvc, Hub: hub, Engine: orch, Sched: sched, API: apiSrv, Log: cfg.Log}
+	// Startup recovery is a hard gate: the scheduler must never dispatch work
+	// before interrupted runs/workspaces are reconciled. A failure here leaves
+	// the server unopened rather than running against unrecovered state.
 	if err := recovery.Reconcile(ctx, st, cfg.Log); err != nil {
 		cfg.Log.Error("recovery", "err", err)
+		_ = st.Close()
+		return nil, fmt.Errorf("startup recovery: %w", err)
 	}
 	return a, nil
 }

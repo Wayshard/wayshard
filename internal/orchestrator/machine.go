@@ -132,6 +132,7 @@ func (e *Engine) markCancelled(ctx context.Context, runID string) error {
 		_ = e.Store.UpdateRunStatus(context.WithoutCancel(ctx), runID, domain.RunCancelled, domain.BlockedUser, "cancelled")
 	}
 	_ = e.Store.CancelPendingApprovalsForRun(context.WithoutCancel(ctx), runID, "cancellation")
+	_ = e.Store.CancelRunningAttempts(context.WithoutCancel(ctx), runID)
 	_ = e.Store.ResetStaleRunningStages(context.WithoutCancel(ctx), runID)
 	return nil
 }
