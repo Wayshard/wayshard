@@ -59,7 +59,7 @@ func ShimMain(configPath string) int {
 		fmt.Fprintln(os.Stderr, "wayshard-provider-shim: incomplete config")
 		return 2
 	}
-	if err := setLinkUp("lo"); err != nil {
+	if err := sandbox.BringUpLoopback(); err != nil {
 		fmt.Fprintln(os.Stderr, "wayshard-provider-shim: loopback:", err)
 		return 3
 	}

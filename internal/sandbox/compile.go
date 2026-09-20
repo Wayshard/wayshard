@@ -30,9 +30,9 @@ func compileCommon(p Policy, allowProvider bool) error {
 		return fmt.Errorf("%w: no writable roots in policy", ErrRequiredIsolation)
 	}
 	switch p.Network {
-	case NetProvider:
+	case NetProvider, NetLoopback:
 		if !allowProvider {
-			return fmt.Errorf("%w: secure provider network isolation is unavailable", ErrRequiredIsolation)
+			return fmt.Errorf("%w: network mode %q is unavailable", ErrRequiredIsolation, p.Network)
 		}
 	case NetAllowlist, NetBrokered:
 		return fmt.Errorf("%w: network mode %q is not implemented", ErrRequiredIsolation, p.Network)

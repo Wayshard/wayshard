@@ -36,6 +36,48 @@ func procProbeExit() int {
 	return 0
 }
 
+// loopbackProbeExit raises loopback in the current (already cloned) network
+// namespace. Used as the capability probe body.
+func loopbackProbeExit() int {
+	if err := BringUpLoopback(); err != nil {
+		return 1
+	}
+	return 0
+}
+
+var (
+	loopOnce sync.Once
+	loopOK   bool
+)
+
+// loopbackProbeSupported probes once whether this platform can create a private
+// network namespace with loopback. When it cannot, the ACP discovery probe
+// falls back to NetworkNone (a local-socket harness then reports incompatible
+// honestly).
+func loopbackProbeSupported() bool {
+	loopOnce.Do(func() {
+		exe, err := os.Executable()
+		if err != nil {
+			return
+		}
+		attr := &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNET}
+		if os.Geteuid() != 0 {
+			attr.Cloneflags |= unix.CLONE_NEWUSER
+			attr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Geteuid(), Size: 1}}
+			attr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
+			attr.GidMappingsEnableSetgroups = false
+		}
+		cmd := exec.Command(exe, LoopbackProbeArg)
+		cmd.SysProcAttr = attr
+		loopOK = cmd.Run() == nil
+	})
+	return loopOK
+}
+
+// LoopbackProbeAvailable reports whether an isolated loopback network namespace
+// can be created for the ACP discovery probe.
+func LoopbackProbeAvailable() bool { return loopbackProbeSupported() }
+
 var (
 	procOnce sync.Once
 	procOK   bool
@@ -103,6 +145,18 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 			c.Features = append(c.Features, "seccomp_provider_tcp")
 		}
 	}
+	if p.Network == NetLoopback {
+		// Loopback mode is a private network namespace with only `lo`. seccomp
+		// permits TCP to that isolated loopback and denies everything else.
+		if _, err := seccompAuditArch(); err != nil {
+			c.Unavailable = append(c.Unavailable, "network_loopback")
+			if p.Required {
+				return c, fmt.Errorf("%w: %v", ErrRequiredIsolation, err)
+			}
+		} else {
+			c.Features = append(c.Features, "seccomp_loopback_tcp")
+		}
+	}
 	if p.SyntheticHome != "" || p.SyntheticTemp != "" {
 		c.Features = append(c.Features, "synthetic_home")
 	}
@@ -129,18 +183,30 @@ func (b LinuxBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 	}
 	cmd.SysProcAttr.Setpgid = true
 	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
+	needUser := false
 	if p.ProcIsolation && procIsolationSupported() {
 		// A private PID + mount namespace lets the helper mount a procfs scoped
 		// to this process and its descendants, so /proc never exposes host
-		// processes. A user namespace is needed to mount it unprivileged.
+		// processes.
 		cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWPID | unix.CLONE_NEWNS
-		if os.Geteuid() != 0 {
-			cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWUSER
-			cmd.SysProcAttr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Geteuid(), Size: 1}}
-			cmd.SysProcAttr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
-			cmd.SysProcAttr.GidMappingsEnableSetgroups = false
-		}
 		p.ProcNamespaced = true
+		needUser = true
+	}
+	if p.Network == NetLoopback {
+		// A private network namespace with only loopback, so a harness that
+		// needs local IPC has loopback but no host/LAN/public route.
+		if !loopbackProbeSupported() {
+			return fmt.Errorf("%w: loopback isolation unavailable", ErrRequiredIsolation)
+		}
+		cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWNET
+		p.LoopbackNamespaced = true
+		needUser = true
+	}
+	if needUser && os.Geteuid() != 0 {
+		cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWUSER
+		cmd.SysProcAttr.UidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Geteuid(), Size: 1}}
+		cmd.SysProcAttr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
+		cmd.SysProcAttr.GidMappingsEnableSetgroups = false
 	}
 
 	helper := os.Getenv("WAYSHARD_SANDBOX_HELPER")

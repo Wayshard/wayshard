@@ -268,12 +268,20 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	}
 	inst.Version = firstLine(out)
 
+	// The ACP initialize probe may need local loopback IPC (for example an ACP
+	// server that runs a local standalone server). When the platform can create
+	// a private network namespace with only loopback, use that distinct
+	// capability; otherwise fall back to NetworkNone and report honestly.
+	acpPol := pol
+	if sandbox.LoopbackProbeAvailable() {
+		acpPol.Network = sandbox.NetLoopback
+	}
 	con := sandbox.AsConstrainer(sandbox.DefaultBackend())
-	if _, err := con.Compile(pol); err != nil {
+	if _, err := con.Compile(acpPol); err != nil {
 		classifyProbeError(inst, err)
 		return
 	}
-	spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, pol) }
+	spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, acpPol) }
 
 	initEnv, initLease, lerr := beginProbeEnv(ctx, owners, "initialize", home, tmp, base)
 	if lerr != nil {
@@ -286,7 +294,7 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 		if cmd.Process != nil {
 			probeSetPGID(initLease, cmd.Process.Pid)
 		}
-		return con.Attach(cmd, pol)
+		return con.Attach(cmd, acpPol)
 	}
 
 	res, err := acp.Probe(ctx, spec, timeout)

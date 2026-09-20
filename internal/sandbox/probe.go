@@ -47,6 +47,17 @@ func ProbePolicy(exePath, syntheticHome, syntheticTemp string) Policy {
 	}
 }
 
+// LoopbackProbePolicy is the ACP discovery probe policy for harnesses whose ACP
+// server needs local loopback IPC. It is ProbePolicy plus an isolated network
+// namespace with only loopback: no host/LAN/public route, TCP stream only, no
+// UDP/AF_UNIX/AF_NETLINK/AF_PACKET. It is a distinct capability from
+// NetworkNone and is used only when the platform can create the namespace.
+func LoopbackProbePolicy(exePath, syntheticHome, syntheticTemp string) Policy {
+	p := ProbePolicy(exePath, syntheticHome, syntheticTemp)
+	p.Network = NetLoopback
+	return p
+}
+
 // boundedBuffer captures at most limit bytes and discards the rest.
 type boundedBuffer struct {
 	buf   []byte

@@ -13,27 +13,8 @@ import (
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
-	"github.com/Wayshard/wayshard/internal/routing"
 	"github.com/Wayshard/wayshard/internal/workspace"
 )
-
-type realHarnessCandidates struct {
-	exe, adapter, model string
-}
-
-func (r realHarnessCandidates) Candidates(context.Context) ([]routing.Candidate, error) {
-	return []routing.Candidate{{
-		Harness: domain.HarnessInstallation{
-			ID: "real-opencode", DefinitionID: "opencode", DisplayName: "OpenCode",
-			Executable: r.exe, Adapter: r.adapter,
-			Health: domain.HarnessReady, Compatibility: domain.CompatEnhanced,
-		},
-		ModelID:           r.model,
-		Isolation:         domain.IsolationAdapterBridge,
-		Network:           domain.NetworkProvider,
-		ProviderTransport: domain.TransportHTTPProxy,
-	}}, nil
-}
 
 func realGitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -71,7 +52,6 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 	if model == "" {
 		model = "opencode/mimo-v2.5-free"
 	}
-	adapter := "opencode"
 
 	canary := "WS_CTX_CANARY_" + time.Now().Format("150405")
 	src := t.TempDir()
@@ -108,6 +88,9 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancel()
+	// Discovery must find OpenCode from the normal search path; no candidate is
+	// injected.
+	t.Setenv("PATH", filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	a, err := Open(ctx, Config{
 		DataDir: t.TempDir(), Listen: "127.0.0.1:0",
 		AllowProviderNetwork: true,
@@ -115,12 +98,26 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 			{Host: "opencode.ai", Port: 443},
 			{Host: "models.opencode.ai", Port: 443},
 		},
+		ProviderModel: model,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer a.Close()
-	a.Engine.Candidates = realHarnessCandidates{exe: exe, adapter: adapter, model: model}
+	// Confirm discovery produced a route-viable OpenCode candidate.
+	cands, _ := a.Engine.Candidates.Candidates(ctx)
+	foundReady := false
+	for _, c := range cands {
+		t.Logf("discovered candidate: %s/%s health=%s network=%s transport=%s model=%s",
+			c.Harness.DefinitionID, c.Harness.Executable, c.Harness.Health, c.Network, c.ProviderTransport, c.ModelID)
+		if c.Harness.DefinitionID == "opencode" && c.Network == domain.NetworkProvider &&
+			c.ProviderTransport == domain.TransportHTTPProxy && c.ModelID == model {
+			foundReady = true
+		}
+	}
+	if !foundReady {
+		t.Fatalf("discovery did not produce a route-viable OpenCode candidate: %+v", cands)
+	}
 	spy := &preIntegrateCheck{inner: a.Engine.Integrate, src: src}
 	a.Engine.Integrate = spy
 

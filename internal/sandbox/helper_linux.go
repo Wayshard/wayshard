@@ -46,6 +46,16 @@ func runHelper(args []string) bool {
 			p.ReadOnlyRoots = dropRoot(p.ReadOnlyRoots, "/proc")
 		}
 	}
+	if p.Network == NetLoopback {
+		if !p.LoopbackNamespaced {
+			fmt.Fprintln(os.Stderr, "wayshard-sandbox: loopback isolation was not applied")
+			os.Exit(125)
+		}
+		if err := BringUpLoopback(); err != nil {
+			fmt.Fprintln(os.Stderr, "wayshard-sandbox: required loopback isolation failed:", err)
+			os.Exit(125)
+		}
+	}
 	if err := applyLandlock(p); err != nil {
 		if p.Required {
 			fmt.Fprintln(os.Stderr, "wayshard-sandbox: required confinement failed:", err)
@@ -67,6 +77,16 @@ func runHelper(args []string) bool {
 		if err := applyNetworkProvider(); err != nil {
 			if p.Required {
 				fmt.Fprintln(os.Stderr, "wayshard-sandbox: required provider network confinement failed:", err)
+				os.Exit(125)
+			}
+		}
+	case NetLoopback:
+		// Loopback mode: a private network namespace with only `lo`. The same
+		// TCP-only seccomp filter applies, so only isolated loopback is
+		// reachable.
+		if err := applyNetworkProvider(); err != nil {
+			if p.Required {
+				fmt.Fprintln(os.Stderr, "wayshard-sandbox: required loopback network confinement failed:", err)
 				os.Exit(125)
 			}
 		}

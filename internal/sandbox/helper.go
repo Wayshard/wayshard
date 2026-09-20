@@ -10,6 +10,10 @@ const HelperArg = "__wayshard-sandbox-exec"
 // ProcProbeArg is the hidden argv marker for the scoped-procfs capability probe.
 const ProcProbeArg = "__wayshard-proc-probe"
 
+// LoopbackProbeArg is the hidden argv marker for the loopback-namespace
+// capability probe.
+const LoopbackProbeArg = "__wayshard-loopback-probe"
+
 // init makes the helper dispatch available in every binary that links this
 // package (server, CLI, and test binaries), so os.Executable() is always a
 // valid helper target.
@@ -19,6 +23,9 @@ func init() {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == ProcProbeArg {
 		os.Exit(procProbeExit())
+	}
+	if len(os.Args) >= 2 && os.Args[1] == LoopbackProbeArg {
+		os.Exit(loopbackProbeExit())
 	}
 }
 

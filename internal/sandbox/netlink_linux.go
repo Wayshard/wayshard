@@ -1,6 +1,6 @@
 //go:build linux
 
-package provider
+package sandbox
 
 import (
 	"encoding/binary"
@@ -27,10 +27,10 @@ func iflaAttr(typ uint16, data []byte) []byte {
 	return b
 }
 
-// setLinkUp brings a named network interface up inside the current network
-// namespace using netlink. It is used to raise the loopback interface in the
-// per-attempt namespace so the broker shim can listen on 127.0.0.1.
-func setLinkUp(name string) error {
+// BringUpLoopback raises the loopback interface inside the current network
+// namespace using netlink. It is used both by the provider shim and by the
+// isolated loopback discovery probe.
+func BringUpLoopback() error {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
 	if err != nil {
 		return fmt.Errorf("netlink socket: %w", err)
@@ -42,7 +42,7 @@ func setLinkUp(name string) error {
 	ifm := make([]byte, 16)
 	binary.LittleEndian.PutUint32(ifm[8:], unix.IFF_UP)
 	binary.LittleEndian.PutUint32(ifm[12:], unix.IFF_UP)
-	payload := append(ifm, iflaAttr(iflaIfname, append([]byte(name), 0))...)
+	payload := append(ifm, iflaAttr(iflaIfname, append([]byte("lo"), 0))...)
 
 	msg := make([]byte, 16+len(payload))
 	binary.LittleEndian.PutUint32(msg[0:], uint32(len(msg)))
@@ -74,7 +74,7 @@ func setLinkUp(name string) error {
 				if code == 0 {
 					return nil
 				}
-				return fmt.Errorf("netlink set %s up: %w", name, unix.Errno(-code))
+				return fmt.Errorf("netlink set lo up: %w", unix.Errno(-code))
 			}
 			off += align4(msgLen)
 		}

@@ -53,6 +53,9 @@ type Config struct {
 	AllowProviderNetwork bool
 	// ProviderDestinations is the authorized provider endpoint policy.
 	ProviderDestinations []domain.ProviderDestination
+	// ProviderModel is the default model id applied to provider-backed
+	// candidates that do not advertise models themselves.
+	ProviderModel string
 }
 
 type App struct {
@@ -132,7 +135,7 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		orch.Candidates = syntheticCandidates{}
 		orch.Exec = nil // deterministic in-process artifacts
 	} else {
-		orch.Candidates = &storeCandidates{Store: st}
+		orch.Candidates = &storeCandidates{Store: st, Model: cfg.ProviderModel}
 	}
 	sched := scheduler.New(st, orch, cfg.Log)
 	apiSrv := &api.Server{
@@ -184,7 +187,12 @@ func (a *App) Close() error {
 
 func (a *App) Handler() http.Handler { return a.API.Handler() }
 
-type storeCandidates struct{ Store *storage.Store }
+type storeCandidates struct {
+	Store *storage.Store
+	// Model is a configured default model id applied to provider-backed
+	// candidates that do not advertise their own models.
+	Model string
+}
 
 func (s *storeCandidates) Refresh(ctx context.Context) error {
 	found, err := harness.Discover(ctx, harness.DiscoverOptions{
@@ -214,12 +222,16 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 	}
 	var out []routing.Candidate
 	for _, h := range list {
-		out = append(out, routing.Candidate{
+		cand := routing.Candidate{
 			Harness:           h,
 			Isolation:         h.Isolation,
 			Network:           harnessNetwork(h.DefinitionID, h.Adapter),
 			ProviderTransport: harnessTransport(h.DefinitionID, h.Adapter),
-		})
+		}
+		if cand.Network == domain.NetworkProvider && cand.ModelID == "" {
+			cand.ModelID = s.Model
+		}
+		out = append(out, cand)
 	}
 	return out, nil
 }

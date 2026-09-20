@@ -15,6 +15,7 @@ type NetworkMode string
 const (
 	NetNone         NetworkMode = "none"
 	NetProvider     NetworkMode = "provider"
+	NetLoopback     NetworkMode = "loopback"
 	NetAllowlist    NetworkMode = "allowlist"
 	NetUnrestricted NetworkMode = "unrestricted"
 	NetBrokered     NetworkMode = "brokered"
@@ -48,6 +49,9 @@ type Policy struct {
 	// ProcIsolation were actually applied, so the helper only mounts a procfs
 	// inside its own namespaces.
 	ProcNamespaced bool
+	// LoopbackNamespaced is set by the backend when a private network namespace
+	// (with only loopback) was created for NetLoopback.
+	LoopbackNamespaced bool
 }
 
 type Backend interface {
