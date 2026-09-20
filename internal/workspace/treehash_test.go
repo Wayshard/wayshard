@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -66,7 +67,9 @@ func TestCanonicalTreeHashVectors(t *testing.T) {
 	check("path change", func(r string) {
 		_ = os.Rename(filepath.Join(r, "a.txt"), filepath.Join(r, "renamed.txt"))
 	})
-	check("mode change", func(r string) { _ = os.Chmod(filepath.Join(r, "bin", "run.sh"), 0o644) })
+	if runtime.GOOS != "windows" {
+		check("mode change", func(r string) { _ = os.Chmod(filepath.Join(r, "bin", "run.sh"), 0o644) })
+	}
 	check("symlink target", func(r string) {
 		_ = os.Remove(filepath.Join(r, "link"))
 		_ = os.Symlink("bin/run.sh", filepath.Join(r, "link"))
