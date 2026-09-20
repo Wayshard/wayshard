@@ -238,8 +238,8 @@ func (s *Store) UpsertHarnessInstallation(ctx context.Context, h *domain.Harness
 	if h.LastProbedAt.IsZero() {
 		h.LastProbedAt = time.Now().UTC()
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO harness_installations(id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO harness_installations(id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(executable) DO UPDATE SET
 			display_name = excluded.display_name,
 			version = excluded.version,
@@ -251,13 +251,29 @@ func (s *Store) UpsertHarnessInstallation(ctx context.Context, h *domain.Harness
 			capabilities_json = excluded.capabilities_json,
 			models_json = excluded.models_json,
 			last_probed_at = excluded.last_probed_at,
-			notes = excluded.notes`,
-		h.ID, h.DefinitionID, h.DisplayName, h.Executable, h.Version, h.Adapter, string(h.Health), string(h.Compatibility), string(h.Isolation), h.AuthStatus, h.CapabilitiesJSON, h.ModelsJSON, h.LastProbedAt.Format(time.RFC3339Nano), h.Notes)
+			notes = excluded.notes,
+			definition_source = excluded.definition_source,
+			bridge_executable = excluded.bridge_executable,
+			bridge_present = excluded.bridge_present,
+			acp_status = excluded.acp_status,
+			blocking_reason = excluded.blocking_reason,
+			provider_transport = excluded.provider_transport,
+			model_selection = excluded.model_selection,
+			requires_provider_network = excluded.requires_provider_network`,
+		h.ID, h.DefinitionID, h.DisplayName, h.Executable, h.Version, h.Adapter, string(h.Health), string(h.Compatibility), string(h.Isolation), h.AuthStatus, h.CapabilitiesJSON, h.ModelsJSON, h.LastProbedAt.Format(time.RFC3339Nano), h.Notes,
+		h.DefinitionSource, h.BridgeExecutable, boolInt(h.BridgePresent), h.ACPStatus, h.BlockingReason, string(h.ProviderTransport), h.ModelSelection, boolInt(h.RequiresProviderNetwork))
 	return err
 }
 
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (s *Store) ListHarnessInstallations(ctx context.Context) ([]domain.HarnessInstallation, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes FROM harness_installations ORDER BY display_name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network FROM harness_installations ORDER BY display_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -266,13 +282,17 @@ func (s *Store) ListHarnessInstallations(ctx context.Context) ([]domain.HarnessI
 	for rows.Next() {
 		var h domain.HarnessInstallation
 		var health, compat, iso, probed string
-		if err := rows.Scan(&h.ID, &h.DefinitionID, &h.DisplayName, &h.Executable, &h.Version, &h.Adapter, &health, &compat, &iso, &h.AuthStatus, &h.CapabilitiesJSON, &h.ModelsJSON, &probed, &h.Notes); err != nil {
+		var bridgePresent, requiresProvider int
+		if err := rows.Scan(&h.ID, &h.DefinitionID, &h.DisplayName, &h.Executable, &h.Version, &h.Adapter, &health, &compat, &iso, &h.AuthStatus, &h.CapabilitiesJSON, &h.ModelsJSON, &probed, &h.Notes,
+			&h.DefinitionSource, &h.BridgeExecutable, &bridgePresent, &h.ACPStatus, &h.BlockingReason, &h.ProviderTransport, &h.ModelSelection, &requiresProvider); err != nil {
 			return nil, err
 		}
 		h.Health = domain.HarnessHealth(health)
 		h.Compatibility = domain.CompatibilityClass(compat)
 		h.Isolation = domain.IsolationMode(iso)
 		h.LastProbedAt = parseTime(probed)
+		h.BridgePresent = bridgePresent != 0
+		h.RequiresProviderNetwork = requiresProvider != 0
 		out = append(out, h)
 	}
 	return out, rows.Err()

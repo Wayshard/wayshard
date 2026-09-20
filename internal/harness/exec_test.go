@@ -17,7 +17,7 @@ func TestACPExecPlanViaFakeHarness(t *testing.T) {
 	res, err := ex.Execute(ctx, orchestrator.StageRequest{
 		Task:  domain.Task{Objective: "plan a change"},
 		Stage: domain.Stage{Kind: domain.StagePlan},
-		Route: routing.Candidate{Harness: domain.HarnessInstallation{Executable: bin, Adapter: AdapterGeneric, DisplayName: "fake"}},
+		Route: routing.Candidate{Harness: domain.HarnessInstallation{DefinitionID: "wayshard-fake-acp", Executable: bin, Adapter: "generic", DisplayName: "fake"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestACPExecAuthRequired(t *testing.T) {
 	res, err := ex.Execute(context.Background(), orchestrator.StageRequest{
 		Task:  domain.Task{Objective: "x"},
 		Stage: domain.Stage{Kind: domain.StagePlan},
-		Route: routing.Candidate{Harness: domain.HarnessInstallation{Executable: bin, Adapter: AdapterGeneric}},
+		Route: routing.Candidate{Harness: domain.HarnessInstallation{DefinitionID: "wayshard-fake-acp", Executable: bin, Adapter: "generic"}},
 	})
 	if err == nil && res.Err == nil {
 		t.Fatal("expected auth required")

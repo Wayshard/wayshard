@@ -21,6 +21,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/auth"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/events"
+	"github.com/Wayshard/wayshard/internal/harness"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/pty"
 	"github.com/Wayshard/wayshard/internal/scheduler"
@@ -45,7 +46,9 @@ type Server struct {
 	// ProviderNet is the runtime-probed provider networking capability,
 	// resolved once at startup for diagnostics.
 	ProviderNet domain.ProviderNetworkCapability
-	http        *http.Server
+	// Catalog is the effective harness catalog for discovery diagnostics.
+	Catalog *harness.Catalog
+	http    *http.Server
 }
 
 func (s *Server) Handler() http.Handler {
@@ -79,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/runs/{id}/routes", s.requireAuth(s.getRoutes))
 	mux.HandleFunc("GET /v1/runs/{id}/stages", s.requireAuth(s.getStages))
 	mux.HandleFunc("GET /v1/harnesses", s.requireAuth(s.listHarnesses))
+	mux.HandleFunc("GET /v1/harness-definitions", s.requireAuth(s.harnessDefinitions))
 	mux.HandleFunc("POST /v1/harnesses/rescan", s.requireAuth(s.rescanHarnesses))
 	mux.HandleFunc("GET /v1/notifications", s.requireAuth(s.listNotes))
 	mux.HandleFunc("POST /v1/notifications/{id}/read", s.requireAuth(s.readNote))

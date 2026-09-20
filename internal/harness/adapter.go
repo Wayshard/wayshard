@@ -1,8 +1,12 @@
-// Package harness discovers installed coding harnesses and maps them to adapters.
+// Package harness discovers installed coding harnesses from the effective
+// harness catalog and maps them onto ACP launch and honestly reported
+// isolation/resume capabilities.
 //
 // Wayshard never installs, downloads, or bootstraps harnesses or ACP bridges.
 // Capability negotiation is authoritative; optional ACP features are never
-// inferred from an executable name.
+// inferred from an executable name. Harness behavior is described declaratively
+// by the catalog (internal/harness/harnesses.toml and the user catalog), not by
+// a compile-time list of supported harness names.
 package harness
 
 import (
@@ -13,40 +17,37 @@ import (
 	"github.com/Wayshard/wayshard/internal/domain"
 )
 
-const (
-	AdapterGeneric  = "generic"
-	AdapterOpenCode = "opencode"
-	AdapterCodex    = "codex"
-)
-
-// HarnessAdapter maps a known (or generic) installation onto ACP launch and
-// honestly reported isolation/resume capabilities.
-type HarnessAdapter interface {
-	ID() string
-	DisplayName() string
-	// LaunchSpec is the argv used to speak ACP on stdin/stdout.
-	LaunchSpec(in Installation) acp.Spec
-	// Isolation reports the effective tool-isolation mode given negotiated caps.
-	Isolation(caps acp.AgentCapabilities) domain.IsolationMode
-	IsolationDetail(caps acp.AgentCapabilities) string
-	// SessionResume reports none/reconstruct/native_resume from advertised caps.
-	SessionResume(caps acp.AgentCapabilities) domain.SessionResumeCapability
-	// InterposeCommands is true when this adapter routes tool commands through
-	// Wayshard (ACP terminal/fs callbacks), i.e. adapter_bridge.
-	InterposeCommands() bool
-}
-
-// Installation is a discovered executable plus probe observations.
+// Installation is an actual discovered installation of a catalog definition:
+// resolved executable paths plus probe observations. It never asserts a
+// capability that was not negotiated.
 type Installation struct {
-	ID              string
-	DefinitionID    string
-	DisplayName     string
-	Executable      string
-	ExtraArgs       []string
-	Env             []string
+	ID               string
+	DefinitionID     string
+	DefinitionSource DefinitionSource
+	Enabled          bool
+	DisplayName      string
+	Homepage         string
+
+	// Executable is the executable Wayshard launches for ACP (the bridge when
+	// the definition is bridge-based, otherwise the primary CLI).
+	Executable string
+	// CLIExecutable is the primary harness CLI when one was resolved.
+	CLIExecutable string
+	// BridgeExecutable is the resolved ACP bridge when the definition needs one.
+	BridgeExecutable string
+	BridgePresent    bool
+
+	Version      string
+	VersionArgs  []string
+	VersionError string
+
+	// ACPStatus is a structured discovery outcome:
+	// ok | incompatible | bridge_missing | probe_unavailable | loopback_unavailable | disabled.
+	ACPStatus      string
+	ACPError       string
+	BlockingReason string
+
 	Dir             string
-	Version         string
-	Adapter         string
 	Health          domain.HarnessHealth
 	Compatibility   domain.CompatibilityClass
 	Isolation       domain.IsolationMode
@@ -57,27 +58,42 @@ type Installation struct {
 	AgentInfo       acp.Implementation
 	AuthMethods     []acp.AuthMethod
 	Notes           []string
+
+	// Catalog-derived behavior carried to the executor.
+	InterposeCommands       bool
+	ModelSelection          string
+	RequiresProviderNetwork bool
+	DeclaredTransport       string
+	ConfigRoots             []string
+	ACPRequiresLoopback     bool
 }
 
-// AdapterFor selects a known adapter from definition ID or executable name.
-// Optional ACP features are still taken only from negotiated capabilities.
-func AdapterFor(definitionID, executable string) HarnessAdapter {
-	id := strings.ToLower(strings.TrimSpace(definitionID))
-	base := normalizeExecName(executable)
-	switch id {
-	case AdapterOpenCode:
-		return OpenCodeAdapter{}
-	case AdapterCodex:
-		return CodexAdapter{}
+// ACPArgs returns the argv used to speak ACP for this installation.
+func definitionACPArgs(def Definition) []string {
+	if def.ACP == "bridge" {
+		return append([]string{}, def.BridgeArgs...)
 	}
-	switch base {
-	case "opencode":
-		return OpenCodeAdapter{}
-	case "codex", "codex-acp":
-		return CodexAdapter{}
-	default:
-		return GenericACPAdapter{}
+	return append([]string{}, def.ACPArgs...)
+}
+
+func definitionIsolation(def Definition, caps acp.AgentCapabilities) domain.IsolationMode {
+	if caps.NativeSandboxAdvertised() {
+		return domain.IsolationNative
 	}
+	if def.InterposeCommands {
+		return domain.IsolationAdapterBridge
+	}
+	return domain.IsolationOuterOnly
+}
+
+func definitionIsolationDetail(def Definition, caps acp.AgentCapabilities) string {
+	if caps.NativeSandboxAdvertised() {
+		return "harness advertised native tool sandbox"
+	}
+	if def.InterposeCommands {
+		return "adapter_bridge: Wayshard interposes ACP terminal/fs; inner harness tools are not independently verified"
+	}
+	return "outer_only: no inner tool sandbox verified; outer harness process only"
 }
 
 func normalizeExecName(path string) string {
@@ -88,119 +104,9 @@ func normalizeExecName(path string) string {
 	return base
 }
 
-func hasAcpArg(args []string) bool {
-	for _, a := range args {
-		if a == "acp" || a == "--acp" {
-			return true
-		}
-	}
-	return false
-}
-
 func resumeFromCaps(caps acp.AgentCapabilities) domain.SessionResumeCapability {
 	if caps.HasNativeResume() {
 		return domain.ResumeNative
 	}
 	return domain.ResumeReconstruct
 }
-
-// GenericACPAdapter is used for any ACP-compliant agent without a known profile.
-type GenericACPAdapter struct{}
-
-func (GenericACPAdapter) ID() string          { return AdapterGeneric }
-func (GenericACPAdapter) DisplayName() string { return "Generic ACP" }
-
-func (GenericACPAdapter) LaunchSpec(in Installation) acp.Spec {
-	return acp.Spec{Command: in.Executable, Args: append([]string{}, in.ExtraArgs...), Env: in.Env, Dir: in.Dir}
-}
-
-func (GenericACPAdapter) Isolation(acp.AgentCapabilities) domain.IsolationMode {
-	return domain.IsolationOuterOnly
-}
-
-func (GenericACPAdapter) IsolationDetail(acp.AgentCapabilities) string {
-	return "generic ACP: no inner tool sandbox verified; outer harness process only"
-}
-
-func (GenericACPAdapter) SessionResume(caps acp.AgentCapabilities) domain.SessionResumeCapability {
-	return resumeFromCaps(caps)
-}
-
-func (GenericACPAdapter) InterposeCommands() bool { return false }
-
-// OpenCodeAdapter launches `opencode acp` and interposes command execution
-// through ACP terminal/fs callbacks (adapter_bridge) when that is the
-// advertised path. Native inner sandbox is reported only if negotiated.
-type OpenCodeAdapter struct{}
-
-func (OpenCodeAdapter) ID() string          { return AdapterOpenCode }
-func (OpenCodeAdapter) DisplayName() string { return "OpenCode" }
-
-func (OpenCodeAdapter) LaunchSpec(in Installation) acp.Spec {
-	args := append([]string{}, in.ExtraArgs...)
-	if !hasAcpArg(args) {
-		args = append([]string{"acp"}, args...)
-	}
-	return acp.Spec{Command: in.Executable, Args: args, Env: in.Env, Dir: in.Dir}
-}
-
-func (a OpenCodeAdapter) Isolation(caps acp.AgentCapabilities) domain.IsolationMode {
-	if caps.NativeSandboxAdvertised() {
-		return domain.IsolationNative
-	}
-	if a.InterposeCommands() {
-		return domain.IsolationAdapterBridge
-	}
-	return domain.IsolationOuterOnly
-}
-
-func (OpenCodeAdapter) IsolationDetail(caps acp.AgentCapabilities) string {
-	if caps.NativeSandboxAdvertised() {
-		return "harness advertised native tool sandbox"
-	}
-	return "adapter_bridge: Wayshard interposes ACP terminal/fs; inner OpenCode tools are not independently verified"
-}
-
-func (OpenCodeAdapter) SessionResume(caps acp.AgentCapabilities) domain.SessionResumeCapability {
-	return resumeFromCaps(caps)
-}
-
-func (OpenCodeAdapter) InterposeCommands() bool { return true }
-
-// CodexAdapter launches a user-installed Codex ACP entrypoint (never npx).
-type CodexAdapter struct{}
-
-func (CodexAdapter) ID() string          { return AdapterCodex }
-func (CodexAdapter) DisplayName() string { return "Codex" }
-
-func (CodexAdapter) LaunchSpec(in Installation) acp.Spec {
-	args := append([]string{}, in.ExtraArgs...)
-	base := normalizeExecName(in.Executable)
-	if base == "codex" && !hasAcpArg(args) {
-		args = append([]string{"acp"}, args...)
-	}
-	return acp.Spec{Command: in.Executable, Args: args, Env: in.Env, Dir: in.Dir}
-}
-
-func (a CodexAdapter) Isolation(caps acp.AgentCapabilities) domain.IsolationMode {
-	if caps.NativeSandboxAdvertised() {
-		return domain.IsolationNative
-	}
-	if a.InterposeCommands() {
-		return domain.IsolationAdapterBridge
-	}
-	return domain.IsolationOuterOnly
-}
-
-func (CodexAdapter) IsolationDetail(caps acp.AgentCapabilities) string {
-	if caps.NativeSandboxAdvertised() {
-		return "harness advertised native tool sandbox"
-	}
-	return "adapter_bridge: Wayshard interposes ACP terminal/fs when the Codex ACP entrypoint uses them"
-}
-
-func (CodexAdapter) SessionResume(caps acp.AgentCapabilities) domain.SessionResumeCapability {
-	return resumeFromCaps(caps)
-}
-
-func (CodexAdapter) InterposeCommands() bool { return true }

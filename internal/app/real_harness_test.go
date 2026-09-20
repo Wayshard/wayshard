@@ -84,7 +84,7 @@ func TestRealHarnessProviderCall(t *testing.T) {
 		Attempt: domain.StageAttempt{ID: "real-attempt"},
 		Route: routing.Candidate{
 			Harness: domain.HarnessInstallation{
-				ID: "real", DisplayName: "real", Executable: exe, Adapter: adapter,
+				ID: "real", DefinitionID: adapter, DisplayName: "real", Executable: exe, Adapter: adapter,
 				Health: domain.HarnessReady, Compatibility: domain.CompatRoutable,
 			},
 			ModelID:           model,

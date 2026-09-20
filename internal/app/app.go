@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"encoding/json"
 
@@ -116,7 +118,8 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 	ptym := pty.New(st)
 	providerCap := provider.Detect()
 	cfg.Log.Info("provider network capability", "available", providerCap.Available, "mode", providerCap.Mode, "reason", providerCap.Reason)
-	exec := &harness.ACPExec{Store: st, Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}, ProviderLog: cfg.Log}
+	cat := loadHarnessCatalog(cfg.Log)
+	exec := &harness.ACPExec{Store: st, Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}, ProviderLog: cfg.Log, Catalog: cat}
 	orch := &orchestrator.Engine{
 		Store:                st,
 		Jev:                  engine,
@@ -135,7 +138,7 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		orch.Candidates = syntheticCandidates{}
 		orch.Exec = nil // deterministic in-process artifacts
 	} else {
-		orch.Candidates = &storeCandidates{Store: st, Model: cfg.ProviderModel}
+		orch.Candidates = &storeCandidates{Store: st, Catalog: cat, Model: cfg.ProviderModel}
 	}
 	sched := scheduler.New(st, orch, cfg.Log)
 	apiSrv := &api.Server{
@@ -150,6 +153,7 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		Advertise:   cfg.Advertise,
 		DataDir:     cfg.DataDir,
 		ProviderNet: providerCap,
+		Catalog:     cat,
 	}
 	a := &App{Store: st, Vault: vault, Auth: authSvc, Hub: hub, Engine: orch, Sched: sched, API: apiSrv, Log: cfg.Log}
 	// Startup recovery is a hard gate: the scheduler must never dispatch work
@@ -188,16 +192,22 @@ func (a *App) Close() error {
 func (a *App) Handler() http.Handler { return a.API.Handler() }
 
 type storeCandidates struct {
-	Store *storage.Store
+	Store   *storage.Store
+	Catalog *harness.Catalog
 	// Model is a configured default model id applied to provider-backed
 	// candidates that do not advertise their own models.
 	Model string
 }
 
 func (s *storeCandidates) Refresh(ctx context.Context) error {
+	var defs []harness.Definition
+	if s.Catalog != nil {
+		defs = s.Catalog.EnabledForPlatform(runtime.GOOS)
+	}
 	found, err := harness.Discover(ctx, harness.DiscoverOptions{
-		Probe:  true,
-		Owners: harness.StoreProbeOwnerSink{Store: s.Store},
+		Probe:       true,
+		Owners:      harness.StoreProbeOwnerSink{Store: s.Store},
+		Definitions: defs,
 	})
 	if err != nil {
 		return err
@@ -206,9 +216,18 @@ func (s *storeCandidates) Refresh(ctx context.Context) error {
 		caps, _ := json.Marshal(inst.Capabilities)
 		h := &domain.HarnessInstallation{
 			ID: inst.ID, DefinitionID: inst.DefinitionID, DisplayName: inst.DisplayName,
-			Executable: inst.Executable, Version: inst.Version, Adapter: inst.Adapter,
+			Executable: inst.Executable, Version: inst.Version, Adapter: "generic",
 			Health: inst.Health, Compatibility: inst.Compatibility, Isolation: inst.Isolation,
 			AuthStatus: inst.AuthStatus, CapabilitiesJSON: string(caps),
+			Notes:                   strings.Join(inst.Notes, "; "),
+			DefinitionSource:        string(inst.DefinitionSource),
+			BridgeExecutable:        inst.BridgeExecutable,
+			BridgePresent:           inst.BridgePresent,
+			ACPStatus:               inst.ACPStatus,
+			BlockingReason:          inst.BlockingReason,
+			ProviderTransport:       harness.VerifiedTransport(inst.DefinitionID),
+			ModelSelection:          inst.ModelSelection,
+			RequiresProviderNetwork: inst.RequiresProviderNetwork,
 		}
 		_ = s.Store.UpsertHarnessInstallation(ctx, h)
 	}
@@ -222,11 +241,15 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 	}
 	var out []routing.Candidate
 	for _, h := range list {
+		network := domain.NetworkNone
+		if h.RequiresProviderNetwork {
+			network = domain.NetworkProvider
+		}
 		cand := routing.Candidate{
 			Harness:           h,
 			Isolation:         h.Isolation,
-			Network:           harnessNetwork(h.DefinitionID, h.Adapter),
-			ProviderTransport: harnessTransport(h.DefinitionID, h.Adapter),
+			Network:           network,
+			ProviderTransport: h.ProviderTransport,
 		}
 		if cand.Network == domain.NetworkProvider && cand.ModelID == "" {
 			cand.ModelID = s.Model
@@ -236,44 +259,23 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 	return out, nil
 }
 
-// harnessNetwork classifies whether a harness needs model/provider network.
-// The deterministic fake harness needs none; real ACP harnesses do.
-func harnessNetwork(definitionID, adapter string) domain.NetworkCapability {
-	switch definitionID {
-	case "wayshard-fake-acp":
-		return domain.NetworkNone
+// loadHarnessCatalog loads the effective catalog, logging diagnostics. A
+// malformed user catalog is reported and the shipped defaults are used so a
+// bad user file cannot make the server unusable.
+func loadHarnessCatalog(log *slog.Logger) *harness.Catalog {
+	cat, err := harness.LoadCatalog("")
+	if err != nil {
+		if log != nil {
+			log.Error("harness catalog", "err", err)
+		}
+		cat = harness.ShippedCatalog()
 	}
-	switch adapter {
-	case "generic":
-		// A generic ACP agent may be local or remote; treat as provider-needing
-		// unless it is the known local fake.
-		return domain.NetworkProvider
-	default:
-		return domain.NetworkProvider
+	if log != nil {
+		for _, d := range cat.Diagnostics {
+			log.Warn("harness catalog diagnostic", "detail", d.String())
+		}
 	}
-}
-
-// harnessTransport reports how a harness can be given provider connectivity.
-// Only transports with empirical evidence are accepted; an unknown transport
-// keeps the provider route unavailable rather than assuming proxy support.
-// Real-harness transport compatibility is established by observing the harness
-// reach an authorized destination through the broker, not by executable name.
-func harnessTransport(definitionID, adapter string) domain.ProviderTransport {
-	switch {
-	case definitionID == "wayshard-fake-acp":
-		return domain.TransportHTTPProxy
-	case definitionID == "codex" || adapter == "codex":
-		// Verified: codex-acp's Codex app-server honors HTTPS_PROXY and its
-		// provider request traversed the Wayshard broker to the authorized
-		// destination (see the guarded real-harness provider test).
-		return domain.TransportHTTPProxy
-	case definitionID == "opencode" || adapter == "opencode":
-		// Verified: OpenCode honors HTTPS_PROXY and its provider request
-		// traversed the Wayshard broker to opencode.ai/models.opencode.ai.
-		return domain.TransportHTTPProxy
-	default:
-		return domain.TransportUnknown
-	}
+	return cat
 }
 
 type syntheticCandidates struct{}

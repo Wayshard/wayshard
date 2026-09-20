@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,8 +90,25 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancel()
 	// Discovery must find OpenCode from the normal search path; no candidate is
-	// injected.
+	// injected. To keep this test focused on the independently audited OpenCode
+	// path, disable the other shipped harnesses through the user catalog (the
+	// supported CRUD interface) so a second installed provider harness cannot be
+	// selected ahead of OpenCode.
 	t.Setenv("PATH", filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "wayshard"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var cat strings.Builder
+	cat.WriteString("schema_version = 1\n")
+	for _, id := range []string{"codex", "claude", "grok", "gemini", "github-copilot", "cursor", "kiro",
+		"junie", "goose", "cline", "qwen", "qoder", "mistral-vibe", "devin", "kilo", "factory-droid",
+		"auggie", "amp", "pi", "omp", "wayshard-fake-acp"} {
+		fmt.Fprintf(&cat, "[[harness]]\nid = %q\nenabled = false\n\n", id)
+	}
+	if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "wayshard", "harnesses.toml"), []byte(cat.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	a, err := Open(ctx, Config{
 		DataDir: t.TempDir(), Listen: "127.0.0.1:0",
 		AllowProviderNetwork: true,

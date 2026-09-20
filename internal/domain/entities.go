@@ -231,6 +231,16 @@ type HarnessInstallation struct {
 	ModelsJSON       string             `json:"models"`
 	LastProbedAt     time.Time          `json:"lastProbedAt"`
 	Notes            string             `json:"notes"`
+
+	// Catalog discovery diagnostics.
+	DefinitionSource        string            `json:"definitionSource,omitempty"`
+	BridgeExecutable        string            `json:"bridgeExecutable,omitempty"`
+	BridgePresent           bool              `json:"bridgePresent"`
+	ACPStatus               string            `json:"acpStatus,omitempty"`
+	BlockingReason          string            `json:"blockingReason,omitempty"`
+	ProviderTransport       ProviderTransport `json:"providerTransport,omitempty"`
+	ModelSelection          string            `json:"modelSelection,omitempty"`
+	RequiresProviderNetwork bool              `json:"requiresProviderNetwork"`
 }
 
 type WorkspaceRecord struct {

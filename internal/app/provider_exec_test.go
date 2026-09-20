@@ -68,7 +68,7 @@ func TestProviderExecLaunchesThroughSecureBroker(t *testing.T) {
 		Attempt: domain.StageAttempt{ID: "attempt-provider"},
 		Route: routing.Candidate{
 			Harness: domain.HarnessInstallation{
-				ID: "fake", DisplayName: "fake", Executable: fake, Adapter: "generic",
+				ID: "fake", DefinitionID: "wayshard-fake-acp", DisplayName: "fake", Executable: fake, Adapter: "generic",
 				Health: domain.HarnessReady, Compatibility: domain.CompatRoutable,
 			},
 			Network:           domain.NetworkProvider,

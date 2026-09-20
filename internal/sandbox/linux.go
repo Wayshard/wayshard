@@ -280,9 +280,9 @@ func (LinuxBackend) Report() IsolationReport {
 	if _, err := seccompAuditArch(); err == nil {
 		r.Features = append(r.Features, "seccomp_network_deny")
 	}
-	// Secure provider-only networking is not implemented; required-isolation
-	// harnesses run with no network instead.
-	r.Missing = append(r.Missing, "provider_network")
-	r.Detail = "linux landlock filesystem confinement + seccomp network confinement (none) + process group + pdeathsig + env allowlist; secure provider network unavailable"
+	// Provider and loopback network isolation are runtime-probed capabilities
+	// reported separately (see providerNetwork on GET /v1/sandbox); this report
+	// covers the always-on filesystem/process confinement only.
+	r.Detail = "linux landlock filesystem confinement + seccomp network confinement (none by default) + process group + pdeathsig + env allowlist; isolated provider/loopback network modes are capability-probed and reported separately"
 	return r
 }

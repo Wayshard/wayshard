@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/acp"
@@ -17,7 +18,6 @@ import (
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/provider"
-	"github.com/Wayshard/wayshard/internal/routing"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
@@ -31,6 +31,28 @@ type ACPExec struct {
 	ProviderResolver provider.Resolver
 	ProviderDialer   provider.Dialer
 	ProviderLog      *slog.Logger
+	// Catalog is the effective harness catalog used to resolve a route's
+	// DefinitionID. When nil it is loaded lazily from the shipped + user catalog.
+	Catalog *Catalog
+
+	catalogOnce sync.Once
+	catalogVal  *Catalog
+}
+
+// definition resolves a harness definition from the effective catalog.
+func (e *ACPExec) definition(defID string) (Definition, bool) {
+	e.catalogOnce.Do(func() {
+		if e.Catalog != nil {
+			e.catalogVal = e.Catalog
+			return
+		}
+		cat, err := LoadCatalog("")
+		if err != nil {
+			cat = &Catalog{}
+		}
+		e.catalogVal = cat
+	})
+	return e.catalogVal.ByID(defID)
 }
 
 func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (orchestrator.StageResult, error) {
@@ -41,20 +63,18 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	if req.Workspace != nil {
 		cwd = req.Workspace.RunPath
 	}
-	inst := Installation{
-		ID:         req.Route.Harness.ID,
-		Executable: req.Route.Harness.Executable,
-		Adapter:    req.Route.Harness.Adapter,
-		Dir:        cwd,
+	// Resolve the harness definition from the effective catalog. A route whose
+	// definition is missing fails closed rather than inventing behavior.
+	def, ok := e.definition(req.Route.Harness.DefinitionID)
+	if !ok {
+		err := fmt.Errorf("no harness definition %q in the effective catalog", req.Route.Harness.DefinitionID)
+		return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
 	}
-	if inst.Executable == "" {
-		inst.Executable = req.Route.Harness.DisplayName
+	exe := req.Route.Harness.Executable
+	if exe == "" {
+		exe = req.Route.Harness.DisplayName
 	}
-	ad := AdapterFor(req.Route.Harness.Adapter, inst.Executable)
-	spec := ad.LaunchSpec(inst)
-	if spec.Dir == "" {
-		spec.Dir = cwd
-	}
+	spec := acp.Spec{Command: exe, Args: definitionACPArgs(def), Dir: cwd}
 
 	sandboxRoot := e.sandboxRoot(req)
 	home := filepath.Join(sandboxRoot, "home")
@@ -75,7 +95,7 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	// permits its owned config dirs plus the workspace and system roots.
 	extras := harnessExtras(req)
 	extras[process.TokenEnv] = token
-	if p := harnessEnvPATH(inst.Executable, os.Getenv("PATH")); p != os.Getenv("PATH") {
+	if p := harnessEnvPATH(exe, os.Getenv("PATH")); p != os.Getenv("PATH") {
 		extras["PATH"] = p
 	}
 	spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
@@ -93,10 +113,10 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 			err = fmt.Errorf("provider destination policy invalid: %w", err)
 			return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
 		}
-		pol := e.policyFor(req, cwd, tmp, realHome)
+		pol := e.policyFor(req, cwd, tmp, realHome, def)
 		pol.Network = sandbox.NetProvider
-		if inst.Executable != "" {
-			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(inst.Executable))
+		if exe != "" {
+			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(exe))
 		}
 		proxyPort, err := provider.RandomPort()
 		if err != nil {
@@ -168,13 +188,13 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 			b = sandbox.DefaultBackend()
 		}
 		con := sandbox.AsConstrainer(b)
-		pol := e.policyFor(req, cwd, tmp, realHome)
+		pol := e.policyFor(req, cwd, tmp, realHome, def)
 		if _, err := con.Compile(pol); err != nil {
 			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
 		}
 		// The harness executable itself must remain executable/readable.
-		if inst.Executable != "" {
-			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(inst.Executable))
+		if exe != "" {
+			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(exe))
 		}
 		spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, pol) }
 		spec.AfterStart = func(cmd *exec.Cmd) (func(), error) { return con.Attach(cmd, pol) }
@@ -242,7 +262,7 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		return orchestrator.StageResult{Class: classifyHarnessError(err), Err: err}, err
 	}
 	if req.Route.ModelID != "" {
-		if merr := selectSessionModel(ctx, drv, sess.SessionID, req.Route); merr != nil {
+		if merr := selectSessionModel(ctx, drv, sess.SessionID, def, req.Route.ModelID); merr != nil {
 			if e.ProviderLog != nil {
 				e.ProviderLog.Debug("harness model selection", "model", req.Route.ModelID, "err", merr)
 			}
@@ -316,9 +336,10 @@ func (e *ACPExec) providerRoot() string {
 }
 
 // policyFor builds the harness policy. Read-only stages get a read-only view of
-// the run workspace; write stages may write it. The harness's own config roots
-// are granted so provider auth keeps working, but nothing else under HOME is.
-func (e *ACPExec) policyFor(req orchestrator.StageRequest, cwd, tmp, realHome string) sandbox.Policy {
+// the run workspace; write stages may write it. The definition's harness-owned
+// config roots are granted so provider auth keeps working, but nothing else
+// under HOME is.
+func (e *ACPExec) policyFor(req orchestrator.StageRequest, cwd, tmp, realHome string, def Definition) sandbox.Policy {
 	var pol sandbox.Policy
 	if cwd == "" {
 		pol = sandbox.ReadOnlyViewPolicy("", tmp)
@@ -327,8 +348,16 @@ func (e *ACPExec) policyFor(req orchestrator.StageRequest, cwd, tmp, realHome st
 	} else {
 		pol = sandbox.HarnessPolicy(cwd, tmp)
 	}
-	for _, r := range harnessConfigRoots(req.Route.Harness.DefinitionID, req.Route.Harness.Adapter, realHome) {
-		pol.ReadWriteRoots = append(pol.ReadWriteRoots, r)
+	// Config roots are catalog-declared and home-relative; the catalog validator
+	// rejects absolute paths and "..", so a definition cannot widen host access.
+	for _, r := range def.ConfigRoots {
+		if realHome == "" {
+			continue
+		}
+		p := filepath.Join(realHome, r)
+		if _, err := os.Stat(p); err == nil {
+			pol.ReadWriteRoots = append(pol.ReadWriteRoots, p)
+		}
 	}
 	// A script/symlink harness needs its package tree and interpreter readable
 	// (read-only) to launch; this is scoped to the harness's own package.
@@ -338,29 +367,6 @@ func (e *ACPExec) policyFor(req orchestrator.StageRequest, cwd, tmp, realHome st
 		pol.ReadWriteRoots = append(pol.ReadWriteRoots, filepath.SplitList(extra)...)
 	}
 	return pol
-}
-
-// harnessConfigRoots returns the harness-owned configuration directories that
-// may be exposed to the harness process. Never includes the Wayshard data dir.
-func harnessConfigRoots(definitionID, adapter, home string) []string {
-	if home == "" {
-		return nil
-	}
-	var rel []string
-	switch {
-	case adapter == "opencode" || definitionID == "opencode":
-		rel = []string{".config/opencode", ".local/share/opencode", ".local/state/opencode", ".cache/opencode", ".opencode"}
-	case adapter == "codex" || definitionID == "codex":
-		rel = []string{".codex", ".config/codex", ".local/share/codex", ".cache/codex"}
-	}
-	var out []string
-	for _, r := range rel {
-		p := filepath.Join(home, r)
-		if _, err := os.Stat(p); err == nil {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 func harnessExtras(req orchestrator.StageRequest) map[string]string {
@@ -556,19 +562,16 @@ var _ = storage.ErrNotFound
 const providerNoProxy = "127.0.0.1,localhost,::1"
 
 // selectSessionModel applies the route's model to a freshly created session
-// using the method the harness adapter uses. Agents differ: OpenCode exposes a
-// "model" config option while Codex uses session/set_model.
-func selectSessionModel(ctx context.Context, drv *acp.Driver, sessionID string, cand routing.Candidate) error {
-	switch cand.Harness.Adapter {
-	case AdapterOpenCode:
-		return drv.SetConfigOption(ctx, sessionID, "model", cand.ModelID)
-	case AdapterCodex:
-		return drv.SetModel(ctx, sessionID, cand.ModelID)
+// using the catalog-declared model selection method. OpenCode exposes a "model"
+// config option while Codex uses session/set_model.
+func selectSessionModel(ctx context.Context, drv *acp.Driver, sessionID string, def Definition, modelID string) error {
+	switch def.ModelSelection {
+	case "config_option":
+		return drv.SetConfigOption(ctx, sessionID, "model", modelID)
+	case "set_model":
+		return drv.SetModel(ctx, sessionID, modelID)
 	default:
-		if err := drv.SetConfigOption(ctx, sessionID, "model", cand.ModelID); err == nil {
-			return nil
-		}
-		return drv.SetModel(ctx, sessionID, cand.ModelID)
+		return nil
 	}
 }
 

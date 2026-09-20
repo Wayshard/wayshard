@@ -10,15 +10,16 @@ import (
 	"github.com/Wayshard/wayshard/internal/domain"
 )
 
-func TestProbeVersionArgs(t *testing.T) {
-	if got := probeVersionArgs(OpenCodeAdapter{}); len(got) != 1 || got[0] != "--version" {
-		t.Fatalf("opencode version args = %v", got)
-	}
-	if got := probeVersionArgs(CodexAdapter{}); len(got) != 1 || got[0] != "--version" {
-		t.Fatalf("codex version args = %v", got)
-	}
-	if got := probeVersionArgs(GenericACPAdapter{}); got != nil {
-		t.Fatalf("generic version args = %v, want nil", got)
+func TestCatalogVersionArgs(t *testing.T) {
+	cat := ShippedCatalog()
+	for _, id := range []string{"opencode", "codex", "grok", "omp"} {
+		d, ok := cat.ByID(id)
+		if !ok {
+			t.Fatalf("definition %q missing", id)
+		}
+		if len(d.VersionArgs) == 0 || d.VersionArgs[0] != "--version" {
+			t.Fatalf("%s version args = %v, want --version", id, d.VersionArgs)
+		}
 	}
 }
 

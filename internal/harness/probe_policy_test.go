@@ -30,6 +30,15 @@ func writeExecutable(t *testing.T, path, body string) {
 	}
 }
 
+// customDefinition builds a single ad-hoc catalog definition for a test fixture
+// executable, proving discovery is catalog-driven rather than name-driven.
+func customDefinition(name string) []Definition {
+	return []Definition{{
+		ID: name, DisplayName: name, Enabled: true,
+		Executables: []string{name}, ACP: "native",
+	}}
+}
+
 func findInstallation(t *testing.T, insts []Installation, exe string) Installation {
 	t.Helper()
 	for _, in := range insts {
@@ -99,6 +108,7 @@ echo pwned > "` + probeDir + `/pwned" 2>/dev/null || true
 		PATH: probeDir, Home: probeDir, ExtraPaths: []string{exe},
 		Probe: true, IncludeLoginPATH: false, WellKnownDirs: false,
 		ProbeTimeout: 5 * time.Second,
+		Definitions:  customDefinition("malicious-harness"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +181,7 @@ func TestProbeTimeoutKillsDescendants(t *testing.T) {
 		PATH: probeDir, Home: probeDir, ExtraPaths: []string{exe},
 		Probe: true, IncludeLoginPATH: false, WellKnownDirs: false,
 		ProbeTimeout: 2 * time.Second,
+		Definitions:  customDefinition("hanging-harness"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +210,7 @@ func TestProbeOutputBounded(t *testing.T) {
 		PATH: probeDir, Home: probeDir, ExtraPaths: []string{exe},
 		Probe: true, IncludeLoginPATH: false, WellKnownDirs: false,
 		ProbeTimeout: 8 * time.Second,
+		Definitions:  customDefinition("noisy-harness"),
 	})
 	if err != nil {
 		t.Fatal(err)

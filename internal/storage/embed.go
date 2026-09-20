@@ -16,3 +16,6 @@ var migration004 string
 
 //go:embed migrations/005_probe_owners.sql
 var migration005 string
+
+//go:embed migrations/006_harness_catalog.sql
+var migration006 string

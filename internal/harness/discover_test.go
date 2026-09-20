@@ -77,8 +77,8 @@ func TestDiscoverPATHReady(t *testing.T) {
 	if got[0].Health != domain.HarnessReady {
 		t.Fatalf("health = %s notes=%v", got[0].Health, got[0].Notes)
 	}
-	if got[0].Adapter != AdapterGeneric {
-		t.Fatalf("adapter = %s", got[0].Adapter)
+	if got[0].DefinitionID != "wayshard-fake-acp" {
+		t.Fatalf("definitionId = %s", got[0].DefinitionID)
 	}
 	if got[0].Compatibility != domain.CompatRoutable && got[0].Compatibility != domain.CompatEnhanced {
 		t.Fatalf("compat = %s", got[0].Compatibility)
@@ -114,7 +114,7 @@ func TestDiscoverWellKnownDir(t *testing.T) {
 
 func TestDiscoverExplicitPath(t *testing.T) {
 	dir := t.TempDir()
-	exe := placeFake(t, dir, "custom-agent")
+	exe := placeFake(t, dir, "wayshard-fake-acp")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	got, err := Discover(ctx, DiscoverOptions{
@@ -160,7 +160,7 @@ func TestDiscoverNeverRunsNpx(t *testing.T) {
 	}
 	var sawNpxRefuse, sawFake bool
 	for _, in := range got {
-		if strings.Contains(strings.Join(in.Notes, " "), "package-runner") {
+		if strings.Contains(in.BlockingReason, "no catalog definition") || strings.Contains(strings.Join(in.Notes, " "), "package-runner") {
 			sawNpxRefuse = true
 		}
 		if normalizeExecName(in.Executable) == "wayshard-fake-acp" {
@@ -243,44 +243,57 @@ func TestDiscoverConfiguredMissingPath(t *testing.T) {
 	}
 }
 
-func TestAdaptersDoNotAssumeOptionalCaps(t *testing.T) {
+// TestCatalogDefinitionBehavior proves harness behavior is described by the
+// catalog, not by per-name Go adapters, and that optional capabilities are never
+// assumed from a harness name.
+func TestCatalogDefinitionBehavior(t *testing.T) {
+	cat := ShippedCatalog()
+	oc, ok := cat.ByID("opencode")
+	if !ok {
+		t.Fatal("opencode definition missing from shipped catalog")
+	}
+	if !oc.InterposeCommands {
+		t.Fatal("opencode must interpose commands")
+	}
+	if oc.ACP != "native" || len(oc.ACPArgs) == 0 || oc.ACPArgs[0] != "acp" {
+		t.Fatalf("opencode acp args = %v", oc.ACPArgs)
+	}
+	if !oc.ACPRequiresLoopback {
+		t.Fatal("opencode acp requires loopback")
+	}
 	empty := acp.AgentCapabilities{}
-	oc := OpenCodeAdapter{}
-	if oc.SessionResume(empty) != domain.ResumeReconstruct {
-		t.Fatal("must not assume native resume from the OpenCode name")
+	if definitionIsolation(oc, empty) != domain.IsolationAdapterBridge {
+		t.Fatal("opencode reports adapter_bridge via command interposition")
 	}
-	if oc.Isolation(empty) != domain.IsolationAdapterBridge {
-		t.Fatal("OpenCode adapter reports adapter_bridge via command interposition")
-	}
-	if oc.LaunchSpec(Installation{Executable: "/usr/bin/opencode"}).Args[0] != "acp" {
-		t.Fatal("opencode launch must use acp subcommand")
-	}
-	cx := CodexAdapter{}
-	if cx.SessionResume(empty) != domain.ResumeReconstruct {
-		t.Fatal("must not assume native resume from the Codex name")
-	}
-	g := GenericACPAdapter{}
-	if g.Isolation(empty) != domain.IsolationOuterOnly {
-		t.Fatal("generic is outer_only")
-	}
-	if g.InterposeCommands() {
-		t.Fatal("generic does not interpose")
+	if resumeFromCaps(empty) != domain.ResumeReconstruct {
+		t.Fatal("must not assume native resume without advertised capability")
 	}
 	native := acp.AgentCapabilities{LoadSession: true}
-	if oc.SessionResume(native) != domain.ResumeNative {
+	if resumeFromCaps(native) != domain.ResumeNative {
 		t.Fatal("native resume only when advertised")
+	}
+	cx, ok := cat.ByID("codex")
+	if !ok || cx.ACP != "bridge" || len(cx.Bridges) == 0 || cx.Bridges[0] != "codex-acp" {
+		t.Fatalf("codex definition = %+v", cx)
+	}
+	gen := Definition{ID: "x", ACP: "native"}
+	if definitionIsolation(gen, empty) != domain.IsolationOuterOnly {
+		t.Fatal("a non-interposing definition is outer_only")
 	}
 }
 
-func TestAdapterForName(t *testing.T) {
-	if AdapterFor("", "/opt/opencode").ID() != AdapterOpenCode {
-		t.Fatal("opencode")
-	}
-	if AdapterFor("", "codex-acp").ID() != AdapterCodex {
-		t.Fatal("codex")
-	}
-	if AdapterFor("", fakeACP).ID() != AdapterGeneric {
-		t.Fatal("fake is generic")
+// TestShippedCatalogHasRequiredDefinitions proves the required harness families
+// ship as defaults.
+func TestShippedCatalogHasRequiredDefinitions(t *testing.T) {
+	cat := ShippedCatalog()
+	for _, id := range []string{
+		"opencode", "codex", "claude", "grok", "gemini", "github-copilot", "cursor",
+		"kiro", "junie", "goose", "cline", "qwen", "qoder", "mistral-vibe", "devin",
+		"kilo", "factory-droid", "auggie", "amp", "pi", "omp",
+	} {
+		if _, ok := cat.ByID(id); !ok {
+			t.Errorf("shipped catalog missing required definition %q", id)
+		}
 	}
 }
 

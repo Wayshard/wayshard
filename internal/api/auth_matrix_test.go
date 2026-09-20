@@ -16,7 +16,7 @@ import (
 func TestFreshServerAuthBoundary(t *testing.T) {
 	_, ts := testAPI(t)
 	protected := []string{"/v1/projects", "/v1/devices", "/v1/settings", "/v1/harnesses",
-		"/v1/storage", "/v1/notifications", "/v1/approvals", "/v1/server"}
+		"/v1/harness-definitions", "/v1/storage", "/v1/notifications", "/v1/approvals", "/v1/server"}
 	for _, ep := range protected {
 		req, _ := http.NewRequest(http.MethodGet, ts.URL+ep, nil)
 		req.RemoteAddr = "127.0.0.1:1"

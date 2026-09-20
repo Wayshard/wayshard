@@ -10,6 +10,7 @@ import (
 	"github.com/Wayshard/wayshard/internal/backup"
 	"github.com/Wayshard/wayshard/internal/ctxengine"
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/harness"
 	"github.com/Wayshard/wayshard/internal/knowledge"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
@@ -164,6 +165,38 @@ func (s *Server) sandboxInfo(w http.ResponseWriter, r *http.Request, _ *auth.Pri
 		"detail":          report.Detail,
 		"providerNetwork": s.ProviderNet,
 	})
+}
+
+// harnessDefinitions reports the effective harness catalog (shipped + user)
+// separately from discovered installations, so diagnostics can distinguish a
+// disabled/overridden definition from a missing installation.
+func (s *Server) harnessDefinitions(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
+	_ = r
+	type row struct {
+		ID                      string   `json:"id"`
+		DisplayName             string   `json:"displayName"`
+		Source                  string   `json:"source"`
+		Enabled                 bool     `json:"enabled"`
+		ACP                     string   `json:"acp"`
+		Executables             []string `json:"executables,omitempty"`
+		Bridges                 []string `json:"bridges,omitempty"`
+		Platforms               []string `json:"platforms,omitempty"`
+		RequiresProviderNetwork bool     `json:"requiresProviderNetwork"`
+		DeclaredTransport       string   `json:"declaredTransport"`
+	}
+	defs := []row{}
+	var diags []harness.CatalogDiagnostic
+	if s.Catalog != nil {
+		diags = s.Catalog.Diagnostics
+		for _, d := range s.Catalog.Definitions {
+			defs = append(defs, row{
+				ID: d.ID, DisplayName: d.DisplayName, Source: string(d.Source), Enabled: d.Enabled,
+				ACP: d.ACP, Executables: d.Executables, Bridges: d.Bridges, Platforms: d.Platforms,
+				RequiresProviderNetwork: d.RequiresProviderNetwork, DeclaredTransport: d.DeclaredTransport,
+			})
+		}
+	}
+	writeJSON(w, 200, map[string]any{"definitions": defs, "diagnostics": diags})
 }
 
 func (s *Server) listTerminals(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {

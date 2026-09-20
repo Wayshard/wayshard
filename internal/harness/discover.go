@@ -17,36 +17,12 @@ import (
 	"github.com/Wayshard/wayshard/internal/sandbox"
 )
 
-// package runners that would download/install a harness if used as a launcher.
-var forbiddenLaunchers = map[string]struct{}{
-	"npx": {}, "npm": {}, "yarn": {}, "pnpm": {}, "bun": {}, "bunx": {},
-	"deno": {}, "pipx": {}, "uvx": {},
-}
-
-// Definition is a known harness recipe. Optional ACP features are still probed.
-type Definition struct {
-	ID          string
-	DisplayName string
-	Names       []string
-	Adapter     string
-}
-
-// KnownDefinitions are executable names Wayshard will look up. Discovery never
-// scans every PATH entry and never installs a missing name.
-func KnownDefinitions() []Definition {
-	return []Definition{
-		{ID: "opencode", DisplayName: "OpenCode", Names: []string{"opencode"}, Adapter: AdapterOpenCode},
-		{ID: "codex", DisplayName: "Codex", Names: []string{"codex", "codex-acp"}, Adapter: AdapterCodex},
-		{ID: "wayshard-fake-acp", DisplayName: "Wayshard Fake ACP", Names: []string{"wayshard-fake-acp"}, Adapter: AdapterGeneric},
-	}
-}
-
 // DiscoverOptions controls where executables are resolved. Probe talks ACP.
 type DiscoverOptions struct {
 	PATH             string
 	Home             string
-	ExtraPaths       []string // explicit configured absolute (or home-relative) executables
-	LookupNames      []string // override known names
+	ExtraPaths       []string // explicit configured executables (absolute or ~-relative)
+	LookupNames      []string // restrict to definitions whose id/executables/bridges match
 	IncludeLoginPATH bool
 	WellKnownDirs    bool
 	Probe            bool
@@ -56,6 +32,11 @@ type DiscoverOptions struct {
 	// record so startup reconciliation can terminate surviving descendants
 	// after a server crash.
 	Owners ProbeOwnerSink
+	// Definitions overrides the effective catalog. When nil, the effective
+	// catalog (shipped + user) is loaded.
+	Definitions []Definition
+	// CatalogPath overrides the user catalog path (used by tests).
+	CatalogPath string
 }
 
 func DefaultDiscoverOptions() DiscoverOptions {
@@ -79,8 +60,8 @@ func (o DiscoverOptions) withDefaults() DiscoverOptions {
 	return o
 }
 
-// Discover finds installed harness executables. It never downloads, npx-installs,
-// or otherwise bootstraps a missing harness.
+// Discover finds installed members of the effective harness catalog. It never
+// downloads, npx-installs, or otherwise bootstraps a missing harness or bridge.
 func Discover(ctx context.Context, opts DiscoverOptions) ([]Installation, error) {
 	opts = opts.withDefaults()
 	home := opts.Home
@@ -96,125 +77,248 @@ func Discover(ctx context.Context, opts DiscoverOptions) ([]Installation, error)
 			searchPATH = mergePATH(searchPATH, lp)
 		}
 	}
-
-	var searchDirs []string
-	searchDirs = append(searchDirs, splitPATH(searchPATH)...)
+	baseDirs := splitPATH(searchPATH)
 	if opts.WellKnownDirs {
-		searchDirs = append(searchDirs, wellKnownBinDirs(home)...)
+		baseDirs = append(baseDirs, wellKnownBinDirs(home)...)
+	}
+
+	defs := opts.Definitions
+	if defs == nil {
+		cat, err := LoadCatalog(opts.CatalogPath)
+		if err != nil {
+			return nil, err
+		}
+		defs = cat.EnabledForPlatform(runtime.GOOS)
 	}
 
 	seen := map[string]struct{}{}
 	var out []Installation
-
-	lookups := opts.LookupNames
-	defsByName := map[string]Definition{}
-	for _, def := range KnownDefinitions() {
-		for _, n := range def.Names {
-			defsByName[n] = def
-			if len(opts.LookupNames) == 0 {
-				lookups = append(lookups, n)
-			}
-		}
-	}
-
-	for _, name := range lookups {
-		if forbiddenLauncher(name) {
-			continue
-		}
-		def := defsByName[name]
-		if def.ID == "" {
-			def = Definition{ID: name, DisplayName: name, Names: []string{name}, Adapter: AdapterGeneric}
-		}
-		resolved := lookInDirs(searchDirs, name)
-		for _, exe := range resolved {
-			key := canonicalPath(exe)
+	emit := func(inst Installation) {
+		key := canonicalPath(inst.Executable)
+		if key != "" {
 			if _, ok := seen[key]; ok {
-				continue
-			}
-			if forbiddenLauncher(exe) {
-				continue
+				return
 			}
 			seen[key] = struct{}{}
-			inst := baseInstallation(def, exe)
+		}
+		out = append(out, inst)
+	}
+
+	for _, def := range defs {
+		if !definitionMatchesLookup(def, opts.LookupNames) {
+			continue
+		}
+		dirs := append([]string{}, baseDirs...)
+		if opts.WellKnownDirs {
+			for _, wk := range def.WellKnown {
+				dirs = append(dirs, expandHomePattern(home, wk)...)
+			}
+		}
+		cliPaths := resolveExecutableNames(dirs, def.Executables)
+		bridgePaths := resolveExecutableNames(dirs, def.Bridges)
+
+		if def.ACP == "bridge" {
+			if len(bridgePaths) == 0 {
+				// Report a present CLI without its required bridge. The CLI path is
+				// used as the row identity; the entry is unavailable and never
+				// routed because the ACP executable is absent.
+				for _, cli := range cliPaths {
+					inst := baseInstallation(def, cli, cli, "")
+					inst.ACPStatus = "bridge_missing"
+					inst.BlockingReason = "ACP bridge " + strings.Join(quoteAll(def.Bridges), " or ") + " is not installed"
+					inst.Health = domain.HarnessUnavailable
+					inst.Compatibility = domain.CompatIncompatible
+					inst.Notes = append(inst.Notes, inst.BlockingReason)
+					if opts.Probe {
+						probeVersionOnly(ctx, &inst, def, opts.ProbeTimeout, opts.Owners)
+					}
+					emit(inst)
+				}
+				continue
+			}
+			for _, br := range bridgePaths {
+				cli := ""
+				if len(cliPaths) > 0 {
+					cli = cliPaths[0]
+				}
+				inst := baseInstallation(def, br, cli, br)
+				if opts.Probe {
+					probeOne(ctx, &inst, def, opts.ProbeTimeout, opts.Owners)
+				} else {
+					inst.Health = domain.HarnessUnavailable
+					inst.Notes = append(inst.Notes, "not probed")
+				}
+				emit(inst)
+			}
+			continue
+		}
+
+		for _, exe := range cliPaths {
+			inst := baseInstallation(def, exe, exe, "")
 			if opts.Probe {
-				probeOne(ctx, &inst, opts.ProbeTimeout, opts.Owners)
+				probeOne(ctx, &inst, def, opts.ProbeTimeout, opts.Owners)
 			} else {
 				inst.Health = domain.HarnessUnavailable
 				inst.Notes = append(inst.Notes, "not probed")
 			}
-			out = append(out, inst)
+			emit(inst)
 		}
 	}
 
+	// Explicit configured executables: match a catalog definition by executable
+	// name; otherwise report an unavailable installation rather than inventing
+	// behavior for an unknown harness.
 	for _, p := range opts.ExtraPaths {
 		p = expandHome(p, home)
 		if p == "" {
 			continue
 		}
-		if forbiddenLauncher(p) {
-			out = append(out, Installation{
-				ID:           id.New(),
-				DefinitionID: "custom",
-				DisplayName:  filepath.Base(p),
-				Executable:   p,
-				Adapter:      AdapterGeneric,
-				Health:       domain.HarnessUnavailable,
-				Notes:        []string{"refusing package-runner launcher (npx/npm/etc); Wayshard never installs harnesses"},
+		base := normalizeExecName(p)
+		var def Definition
+		found := false
+		for _, d := range defs {
+			if containsName(d.Executables, base) || containsName(d.Bridges, base) {
+				def = d
+				found = true
+				break
+			}
+		}
+		if !found {
+			emit(Installation{
+				ID: id.New(), DefinitionID: "custom", DisplayName: filepath.Base(p),
+				Executable: p, ACPStatus: "no_definition",
+				BlockingReason: "no catalog definition matches " + filepath.Base(p),
+				Health:         domain.HarnessUnavailable, Compatibility: domain.CompatIncompatible,
+				AuthStatus: "unknown",
 			})
 			continue
 		}
-		st, err := os.Stat(p)
-		if err != nil || st.IsDir() {
-			out = append(out, Installation{
-				ID:           id.New(),
-				DefinitionID: "custom",
-				DisplayName:  filepath.Base(p),
-				Executable:   p,
-				Adapter:      AdapterGeneric,
-				Health:       domain.HarnessUnavailable,
-				Notes:        []string{"configured path not found"},
-			})
-			continue
-		}
-		key := canonicalPath(p)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		def := Definition{ID: "custom", DisplayName: filepath.Base(p), Adapter: AdapterFor("", p).ID()}
-		inst := baseInstallation(def, p)
+		inst := baseInstallation(def, p, p, "")
 		if opts.Probe {
-			probeOne(ctx, &inst, opts.ProbeTimeout, opts.Owners)
+			probeOne(ctx, &inst, def, opts.ProbeTimeout, opts.Owners)
 		}
-		out = append(out, inst)
+		emit(inst)
 	}
 	return out, nil
 }
 
-func baseInstallation(def Definition, exe string) Installation {
-	ad := AdapterFor(def.Adapter, exe)
-	return Installation{
-		ID:           id.New(),
-		DefinitionID: def.ID,
-		DisplayName:  def.DisplayName,
-		Executable:   exe,
-		Adapter:      ad.ID(),
-		Health:       domain.HarnessUnavailable,
-		Isolation:    ad.Isolation(acp.AgentCapabilities{}),
-		Resume:       domain.ResumeReconstruct,
-		AuthStatus:   "unknown",
+func baseInstallation(def Definition, acpExe, cliExe, bridgeExe string) Installation {
+	inst := Installation{
+		ID:                      id.New(),
+		DefinitionID:            def.ID,
+		DefinitionSource:        def.Source,
+		Enabled:                 def.Enabled,
+		DisplayName:             def.DisplayName,
+		Homepage:                def.Homepage,
+		Executable:              acpExe,
+		CLIExecutable:           cliExe,
+		BridgeExecutable:        bridgeExe,
+		BridgePresent:           bridgeExe != "",
+		VersionArgs:             append([]string{}, def.VersionArgs...),
+		Health:                  domain.HarnessUnavailable,
+		Compatibility:           domain.CompatIncompatible,
+		Resume:                  domain.ResumeReconstruct,
+		AuthStatus:              "unknown",
+		InterposeCommands:       def.InterposeCommands,
+		ModelSelection:          def.ModelSelection,
+		RequiresProviderNetwork: def.RequiresProviderNetwork,
+		DeclaredTransport:       def.DeclaredTransport,
+		ConfigRoots:             append([]string{}, def.ConfigRoots...),
+		ACPRequiresLoopback:     def.ACPRequiresLoopback,
+	}
+	if inst.DisplayName == "" {
+		inst.DisplayName = def.ID
+	}
+	if acpExe != "" {
+		inst.Dir = filepath.Dir(acpExe)
+	}
+	return inst
+}
+
+func definitionMatchesLookup(def Definition, lookups []string) bool {
+	if len(lookups) == 0 {
+		return true
+	}
+	for _, l := range lookups {
+		if l == def.ID || containsName(def.Executables, l) || containsName(def.Bridges, l) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsName(list []string, name string) bool {
+	for _, x := range list {
+		if x == name {
+			return true
+		}
+	}
+	return false
+}
+
+func quoteAll(list []string) []string {
+	out := make([]string, 0, len(list))
+	for _, x := range list {
+		out = append(out, "'"+x+"'")
+	}
+	return out
+}
+
+// resolveExecutableNames resolves bare executable names across search dirs and
+// returns deduplicated physical paths.
+func resolveExecutableNames(dirs, names []string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		if name == "" || forbiddenLauncher(name) {
+			continue
+		}
+		for _, p := range lookInDirs(dirs, name) {
+			key := canonicalPath(p)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// probeVersionOnly runs just the version probe (used for a CLI whose bridge is
+// missing, so the CLI presence is reported accurately).
+func probeVersionOnly(ctx context.Context, inst *Installation, def Definition, timeout time.Duration, owners ProbeOwnerSink) {
+	probeDir, err := os.MkdirTemp("", "wayshard-probe-")
+	if err != nil {
+		return
+	}
+	defer os.RemoveAll(probeDir)
+	home := filepath.Join(probeDir, "home")
+	tmp := filepath.Join(probeDir, "tmp")
+	_ = os.MkdirAll(home, 0o700)
+	_ = os.MkdirAll(tmp, 0o700)
+	pol := sandbox.ProbePolicy(inst.CLIExecutable, home, tmp)
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessClosureFor(inst.CLIExecutable).Roots...)
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessProcRoots()...)
+	base := probeBaseEnv(inst.CLIExecutable)
+	env, lease, lerr := beginProbeEnv(ctx, owners, "version", home, tmp, base)
+	if lerr != nil {
+		return
+	}
+	verTimeout := timeout
+	if verTimeout > 3*time.Second {
+		verTimeout = 3 * time.Second
+	}
+	out, verr := sandbox.RunConstrainedOutputWithStart(ctx, pol, verTimeout, 256<<10, inst.CLIExecutable, def.VersionArgs, env, func(pgid int) { probeSetPGID(lease, pgid) })
+	probeDone(lease)
+	if verr == nil {
+		inst.Version = firstLine(out)
+	} else {
+		inst.VersionError = firstLine(out)
 	}
 }
 
-func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, owners ProbeOwnerSink) {
-	ad := AdapterFor(inst.Adapter, inst.Executable)
-	spec := ad.LaunchSpec(*inst)
-
-	// A dedicated ProbePolicy confines the version probe and the ACP
-	// initialize: NetworkNone, synthetic HOME/TEMP, no project/SourceWorkspace,
-	// no Wayshard runtime/DB/vault, no SSH agent or display sockets. If the
-	// platform cannot enforce it, the probe is reported unavailable rather than
-	// run unrestricted.
+func probeOne(ctx context.Context, inst *Installation, def Definition, timeout time.Duration, owners ProbeOwnerSink) {
 	probeDir, err := os.MkdirTemp("", "wayshard-probe-")
 	if err != nil {
 		classifyProbeError(inst, err)
@@ -225,55 +329,55 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	tmp := filepath.Join(probeDir, "tmp")
 	_ = os.MkdirAll(home, 0o700)
 	_ = os.MkdirAll(tmp, 0o700)
-	pol := sandbox.ProbePolicy(inst.Executable, home, tmp)
-	// A script/symlink harness (for example a Node ACP adapter) needs its
-	// package tree and interpreter available to launch at all. These are
-	// read-only and scoped to the harness's own package, never the home dir.
-	closure := harnessClosureFor(inst.Executable)
-	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, closure.Roots...)
-	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessProcRoots()...)
 
-	// The deterministic fake harness scenario knob is forwarded so its behavior
-	// is observable in tests; nothing else from the host environment survives.
-	base := map[string]string{}
-	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_INIT_CANARY", "WAYSHARD_FAKE_PROBE_DAEMON", "WAYSHARD_FAKE_PROBE_DAEMON_HANG"} {
-		if v := os.Getenv(k); v != "" {
-			base[k] = v
+	// Version probe on the primary CLI when present, otherwise on the ACP
+	// executable. Version probing is always NetworkNone.
+	versionExe := inst.CLIExecutable
+	if versionExe == "" {
+		versionExe = inst.Executable
+	}
+	if versionExe != "" {
+		pol := sandbox.ProbePolicy(versionExe, home, tmp)
+		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessClosureFor(versionExe).Roots...)
+		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessProcRoots()...)
+		base := probeBaseEnv(versionExe)
+		versionEnv, versionLease, lerr := beginProbeEnv(ctx, owners, "version", home, tmp, base)
+		if lerr != nil {
+			classifyProbeError(inst, lerr)
+			inst.Notes = append(inst.Notes, "probe ownership unavailable")
+			return
+		}
+		verTimeout := timeout
+		if verTimeout > 3*time.Second {
+			verTimeout = 3 * time.Second
+		}
+		out, verr := sandbox.RunConstrainedOutputWithStart(ctx, pol, verTimeout, 256<<10, versionExe, def.VersionArgs, versionEnv, func(pgid int) { probeSetPGID(versionLease, pgid) })
+		probeDone(versionLease)
+		if errors.Is(verr, sandbox.ErrRequiredIsolation) {
+			classifyProbeError(inst, verr)
+			inst.Notes = append(inst.Notes, "probe isolation unavailable")
+			return
+		}
+		if verr == nil {
+			inst.Version = firstLine(out)
+		} else {
+			inst.VersionError = firstLine(out)
 		}
 	}
-	if p := harnessEnvPATH(inst.Executable, os.Getenv("PATH")); p != os.Getenv("PATH") {
-		base["PATH"] = p
-	}
 
-	// Every probe process tree gets durable ownership before launch so startup
-	// reconciliation can terminate daemonized descendants after a server crash.
-	versionEnv, versionLease, lerr := beginProbeEnv(ctx, owners, "version", home, tmp, base)
-	if lerr != nil {
-		classifyProbeError(inst, lerr)
-		inst.Notes = append(inst.Notes, "probe ownership unavailable")
+	if inst.Executable == "" {
+		inst.ACPStatus = "bridge_missing"
+		inst.Health = domain.HarnessUnavailable
+		inst.Compatibility = domain.CompatIncompatible
 		return
 	}
-	spec.Env = versionEnv
 
-	verTimeout := timeout
-	if verTimeout > 3*time.Second {
-		verTimeout = 3 * time.Second
-	}
-	out, verr := sandbox.RunConstrainedOutputWithStart(ctx, pol, verTimeout, 256<<10, inst.Executable, probeVersionArgs(ad), versionEnv, func(pgid int) { probeSetPGID(versionLease, pgid) })
-	probeDone(versionLease)
-	if errors.Is(verr, sandbox.ErrRequiredIsolation) {
-		classifyProbeError(inst, verr)
-		inst.Notes = append(inst.Notes, "probe isolation unavailable")
-		return
-	}
-	inst.Version = firstLine(out)
-
-	// The ACP initialize probe may need local loopback IPC (for example an ACP
-	// server that runs a local standalone server). When the platform can create
-	// a private network namespace with only loopback, use that distinct
-	// capability; otherwise fall back to NetworkNone and report honestly.
-	acpPol := pol
-	if sandbox.LoopbackProbeAvailable() {
+	// ACP initialize probe. Harnesses whose ACP server needs private local IPC
+	// use the isolated loopback capability when available; otherwise NetworkNone.
+	acpPol := sandbox.ProbePolicy(inst.Executable, home, tmp)
+	acpPol.ReadOnlyRoots = append(acpPol.ReadOnlyRoots, harnessClosureFor(inst.Executable).Roots...)
+	acpPol.ReadOnlyRoots = append(acpPol.ReadOnlyRoots, harnessProcRoots()...)
+	if def.ACPRequiresLoopback && sandbox.LoopbackProbeAvailable() {
 		acpPol.Network = sandbox.NetLoopback
 	}
 	con := sandbox.AsConstrainer(sandbox.DefaultBackend())
@@ -281,22 +385,22 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 		classifyProbeError(inst, err)
 		return
 	}
-	spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, acpPol) }
-
+	acpArgs := definitionACPArgs(def)
+	base := probeBaseEnv(inst.Executable)
 	initEnv, initLease, lerr := beginProbeEnv(ctx, owners, "initialize", home, tmp, base)
 	if lerr != nil {
 		classifyProbeError(inst, lerr)
 		inst.Notes = append(inst.Notes, "probe ownership unavailable")
 		return
 	}
-	spec.Env = initEnv
+	spec := acp.Spec{Command: inst.Executable, Args: acpArgs, Env: initEnv, Dir: inst.Dir}
+	spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, acpPol) }
 	spec.AfterStart = func(cmd *exec.Cmd) (func(), error) {
 		if cmd.Process != nil {
 			probeSetPGID(initLease, cmd.Process.Pid)
 		}
 		return con.Attach(cmd, acpPol)
 	}
-
 	res, err := acp.Probe(ctx, spec, timeout)
 	probeDone(initLease)
 	if res != nil {
@@ -308,41 +412,39 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	}
 	if err != nil {
 		classifyProbeError(inst, err)
-		if inst.Version != "" && inst.Health == domain.HarnessIncompatible {
-			inst.Health = domain.HarnessIncompatible
+		if inst.ACPStatus == "" {
+			inst.ACPStatus = "incompatible"
 		}
 		return
 	}
 	if res == nil || res.Initialize == nil {
 		inst.Health = domain.HarnessIncompatible
 		inst.Compatibility = domain.CompatIncompatible
+		inst.ACPStatus = "incompatible"
 		inst.Notes = append(inst.Notes, "initialize returned no result")
 		return
 	}
 	init := res.Initialize
+	inst.ACPStatus = "ok"
 	inst.Capabilities = init.AgentCapabilities
 	inst.AgentInfo = init.AgentInfo
 	inst.AuthMethods = init.AuthMethods
-	inst.Isolation = ad.Isolation(init.AgentCapabilities)
-	inst.IsolationDetail = ad.IsolationDetail(init.AgentCapabilities)
-	inst.Resume = ad.SessionResume(init.AgentCapabilities)
+	inst.Isolation = definitionIsolation(def, init.AgentCapabilities)
+	inst.IsolationDetail = definitionIsolationDetail(def, init.AgentCapabilities)
+	inst.Resume = resumeFromCaps(init.AgentCapabilities)
 	if inst.Version == "" && init.AgentInfo.Version != "" {
 		inst.Version = init.AgentInfo.Version
 	}
 	if init.AgentInfo.Title != "" && inst.DefinitionID == "custom" {
 		inst.DisplayName = init.AgentInfo.Title
 	}
-
 	if len(init.AuthMethods) > 0 {
-		// Many agents advertise auth methods even when they are already
-		// authenticated. The probe runs without real harness configuration, so it
-		// cannot determine auth state; report it honestly as unknown rather than
-		// assuming unauthenticated. Authentication stays harness-owned and is
-		// resolved when the harness actually runs with its config roots.
+		// Many agents advertise auth methods even when already authenticated. The
+		// probe runs without real harness configuration, so auth state is unknown.
 		inst.AuthStatus = "unknown"
 		inst.Health = domain.HarnessReady
 		inst.Compatibility = domain.CompatRoutable
-		if init.AgentCapabilities.HasNativeResume() || ad.InterposeCommands() {
+		if init.AgentCapabilities.HasNativeResume() || def.InterposeCommands {
 			inst.Compatibility = domain.CompatEnhanced
 		}
 		inst.Notes = append(inst.Notes, "agent advertises auth methods; authentication is harness-owned and not verified by the probe")
@@ -351,20 +453,22 @@ func probeOne(ctx context.Context, inst *Installation, timeout time.Duration, ow
 	inst.AuthStatus = "none"
 	inst.Health = domain.HarnessReady
 	inst.Compatibility = domain.CompatRoutable
-	if init.AgentCapabilities.HasNativeResume() || ad.InterposeCommands() {
+	if init.AgentCapabilities.HasNativeResume() || def.InterposeCommands {
 		inst.Compatibility = domain.CompatEnhanced
 	}
 }
 
-// probeVersionArgs returns the argv used to ask a known harness for its version.
-// Unknown/generic harnesses keep the no-argument probe.
-func probeVersionArgs(ad HarnessAdapter) []string {
-	switch ad.ID() {
-	case AdapterOpenCode, AdapterCodex:
-		return []string{"--version"}
-	default:
-		return nil
+func probeBaseEnv(exePath string) map[string]string {
+	base := map[string]string{}
+	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_INIT_CANARY", "WAYSHARD_FAKE_PROBE_DAEMON", "WAYSHARD_FAKE_PROBE_DAEMON_HANG"} {
+		if v := os.Getenv(k); v != "" {
+			base[k] = v
+		}
 	}
+	if p := harnessEnvPATH(exePath, os.Getenv("PATH")); p != os.Getenv("PATH") {
+		base["PATH"] = p
+	}
+	return base
 }
 
 func classifyProbeError(inst *Installation, err error) {
@@ -372,8 +476,10 @@ func classifyProbeError(inst *Installation, err error) {
 	case errors.Is(err, acp.ErrIncompatible), errors.Is(err, acp.ErrProtocol), errors.Is(err, acp.ErrStdoutPollution):
 		inst.Health = domain.HarnessIncompatible
 		inst.Compatibility = domain.CompatIncompatible
+		inst.ACPStatus = "incompatible"
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, acp.ErrHandshakeTimeout):
 		inst.Health = domain.HarnessDegraded
+		inst.ACPStatus = "incompatible"
 		inst.Notes = append(inst.Notes, "initialize timed out")
 	default:
 		var rpc *acp.Error
@@ -381,11 +487,14 @@ func classifyProbeError(inst *Installation, err error) {
 			inst.Health = domain.HarnessUnauth
 			inst.AuthStatus = "unauthenticated"
 			inst.Compatibility = domain.CompatCore
+			inst.ACPStatus = "incompatible"
 			return
 		}
 		inst.Health = domain.HarnessUnavailable
 		inst.Compatibility = domain.CompatIncompatible
+		inst.ACPStatus = "incompatible"
 	}
+	inst.ACPError = err.Error()
 	inst.Notes = append(inst.Notes, err.Error())
 }
 
@@ -438,8 +547,14 @@ func wellKnownBinDirs(home string) []string {
 			filepath.Join(home, "bin"),
 			filepath.Join(home, ".cargo", "bin"),
 			filepath.Join(home, "go", "bin"),
-			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".volta", "bin"),
 		)
+		// Node version-manager layouts are common homes for npm-distributed
+		// harness CLIs and ACP bridges. These are home-relative and never
+		// project-controlled.
+		if m, _ := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin")); len(m) > 0 {
+			dirs = append(dirs, m...)
+		}
 	}
 	switch runtime.GOOS {
 	case "darwin":
@@ -452,6 +567,20 @@ func wellKnownBinDirs(home string) []string {
 		dirs = append(dirs, "/usr/local/bin", "/usr/bin")
 	}
 	return dirs
+}
+
+// expandHomePattern resolves a catalog-declared home-relative well-known path.
+// A glob pattern (for example `.nvm/versions/node/*/bin`) expands within HOME
+// only; the catalog validator rejects absolute paths and `..`.
+func expandHomePattern(home, rel string) []string {
+	p := filepath.Join(home, rel)
+	if strings.ContainsAny(rel, "*?[") {
+		if m, err := filepath.Glob(p); err == nil {
+			return m
+		}
+		return nil
+	}
+	return []string{p}
 }
 
 func splitPATH(p string) []string {
@@ -503,7 +632,7 @@ func expandHome(p, home string) string {
 }
 
 func forbiddenLauncher(path string) bool {
-	_, ok := forbiddenLaunchers[normalizeExecName(path)]
+	_, ok := forbidden[normalizeExecName(path)]
 	return ok
 }
 
