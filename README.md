@@ -39,6 +39,35 @@ Wayshard has four full clients:
 
 The graphical and terminal clients may begin from selected MIT-licensed OpenCode 2 client source imported into Wayshard. Wayshard is an independent project: it is not maintained as an OpenCode fork, has no upstream-sync relationship, and does not target OpenCode API compatibility. Required third-party MIT attribution is preserved separately.
 
+## Install the CLI / TUI
+
+Official CLI/TUI releases are distributed as one archive per platform. The
+archive contains the `wayshard` CLI and its required `wayshard-tui` companion
+under the canonical runtime names, plus `LICENSE`, `NOTICE`, and
+`THIRD_PARTY_NOTICES.md`:
+
+| Platform | Archive |
+|---|---|
+| Linux x86-64 | `wayshard-vX-linux-amd64.tar.gz` |
+| Linux arm64 | `wayshard-vX-linux-arm64.tar.gz` |
+| macOS x86-64 | `wayshard-vX-darwin-amd64.tar.gz` |
+| macOS Apple silicon | `wayshard-vX-darwin-arm64.tar.gz` |
+| Windows x86-64 | `wayshard-vX-windows-amd64.zip` |
+
+Extract the archive and run the binaries in place. No renaming, no
+`WAYSHARD_TUI` override, and no Bun installation are required:
+
+```sh
+mkdir wayshard && tar -xzf wayshard-vX-linux-amd64.tar.gz -C wayshard
+./wayshard/wayshard          # interactive Wayshard TUI
+./wayshard/wayshard help     # scriptable CLI help
+```
+
+The raw `wayshard` binary alone is **not** a functional interactive client: it
+launches the adjacent `wayshard-tui` companion. Standalone server, CLI, and TUI
+binaries are also published for advanced users, but the archive is the normal
+installable unit.
+
 ## Server model
 
 Projects and execution live where **Wayshard Server** runs.
@@ -200,12 +229,22 @@ make build
 ./bin/wayshard status
 ```
 
+`make build-all` additionally builds the packaged TUI companion under its
+canonical runtime name, so `bin/wayshard` and `bin/wayshard-tui` form a directly
+runnable pair:
+
+```sh
+make build-all
+./bin/wayshard        # interactive TUI (launches bin/wayshard-tui)
+./bin/wayshard status # scriptable CLI
+```
+
 Default data directory:
 
 - Linux: `~/.local/share/wayshard`
 - macOS: `~/Library/Application Support/Wayshard`
 - Windows: `%APPDATA%\Wayshard`
 
-Pairing: from a loopback client or an already-trusted device, `POST /v1/pairing/invitations` (optional `advertisedUrl` when the reachable client URL differs from loopback). Complete with `wayshard pair <code>`.
+Pairing: from a loopback client or an already-trusted device, `POST /v1/pairing/invitations` (optional `advertisedUrl` when the reachable client URL differs from loopback). Complete verified pairing with `wayshard pair --invitation '<pairing card/json>'` (or `wayshard pair --server-id <id> --fingerprint <fp> <code>`); a bare code is refused because pairing binds to the expected server identity.
 
 Official release artifacts are produced by GitHub Actions on `Wayshard/wayshard`, not from workstation uploads. Normal PR CI does not require production secrets, paid model calls, or installed third-party harnesses.

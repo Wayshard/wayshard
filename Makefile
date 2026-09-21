@@ -4,17 +4,20 @@
 GO        ?= go
 GOFLAGS   ?=
 BINDIR    ?= bin
+HOSTOS    ?= $(shell $(GO) env GOOS)
+HOSTARCH  ?= $(shell $(GO) env GOARCH)
+EXE       ?= $(if $(filter windows,$(HOSTOS)),.exe,)
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE      ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS   := -s -w -X github.com/Wayshard/wayshard/internal/version.Version=$(VERSION) -X github.com/Wayshard/wayshard/internal/version.Commit=$(COMMIT) -X github.com/Wayshard/wayshard/internal/version.Date=$(DATE)
 
-.PHONY: all help fmt vet test test-race build build-server build-cli build-fake-acp build-tui build-cross build-all tidy ci web desktop android clean
+.PHONY: all help fmt vet test test-race build build-server build-cli build-fake-acp build-tui build-tui-versioned build-cross build-all tidy ci web desktop android clean
 
 all: test build
 
 help:
-	@echo "Targets: fmt vet test build build-server build-cli build-tui build-cross build-all web desktop android release-scripts-test ci clean"
+	@echo "Targets: fmt vet test build build-server build-cli build-tui build-tui-versioned build-cross build-all web desktop android release-scripts-test ci clean"
 
 fmt:
 	$(GO) fmt ./...
@@ -35,19 +38,26 @@ build: build-server build-cli build-fake-acp
 
 build-server:
 	mkdir -p $(BINDIR)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server ./cmd/wayshard-server
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server$(EXE) ./cmd/wayshard-server
 
 build-cli:
 	mkdir -p $(BINDIR)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard ./cmd/wayshard
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard$(EXE) ./cmd/wayshard
 
+# Build the interactive companion under its canonical runtime name so that
+# bin/wayshard finds bin/wayshard-tui directly (no rename, no override).
 build-tui:
+	mkdir -p $(BINDIR)
 	cd clients && bun install --frozen-lockfile
-	cd clients/tui && TUI_OUTFILE=$(CURDIR)/$(BINDIR)/wayshard-tui-$(shell go env GOOS)-$(shell go env GOARCH) bun run build.ts
+	cd clients/tui && TUI_OUTFILE=$(CURDIR)/$(BINDIR)/wayshard-tui$(EXE) bun run build.ts
+
+# Optional versioned copy for archival; it never replaces the runtime layout.
+build-tui-versioned: build-tui
+	cp -a $(BINDIR)/wayshard-tui$(EXE) $(BINDIR)/wayshard-tui-$(HOSTOS)-$(HOSTARCH)$(EXE)
 
 build-fake-acp:
 	mkdir -p $(BINDIR)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-fake-acp ./cmd/wayshard-fake-acp
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-fake-acp$(EXE) ./cmd/wayshard-fake-acp
 
 # Cross-compilation of Go binaries (CGO-free). Desktop/Android packaging is CI-only.
 # Artifact names used for GitHub Releases are applied by scripts/release/package-go.sh.
@@ -93,6 +103,7 @@ release-scripts-test:
 	bash scripts/release/android_jks_test.sh
 	bash scripts/release/android_version_properties_test.sh
 	bash scripts/release/package_go_test.sh
+	bash scripts/release/package_cli_tui_test.sh
 	bash scripts/release/windows_pfx_test.sh
 	bash scripts/release/minisign_test.sh
 	bash scripts/release/release_policy_test.sh

@@ -19,7 +19,9 @@ There is no Tauri auto-updater (not required by the canonicals).
 | Component | Artifact name pattern | How it is signed |
 |---|---|---|
 | Server | `wayshard-server-<tag>-<os>-<arch>[.exe]` | Checksums + minisign on `SHA256SUMS.txt` |
-| CLI | `wayshard-<tag>-<os>-<arch>[.exe]` | Same |
+| CLI (raw) | `wayshard-<tag>-<os>-<arch>[.exe]` | Same |
+| **CLI+TUI bundle** | `wayshard-<tag>-<os>-<arch>.tar.gz` (`.zip` on Windows) | Same |
+| TUI (raw companion) | `wayshard-tui-<tag>-<os>-<arch>[.exe]` | Same |
 | Embedded Web | inside Server | Same |
 | CycloneDX SBOM | `wayshard-<tag>-sbom-go.cdx.json` | Same |
 | Go buildinfo | `wayshard-<tag>-buildinfo-server-linux-amd64.txt` | Same (not an SBOM) |
@@ -29,6 +31,27 @@ There is no Tauri auto-updater (not required by the canonicals).
 | Desktop Windows | `wayshard-desktop-<tag>-windows-x64.msi` and `-setup.exe` | **Self-signed Authenticode** from maintainer PFX |
 | Android APK | `wayshard-<tag>-android.apk` | **JKS/PKCS12** upload key, verified before publish |
 | Checksums | `SHA256SUMS.txt` + `SHA256SUMS.txt.minisig` | SHA-256 plus minisign |
+
+### CLI+TUI bundle layout
+
+The `tui` matrix builds a native `wayshard` CLI and a self-contained
+`wayshard-tui` companion on each platform runner and packages them with
+`scripts/release/package-cli-tui.sh`. Inside every archive the binaries use the
+canonical runtime names the launcher expects, so a user extracts and runs with
+no rename and no `WAYSHARD_TUI` override:
+
+```text
+wayshard-vX-linux-amd64.tar.gz
+├── wayshard
+├── wayshard-tui
+├── LICENSE
+├── NOTICE
+└── THIRD_PARTY_NOTICES.md
+```
+
+Windows uses the same layout in `wayshard-vX-windows-amd64.zip` with `.exe`
+suffixes. The raw CLI/TUI binaries remain published for advanced users, but the
+raw `wayshard` binary alone is not a functional interactive client.
 
 ## Trust vs cryptography
 
@@ -51,7 +74,7 @@ There is no Tauri auto-updater (not required by the canonicals).
 
 Exact name: **`release`**.
 
-Jobs: `release`, `desktop`, `android`, `checksums` in `.github/workflows/release.yml`.
+Jobs: `release`, `tui`, `desktop`, `android`, `checksums` in `.github/workflows/release.yml`.
 
 Recommended: required reviewers; restrict to tags `v*`.
 
@@ -235,7 +258,17 @@ Wayshard signing key. No Play account is used.
 ```sh
 minisign -V -p keys/wayshard-release.minisign.pub -m SHA256SUMS.txt
 sha256sum -c SHA256SUMS.txt
+
+# CLI+TUI bundle: verify then extract and run in place (no rename/override).
+tar -xzf wayshard-vX-linux-amd64.tar.gz -C wayshard
+./wayshard/wayshard help
+./wayshard/wayshard
 ```
+
+`SHA256SUMS.txt` covers every published asset, including each CLI+TUI bundle.
+The combined checksums job runs only after `release`, `tui`, `desktop`, and
+`android` finish, and it fails if any expected bundle is missing before the
+manifest is minisigned.
 
 macOS: `codesign -dv --verbose=4 Wayshard.app` should mention `adhoc`.
 

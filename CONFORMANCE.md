@@ -274,3 +274,35 @@ The live clients are adapted from the imported OpenCode 2 client source, not rec
   security remains user-owned. Proof: `internal/api/pairing_identity_test.go`,
   `internal/auth` pairing tests, `clients/sdk/src/identity.test.ts`,
   `cmd/wayshard/pairing_test.go`.
+
+### Pass 1E final release-packaging remediation
+
+- **Runnable CLI+TUI distribution unit.** The release `tui` matrix builds a
+  native `wayshard` CLI and a self-contained `wayshard-tui` companion on each
+  runner and packages them with `scripts/release/package-cli-tui.sh` into
+  `wayshard-<tag>-<os>-<arch>.tar.gz` (`.zip` on Windows). Inside the archive the
+  binaries use the canonical runtime names the launcher expects plus `LICENSE`,
+  `NOTICE`, and `THIRD_PARTY_NOTICES.md`, so extraction yields a working
+  no-argument `wayshard` with no rename and no `WAYSHARD_TUI` override. The raw
+  CLI/TUI binaries remain published for advanced users but the raw `wayshard`
+  binary alone is not a functional interactive client.
+- **Local build parity.** `make build-all` now emits `bin/wayshard` and
+  `bin/wayshard-tui` under canonical names; `build-tui-versioned` adds an
+  optional versioned copy without breaking the runtime layout.
+- **Executable symlink resolution.** `resolveTUI` resolves the running
+  executable itself through symlinks before taking its directory, so
+  `/usr/local/bin/wayshard -> /opt/wayshard/wayshard` finds
+  `/opt/wayshard/wayshard-tui`. A companion symlink escaping the real install
+  directory is still rejected and PATH search remains forbidden. Proof:
+  `cmd/wayshard/resolve_test.go`, `cmd/wayshard/resolve_symlink_test.go`.
+- **Deterministic checksum coverage.** The combined `checksums` job now waits
+  for `release`, `tui`, `desktop`, and `android`, and fails if any expected
+  CLI+TUI bundle is absent before writing/minisigning `SHA256SUMS.txt`. Guarded
+  by `scripts/release/release_policy_test.sh`.
+- **Release-script + packaged smoke coverage.** `package_cli_tui_test.sh`
+  validates the archive layout, notices, executable mode, and extraction
+  behavior; `scripts/ci/tui_smoke.sh` now exercises the real packaging script
+  end to end (extract, `wayshard help`, no-argument TUI launch).
+- **CLI help accuracy.** `wayshard help` documents verified pairing
+  (`--invitation` or `--server-id`/`--fingerprint`); a bare code remains refused.
+  Pairing security behavior is unchanged.

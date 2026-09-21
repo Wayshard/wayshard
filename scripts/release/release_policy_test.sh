@@ -72,4 +72,53 @@ if bash "$ROOT/scripts/release/minisign-sign.sh" "$TMP/SHA256SUMS.txt" >"$TMP/mi
 fi
 grep -q 'WAYSHARD_RELEASE_MINISIGN_KEY_BASE64' "$TMP/minisign.err" || fail "minisign-sign.sh must name the missing secret"
 
+# --- CLI+TUI distribution unit and deterministic checksum coverage -----------
+test -s "$ROOT/scripts/release/package-cli-tui.sh" || fail "missing scripts/release/package-cli-tui.sh"
+grep -q 'package-cli-tui.sh' "$REL" || fail "release tui job must package the CLI+TUI bundle with package-cli-tui.sh"
+grep -q 'package-cli-tui.sh' "$ROOT/scripts/ci/tui_smoke.sh" || fail "tui smoke must exercise the real packaging script"
+grep -q 'wayshard-tui' "$REL" || fail "release tui job must build the wayshard-tui companion"
+
+python3 - "$REL" "$ROOT/scripts/release/package-cli-tui.sh" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+
+
+def job_block(name):
+    m = re.search(rf"^  {re.escape(name)}:\s*$", text, re.M)
+    if not m:
+        raise SystemExit(f"release.yml is missing job {name!r}")
+    rest = text[m.end():]
+    end = re.search(r"^  [A-Za-z0-9_-]+:\s*$", rest, re.M)
+    return rest[: end.start()] if end else rest
+
+
+checksums = job_block("checksums")
+m = re.search(r"^    needs:\s*(.+)$", checksums, re.M)
+if not m:
+    raise SystemExit("checksums job must declare needs")
+raw = m.group(1).strip()
+if raw.startswith("["):
+    deps = {d.strip() for d in raw.strip("[]").split(",") if d.strip()}
+else:
+    deps = set(re.findall(r"^\s+-\s+(\S+)", checksums[m.end():], re.M))
+required = {"release", "tui", "desktop", "android"}
+missing = required - deps
+if missing:
+    raise SystemExit(
+        f"combined checksums must wait for every release producer; missing {sorted(missing)}"
+    )
+
+# The checksum job must verify the CLI+TUI bundles before signing the manifest.
+if "Verify every expected CLI+TUI bundle is present" not in checksums:
+    raise SystemExit("checksums job must assert all CLI+TUI bundles exist before minisigning")
+
+script = open(sys.argv[2], encoding="utf-8").read()
+for needle in ("wayshard-tui", "wayshard-${VERSION}", ".tar.gz", ".zip"):
+    if needle not in script:
+        raise SystemExit(f"package-cli-tui.sh must produce {needle!r}")
+print("release asset dependency + bundle graph ok")
+PY
+
 echo "release policy test ok"

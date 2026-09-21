@@ -16,22 +16,30 @@ func tuiCompanionName() string {
 	return "wayshard-tui"
 }
 
-// resolveTUI locates the packaged TUI companion deterministically without a
-// PATH search. It only accepts:
-//   - an explicit WAYSHARD_TUI override, or
-//   - a regular file named wayshard-tui in the same resolved directory as the
-//     running wayshard executable.
-//
-// A symlinked companion is resolved but must still live in that directory.
+// resolveTUI locates the packaged TUI companion for the running executable.
 func resolveTUI() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("resolve wayshard executable: %w", err)
 	}
-	dir := filepath.Dir(exe)
-	if resolved, rerr := filepath.EvalSymlinks(dir); rerr == nil {
-		dir = resolved
+	return resolveTUIFor(exe)
+}
+
+// resolveTUIFor locates the packaged TUI companion deterministically without a
+// PATH search. It only accepts:
+//   - an explicit WAYSHARD_TUI override, or
+//   - a regular file named wayshard-tui beside the real executable.
+//
+// The executable path is resolved through symlinks before its directory is
+// taken, so an install reached through a symlinked launcher (for example
+// /usr/local/bin/wayshard -> /opt/wayshard/wayshard) still finds the companion
+// beside the real executable. A symlinked companion is resolved but must still
+// live in that directory.
+func resolveTUIFor(exe string) (string, error) {
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
 	}
+	dir := filepath.Dir(exe)
 
 	candidate := filepath.Join(dir, tuiCompanionName())
 	if override := os.Getenv("WAYSHARD_TUI"); override != "" {

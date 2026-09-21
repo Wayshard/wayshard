@@ -60,6 +60,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Wayshard ${{ github.ref_name }}
+          body: |
+            ## Installing the CLI / TUI
+
+            Download the platform archive (for example
+            `wayshard-<tag>-linux-amd64.tar.gz`), extract it, and run
+            `./wayshard` for the interactive TUI or `./wayshard help` for the
+            scriptable CLI. The archive already contains the `wayshard-tui`
+            companion under its canonical runtime name — no rename, no
+            `WAYSHARD_TUI` override, and no Bun install are required.
+
+            The standalone `wayshard-<tag>-<os>-<arch>` binary is for advanced
+            users and is **not** a functional interactive client on its own: it
+            launches the adjacent `wayshard-tui` companion.
           generate_release_notes: true
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.IS_PRERELEASE == 'false' }}
@@ -69,7 +82,7 @@ jobs:
 
 
   tui:
-    name: Interactive TUI (${{ matrix.asset }})
+    name: CLI+TUI bundle (${{ matrix.asset }})
     needs: release
     if: github.repository == 'Wayshard/wayshard'
     strategy:
@@ -78,43 +91,76 @@ jobs:
         include:
           - os: ubuntu-latest
             target: bun-linux-x64
+            goos: linux
+            goarch: amd64
             asset: linux-amd64
           - os: ubuntu-24.04-arm
             target: bun-linux-arm64
+            goos: linux
+            goarch: arm64
             asset: linux-arm64
           - os: macos-13
             target: bun-darwin-x64
+            goos: darwin
+            goarch: amd64
             asset: darwin-amd64
           - os: macos-latest
             target: bun-darwin-arm64
+            goos: darwin
+            goarch: arm64
             asset: darwin-arm64
           - os: windows-latest
             target: bun-windows-x64
+            goos: windows
+            goarch: amd64
             asset: windows-amd64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
       - name: Install client workspace
         run: bun install --frozen-lockfile
         working-directory: clients
+      - name: Build native CLI
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          mkdir -p dist/cli-tui/stage dist/cli-tui/out
+          go build -ldflags "-s -w \
+            -X github.com/Wayshard/wayshard/internal/version.Version=${GITHUB_REF_NAME} \
+            -X github.com/Wayshard/wayshard/internal/version.Commit=${GITHUB_SHA} \
+            -X github.com/Wayshard/wayshard/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "dist/cli-tui/stage/wayshard${ext}" ./cmd/wayshard
       - name: Build packaged TUI companion
         shell: bash
         run: |
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
-          mkdir -p "$GITHUB_WORKSPACE/dist/tui"
           cd clients/tui
-          TUI_TARGET=${{ matrix.target }} TUI_OUTFILE="$GITHUB_WORKSPACE/dist/tui/wayshard-tui-${GITHUB_REF_NAME}-${{ matrix.asset }}${ext}" bun run build.ts
-      - name: Publish TUI companion
+          TUI_TARGET=${{ matrix.target }} TUI_OUTFILE="$GITHUB_WORKSPACE/dist/cli-tui/stage/wayshard-tui${ext}" bun run build.ts
+      - name: Package CLI+TUI distribution unit
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          bash scripts/release/package-cli-tui.sh "${GITHUB_REF_NAME}" "${{ matrix.goos }}" "${{ matrix.goarch }}" \
+            dist/cli-tui/stage dist/cli-tui/out
+          # Also publish the raw companion for advanced users.
+          cp "dist/cli-tui/stage/wayshard-tui${ext}" \
+            "dist/cli-tui/out/wayshard-tui-${GITHUB_REF_NAME}-${{ matrix.asset }}${ext}"
+      - name: Publish CLI+TUI bundle
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.IS_PRERELEASE == 'false' }}
-          files: dist/tui/*
+          files: dist/cli-tui/out/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -267,7 +313,7 @@ jobs:
 
   checksums:
     name: Combined SHA256SUMS
-    needs: [release, desktop, android]
+    needs: [release, tui, desktop, android]
     if: github.repository == 'Wayshard/wayshard'
     environment: release
     runs-on: ubuntu-latest
@@ -279,6 +325,16 @@ jobs:
         run: |
           mkdir -p all-assets
           gh release download "${GITHUB_REF_NAME}" -D all-assets
+      - name: Verify every expected CLI+TUI bundle is present
+        run: |
+          set -euo pipefail
+          for asset in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            test -s "all-assets/wayshard-${GITHUB_REF_NAME}-${asset}.tar.gz" \
+              || { echo "missing CLI+TUI bundle for ${asset}" >&2; exit 1; }
+          done
+          test -s "all-assets/wayshard-${GITHUB_REF_NAME}-windows-amd64.zip" \
+            || { echo "missing CLI+TUI bundle for windows-amd64" >&2; exit 1; }
+          echo "all CLI+TUI bundles present"
       - name: Install minisign
         run: |
           sudo apt-get update

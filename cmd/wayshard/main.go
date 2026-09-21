@@ -180,13 +180,17 @@ func main() {
 
   wayshard                         interactive client (launches the packaged Wayshard TUI)
   wayshard status|projects|devices|harnesses|approvals|notifications|storage|settings
-  wayshard pair <code> | invite | open <path>
+  wayshard pair --invitation '<pairing card or json>'   verified identity pairing
+  wayshard pair --server-id <id> --fingerprint <fp> <code>
+  wayshard invite | open <path>
   wayshard send <conversation> <text>
   wayshard run|stages|artifacts|changes|cancel|retry|integrate <run-id>
   wayshard allow|deny <approval-id>
   wayshard knowledge <project-id>
   wayshard revoke <device-id>
 
+Pairing refuses a bare code: verified pairing requires the expected server id and
+fingerprint from the trusted invitation (--invitation, or --server-id/--fingerprint).
 Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN
 `)
 	default:
