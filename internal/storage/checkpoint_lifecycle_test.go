@@ -162,6 +162,13 @@ func TestReclaimTerminalCheckpoint(t *testing.T) {
 	if n, _ := s.ReclaimCheckpoints(ctx, time.Hour); n != 0 {
 		t.Fatalf("recent terminal checkpoint reclaimed early: %d", n)
 	}
+	// Backdate the checkpoint so the retention decision is deterministic and
+	// independent of platform clock resolution (Windows time.Now can be coarse
+	// enough that a freshly created row shares a tick with "now").
+	if _, err := s.DB.ExecContext(ctx, `UPDATE workspace_checkpoints SET created_at = ? WHERE id = ?`,
+		time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339Nano), cp.ID); err != nil {
+		t.Fatal(err)
+	}
 	n, err := s.ReclaimCheckpoints(ctx, time.Nanosecond)
 	if err != nil {
 		t.Fatal(err)
