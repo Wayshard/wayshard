@@ -75,6 +75,154 @@ export interface EventFrame {
   payload?: unknown;
 }
 
+
+// ---------------------------------------------------------------------------
+// Wayshard application-identity verification.
+//
+// Pairing binds to an expected server identity taken from the trusted pairing
+// invitation (serverId + fingerprint), verifies possession of the identity
+// private key via a signed fresh nonce, and only then persists a credential.
+// This proves application identity; it does not provide transport security
+// (TLS/VPN/tunnel remain the user's responsibility).
+// ---------------------------------------------------------------------------
+
+export interface PairingChallenge {
+  serverId: string;
+  fingerprint: string;
+  publicKey: string;
+  signature: string;
+}
+
+export interface ServerIdentityExpectation {
+  serverId?: string;
+  fingerprint?: string;
+}
+
+export interface IdentityVerification {
+  ok: boolean;
+  reason?: string;
+  serverId?: string;
+  fingerprint?: string;
+}
+
+export interface PairingInvitation {
+  advertisedUrl?: string;
+  listenUrl?: string;
+  serverId?: string;
+  fingerprint?: string;
+  code?: string;
+  expiresAt?: string;
+}
+
+function bytesToHex(b: Uint8Array): string {
+  return Array.from(b)
+    .map((x) => x.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function hexToBytes(hex: string): Uint8Array | null {
+  if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) return null;
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
+  return bytesToHex(new Uint8Array(digest));
+}
+
+// randomNonce returns a fresh unpredictable nonce (hex) so a challenge response
+// cannot be replayed.
+export function randomNonce(bytes = 32): string {
+  const b = new Uint8Array(bytes);
+  crypto.getRandomValues(b);
+  return bytesToHex(b);
+}
+
+// verifyServerIdentity checks that the challenge was signed by the private key
+// for the expected application identity over the fresh nonce.
+export async function verifyServerIdentity(
+  nonce: string,
+  challenge: PairingChallenge,
+  expected: ServerIdentityExpectation,
+): Promise<IdentityVerification> {
+  const pub = hexToBytes(challenge.publicKey ?? "");
+  if (!pub || pub.length !== 32) return { ok: false, reason: "malformed server public key" };
+  const sig = hexToBytes(challenge.signature ?? "");
+  if (!sig) return { ok: false, reason: "malformed signature" };
+  const nonceBytes = hexToBytes(nonce);
+  if (!nonceBytes) return { ok: false, reason: "malformed nonce" };
+
+  const fingerprint = (await sha256Hex(pub)).slice(0, 16);
+  if (challenge.fingerprint && challenge.fingerprint !== fingerprint) {
+    return { ok: false, reason: "presented fingerprint does not match the presented public key" };
+  }
+  if (expected.fingerprint && expected.fingerprint !== fingerprint) {
+    return { ok: false, reason: "server fingerprint does not match the trusted invitation" };
+  }
+  if (expected.serverId && expected.serverId !== challenge.serverId) {
+    return { ok: false, reason: "server id does not match the trusted invitation" };
+  }
+  try {
+    const key = await crypto.subtle.importKey("raw", pub as unknown as ArrayBuffer, { name: "Ed25519" }, false, ["verify"]);
+    const valid = await crypto.subtle.verify({ name: "Ed25519" }, key, sig as unknown as ArrayBuffer, nonceBytes as unknown as ArrayBuffer);
+    if (!valid) return { ok: false, reason: "signature is not valid for this nonce" };
+  } catch (err) {
+    return { ok: false, reason: `Ed25519 verification unavailable: ${String(err)}` };
+  }
+  return { ok: true, serverId: challenge.serverId, fingerprint };
+}
+
+// parseInvitation accepts the Wayshard pairing card text or its JSON form.
+export function parseInvitation(text: string): PairingInvitation | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("{")) {
+    try {
+      const raw = JSON.parse(trimmed) as Record<string, unknown>;
+      return {
+        advertisedUrl: (raw.advertisedUrl ?? raw.url) as string | undefined,
+        listenUrl: raw.listenUrl as string | undefined,
+        serverId: raw.serverId as string | undefined,
+        fingerprint: raw.fingerprint as string | undefined,
+        code: raw.code as string | undefined,
+        expiresAt: raw.expiresAt as string | undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+  const out: PairingInvitation = {};
+  for (const line of trimmed.split(/\r?\n/)) {
+    const m = line.match(/^\s*(Server|Fingerprint|URL|Listen|Code|Expires)\s*:\s*(.+?)\s*$/i);
+    if (!m) continue;
+    const value = m[2];
+    switch (m[1].toLowerCase()) {
+      case "server":
+        out.serverId = value;
+        break;
+      case "fingerprint":
+        out.fingerprint = value;
+        break;
+      case "url":
+        out.advertisedUrl = value;
+        break;
+      case "listen":
+        out.listenUrl = value;
+        break;
+      case "code":
+        out.code = value;
+        break;
+      case "expires":
+        out.expiresAt = value;
+        break;
+    }
+  }
+  if (!out.code) return null;
+  return out;
+}
+
 export class WayshardClient {
   constructor(
     public baseUrl: string,
@@ -256,17 +404,20 @@ export class WayshardClient {
   invite(advertisedUrl?: string) {
     return this.post("/v1/pairing/invitations", { advertisedUrl });
   }
-  pair(code: string, deviceName: string, deviceKind: string) {
-    return this.post<{ credential?: string; session?: string; device?: unknown }>("/v1/pairing/complete", {
-      code,
-      deviceName,
-      deviceKind,
-    });
-  }
-  pairingChallenge(nonce = "wayshard-pairing") {
-    return this.get<{ serverId: string; fingerprint: string; signature: string }>(
-      `/v1/pairing/challenge?nonce=${encodeURIComponent(nonce)}`,
+  pair(code: string, deviceName: string, deviceKind: string, expected?: ServerIdentityExpectation) {
+    return this.post<{ credential?: string; session?: string; deviceId?: string; serverId?: string; fingerprint?: string }>(
+      "/v1/pairing/complete",
+      {
+        code,
+        deviceName,
+        deviceKind,
+        expectedServerId: expected?.serverId,
+        expectedFingerprint: expected?.fingerprint,
+      },
     );
+  }
+  pairingChallenge(nonce: string) {
+    return this.get<PairingChallenge>(`/v1/pairing/challenge?nonce=${encodeURIComponent(nonce)}`);
   }
   terminals(projectId: string) {
     return this.get(`/v1/projects/${projectId}/terminals`);

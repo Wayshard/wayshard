@@ -308,12 +308,15 @@ func (s *Service) authenticateSession(ctx context.Context, token string) (*Princ
 	return &Principal{DeviceID: d.ID, Kind: d.Kind, Name: d.Name}, nil
 }
 
-func (s *Service) Challenge(ctx context.Context, nonce []byte) (serverID, fp string, sig []byte, err error) {
+// Challenge signs a fresh client nonce with the server application identity key
+// and returns the public identity so a client can independently verify
+// possession of the expected key.
+func (s *Service) Challenge(ctx context.Context, nonce []byte) (serverID, fp string, pub ed25519.PublicKey, sig []byte, err error) {
 	ident, priv, err := s.EnsureIdentity(ctx)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
-	return ident.ServerID, crypto.Fingerprint(ident.PublicKey), crypto.Sign(priv, nonce), nil
+	return ident.ServerID, crypto.Fingerprint(ident.PublicKey), ident.PublicKey, crypto.Sign(priv, nonce), nil
 }
 
 func LocalAdminBypass(listenHost string) bool {

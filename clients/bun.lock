@@ -78,6 +78,14 @@
         "solid-js": "^1.9.15",
         "typescript": "^7.0.2",
       },
+      "optionalDependencies": {
+        "@opentui/core-darwin-arm64": "0.5.11",
+        "@opentui/core-darwin-x64": "0.5.11",
+        "@opentui/core-linux-arm64": "0.5.11",
+        "@opentui/core-linux-x64": "0.5.11",
+        "@opentui/core-win32-arm64": "0.5.11",
+        "@opentui/core-win32-x64": "0.5.11",
+      },
     },
     "ui": {
       "name": "@wayshard/ui",

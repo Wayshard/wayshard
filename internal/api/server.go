@@ -233,16 +233,22 @@ func (s *Server) pairingComplete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) pairingChallenge(w http.ResponseWriter, r *http.Request) {
-	nonce, _ := hex.DecodeString(r.URL.Query().Get("nonce"))
-	if len(nonce) == 0 {
-		nonce = []byte("wayshard-pairing")
+	nonce, err := hex.DecodeString(r.URL.Query().Get("nonce"))
+	if err != nil || len(nonce) < 16 {
+		http.Error(w, `{"error":"a fresh nonce of at least 16 bytes (hex) is required"}`, http.StatusBadRequest)
+		return
 	}
-	id, fp, sig, err := s.Auth.Challenge(r.Context(), nonce)
+	id, fp, pub, sig, err := s.Auth.Challenge(r.Context(), nonce)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"serverId": id, "fingerprint": fp, "signature": hex.EncodeToString(sig)})
+	writeJSON(w, 200, map[string]any{
+		"serverId":    id,
+		"fingerprint": fp,
+		"publicKey":   hex.EncodeToString(pub),
+		"signature":   hex.EncodeToString(sig),
+	})
 }
 
 func (s *Server) getServer(w http.ResponseWriter, r *http.Request, p *auth.Principal) {

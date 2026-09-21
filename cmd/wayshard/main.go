@@ -23,7 +23,7 @@ func main() {
 	_ = fs.Parse(os.Args[1:])
 	args := fs.Args()
 	if len(args) == 0 {
-		runTUI(*base, *token)
+		launchTUI(*base, *token)
 		return
 	}
 	c := &client{base: strings.TrimRight(*base, "/"), token: *token, http: &http.Client{Timeout: 30 * time.Second}}
@@ -31,27 +31,71 @@ func main() {
 	case "version":
 		fmt.Printf("Wayshard CLI %s (%s)\n", version.Version, version.Commit)
 	case "pair":
-		if len(args) < 2 {
-			fatal("usage: wayshard pair <code>")
+		pf := flag.NewFlagSet("pair", flag.ExitOnError)
+		sid := pf.String("server-id", "", "expected server id from the pairing invitation")
+		fp := pf.String("fingerprint", "", "expected server fingerprint from the pairing invitation")
+		inv := pf.String("invitation", "", "pairing invitation text or JSON")
+		_ = pf.Parse(args[1:])
+		rest := pf.Args()
+		expectedID, expectedFP, inviteCode, inviteURL := *sid, *fp, "", ""
+		if *inv != "" {
+			parsed, perr := parseInvitation(*inv)
+			if perr != nil {
+				fatal(perr)
+			}
+			if parsed.ServerID != "" {
+				expectedID = parsed.ServerID
+			}
+			if parsed.Fingerprint != "" {
+				expectedFP = parsed.Fingerprint
+			}
+			inviteCode = parsed.Code
+			if parsed.AdvertisedURL != "" {
+				inviteURL = parsed.AdvertisedURL
+			}
+		}
+		if len(rest) > 0 {
+			inviteCode = rest[0]
+		}
+		if inviteURL != "" {
+			c.base = strings.TrimRight(inviteURL, "/")
+		}
+		if inviteCode == "" {
+			fatal("usage: wayshard pair --server-id <id> --fingerprint <fp> <code>  (or --invitation <text/json>)")
+		}
+		if expectedID == "" || expectedFP == "" {
+			fatal("verified pairing requires the expected server id and fingerprint from the trusted invitation (pass --invitation, or --server-id and --fingerprint)")
+		}
+		if err := verifyServerIdentity(c, expectedID, expectedFP); err != nil {
+			fatal(err)
 		}
 		name, _ := os.Hostname()
 		body, err := c.post("/v1/pairing/complete", map[string]string{
-			"code": args[1], "deviceName": name, "deviceKind": "cli",
+			"code": inviteCode, "deviceName": name, "deviceKind": "cli",
+			"expectedServerId": expectedID, "expectedFingerprint": expectedFP,
 		})
 		if err != nil {
 			fatal(err)
 		}
 		var res struct {
-			Credential string `json:"credential"`
-			ServerID   string `json:"serverId"`
+			Credential  string `json:"credential"`
+			ServerID    string `json:"serverId"`
+			Fingerprint string `json:"fingerprint"`
 		}
 		_ = json.Unmarshal(body, &res)
-		if res.Credential != "" {
-			_ = saveToken(res.Credential)
-			fmt.Println("paired", res.ServerID)
-		} else {
-			fmt.Println(string(body))
+		if res.Credential == "" {
+			fatal("server did not return a credential: " + string(body))
 		}
+		if res.ServerID != "" && res.ServerID != expectedID {
+			fatal("paired server id does not match the invited identity; credential not saved")
+		}
+		if res.Fingerprint != "" && res.Fingerprint != expectedFP {
+			fatal("paired server fingerprint does not match the invited identity; credential not saved")
+		}
+		if err := saveToken(res.Credential); err != nil {
+			fatal(err)
+		}
+		fmt.Println("paired", res.ServerID)
 	case "projects":
 		b, err := c.get("/v1/projects")
 		if err != nil {
@@ -134,7 +178,7 @@ func main() {
 	case "help", "-h", "--help":
 		fmt.Print(`wayshard — Wayshard CLI/TUI
 
-  wayshard                         interactive client
+  wayshard                         interactive client (launches the packaged Wayshard TUI)
   wayshard status|projects|devices|harnesses|approvals|notifications|storage|settings
   wayshard pair <code> | invite | open <path>
   wayshard send <conversation> <text>
@@ -147,46 +191,6 @@ Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN
 `)
 	default:
 		fatal("unknown command " + args[0])
-	}
-}
-
-func runTUI(base, token string) {
-	fmt.Printf("Wayshard %s  %s\n", version.Version, base)
-	fmt.Println("Interactive TUI talks to the Wayshard Server over HTTP/JSON + WebSocket.")
-	fmt.Println("Type a command: status | projects | help | quit")
-	in := io.Reader(os.Stdin)
-	buf := make([]byte, 0, 256)
-	tmp := make([]byte, 1)
-	for {
-		fmt.Print("wayshard> ")
-		line := ""
-		for {
-			n, err := in.Read(tmp)
-			if n > 0 {
-				if tmp[0] == '\n' {
-					line = string(buf)
-					buf = buf[:0]
-					break
-				}
-				buf = append(buf, tmp[0])
-			}
-			if err != nil {
-				return
-			}
-		}
-		line = strings.TrimSpace(line)
-		switch line {
-		case "", "help":
-			fmt.Println("status | projects | quit")
-		case "quit", "exit":
-			return
-		case "status":
-			os.Args = []string{"wayshard", "status"}
-			main()
-			return
-		default:
-			fmt.Println("use subcommands: wayshard", line)
-		}
 	}
 }
 

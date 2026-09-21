@@ -9,12 +9,12 @@ COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE      ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS   := -s -w -X github.com/Wayshard/wayshard/internal/version.Version=$(VERSION) -X github.com/Wayshard/wayshard/internal/version.Commit=$(COMMIT) -X github.com/Wayshard/wayshard/internal/version.Date=$(DATE)
 
-.PHONY: all help fmt vet test test-race build build-server build-cli build-fake-acp build-cross tidy ci web desktop android clean
+.PHONY: all help fmt vet test test-race build build-server build-cli build-fake-acp build-tui build-cross build-all tidy ci web desktop android clean
 
 all: test build
 
 help:
-	@echo "Targets: fmt vet test build build-server build-cli build-cross web desktop android release-scripts-test ci clean"
+	@echo "Targets: fmt vet test build build-server build-cli build-tui build-cross build-all web desktop android release-scripts-test ci clean"
 
 fmt:
 	$(GO) fmt ./...
@@ -41,6 +41,10 @@ build-cli:
 	mkdir -p $(BINDIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard ./cmd/wayshard
 
+build-tui:
+	cd clients && bun install --frozen-lockfile
+	cd clients/tui && TUI_OUTFILE=$(CURDIR)/$(BINDIR)/wayshard-tui-$(shell go env GOOS)-$(shell go env GOARCH) bun run build.ts
+
 build-fake-acp:
 	mkdir -p $(BINDIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-fake-acp ./cmd/wayshard-fake-acp
@@ -61,6 +65,9 @@ build-cross:
 	GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-windows-amd64.exe ./cmd/wayshard
 
 ci: fmt vet test build
+
+# Build everything for the host platform (Go server/CLI + interactive TUI).
+build-all: build build-tui
 
 web:
 	cd clients && bun install --frozen-lockfile && bun run --cwd web build

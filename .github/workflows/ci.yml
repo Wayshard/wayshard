@@ -58,6 +58,30 @@ jobs:
         run: bun run build
         working-directory: clients/web
 
+
+  tui:
+    name: Interactive TUI (shipped path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Install client workspace
+        run: bun install --frozen-lockfile
+        working-directory: clients
+      - name: TUI tests
+        run: bun run test
+        working-directory: clients/tui
+      - name: Build packaged TUI companion
+        run: TUI_OUTFILE="$PWD/wayshard-tui" bun run build.ts
+        working-directory: clients/tui
+      - name: Smoke shipped interactive path
+        run: bash scripts/ci/tui_smoke.sh
+
   release-scripts:
     name: Release scripts
     runs-on: ubuntu-latest

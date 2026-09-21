@@ -100,3 +100,17 @@ describe("client source lineage — production usage", () => {
     })
   }
 })
+
+describe("client source lineage — blob integrity", () => {
+  const manifest3 = JSON.parse(readFileSync(join(clientsRoot, "lineage.manifest.json"), "utf8"))
+  test("concrete file ancestry entries record a real upstream git blob", () => {
+    let checked = 0
+    for (const entry of manifest3.fileAncestry) {
+      if (!/\.(ts|tsx|toml)$/.test(entry.upstream)) continue
+      checked++
+      expect(typeof entry.upstreamBlob).toBe("string")
+      expect(entry.upstreamBlob).toMatch(/^[0-9a-f]{40}$/)
+    }
+    expect(checked).toBeGreaterThanOrEqual(15)
+  })
+})

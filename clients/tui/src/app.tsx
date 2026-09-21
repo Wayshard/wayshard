@@ -6,10 +6,14 @@
 // messages, runs, stages, changes, files, routing, usage, approvals,
 // notifications, integration and diagnostics.
 import { render, useRenderer, useTerminalDimensions } from "@opentui/solid"
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { ErrorBoundary, For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { TextAttributes } from "@opentui/core"
-import { WayshardClient, type Approval, type Conversation, type Notification, type Project, type Run, type Stage } from "@wayshard/sdk"
+import { WayshardClient, parseInvitation, randomNonce, verifyServerIdentity, type Approval, type Conversation, type Notification, type Project, type Run, type Stage } from "@wayshard/sdk"
+import { hostname } from "node:os"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { DialogPrompt } from "./ui/dialog-prompt"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { KVProvider } from "./context/kv"
 import { ClipboardProvider } from "./context/clipboard"
@@ -65,8 +69,30 @@ function initialState(): TuiState {
   }
 }
 
+function tuiTokenPath(): string {
+  return join(process.env.XDG_CONFIG_HOME ?? join(process.env.HOME ?? ".", ".config"), "wayshard", "device.token")
+}
+
+function loadTuiToken(): string {
+  try {
+    return readFileSync(tuiTokenPath(), "utf8").trim()
+  } catch {
+    return ""
+  }
+}
+
+function saveTuiToken(token: string) {
+  try {
+    const p = tuiTokenPath()
+    mkdirSync(dirname(p), { recursive: true, mode: 0o700 })
+    writeFileSync(p, token, { mode: 0o600 })
+  } catch {
+    // ignore
+  }
+}
+
 function createClient(): WayshardClient {
-  return new WayshardClient(process.env.WAYSHARD_URL ?? "http://127.0.0.1:7420", process.env.WAYSHARD_TOKEN ?? "")
+  return new WayshardClient(process.env.WAYSHARD_URL ?? "http://127.0.0.1:7420", process.env.WAYSHARD_TOKEN ?? loadTuiToken())
 }
 
 function Shell() {
@@ -173,6 +199,7 @@ function Shell() {
     { id: "integrate-run", title: "Integrate run", run: () => state.run && void client.integrate(state.run.id).then(refresh) },
     { id: "refresh", title: "Refresh", run: () => void refresh() },
     { id: "settings", title: "Settings / connection", run: () => openSettings() },
+    { id: "connect.pair", title: "Pair device (verified identity)", run: () => pairDevice() },
   ])
 
   function openPalette() {
@@ -187,6 +214,52 @@ function Shell() {
         }}
       />
     ))
+  }
+
+  function pairDevice() {
+    dialog.replace(() => (
+      <DialogPrompt
+        title="Pair device"
+        description={() => (
+          <text fg={theme.textMuted}>
+            Paste the Wayshard pairing invitation (Server, Fingerprint, URL, Code). The server identity is verified before any
+            credential is saved.
+          </text>
+        )}
+        placeholder="Paste pairing invitation…"
+        onConfirm={(text) => void completePair(text)}
+        onCancel={() => dialog.clear()}
+      />
+    ))
+  }
+
+  async function completePair(text: string) {
+    const inv = parseInvitation(text)
+    if (!inv || !inv.code || !inv.serverId || !inv.fingerprint) {
+      toast.show({ variant: "error", title: "Pairing", message: "Invalid or incomplete pairing invitation." })
+      dialog.clear()
+      return
+    }
+    const url = inv.advertisedUrl ?? client.baseUrl
+    const verifier = new WayshardClient(url, "")
+    try {
+      const nonce = randomNonce()
+      const challenge = await verifier.pairingChallenge(nonce)
+      const result = await verifyServerIdentity(nonce, challenge, { serverId: inv.serverId, fingerprint: inv.fingerprint })
+      if (!result.ok) throw new Error(`server identity verification failed: ${result.reason}`)
+      const res = await verifier.pair(inv.code, hostname(), "cli", { serverId: inv.serverId, fingerprint: inv.fingerprint })
+      if (!res.credential) throw new Error("server did not return a credential")
+      if (res.serverId && res.serverId !== inv.serverId) throw new Error("paired server id does not match the invited identity")
+      if (res.fingerprint && res.fingerprint !== inv.fingerprint) throw new Error("paired fingerprint does not match the invited identity")
+      saveTuiToken(res.credential)
+      client.baseUrl = url
+      client.token = res.credential
+      toast.show({ variant: "success", title: "Paired", message: `Verified ${inv.fingerprint}` })
+      void refresh()
+    } catch (err) {
+      toast.error(err)
+    }
+    dialog.clear()
   }
 
   function openSettings() {
@@ -430,20 +503,30 @@ function Approvals(props: { state: TuiState; resolve: (id: string, status: "allo
 
 function App() {
   return (
+    <ErrorBoundary fallback={(err) => {
+      console.error("TUI_BOUNDARY_ERROR:", String(err), (err as Error)?.stack ?? "")
+      return <box><text>Wayshard TUI failed to start. See the console for details.</text></box>
+    }}>
     <ThemeProvider>
       <KVProvider>
         <ClipboardProvider>
-          <DialogProvider>
-            <ToastProvider>
+          <ToastProvider>
+            <DialogProvider>
               <Shell />
-            </ToastProvider>
-          </DialogProvider>
+            </DialogProvider>
+          </ToastProvider>
         </ClipboardProvider>
       </KVProvider>
     </ThemeProvider>
+    </ErrorBoundary>
   )
 }
 
 export async function run() {
-  await render(() => <App />)
+  try {
+    await render(() => <App />)
+  } catch (err) {
+    console.error("wayshard-tui error:", err)
+    throw err
+  }
 }

@@ -252,3 +252,25 @@ The live clients are adapted from the imported OpenCode 2 client source, not rec
 - **Branding**: live client source has no OpenCode product branding (theme names/namespaces/i18n renamed to Wayshard; provider icon identifiers and provenance comments retained); MIT attribution remains in `NOTICE`/`THIRD_PARTY_NOTICES.md`.
 - **Signature surfaces**: the graphical composer renders the imported `PromptInputV2`; Changes renders real diffs through the imported session-ui `File` component (`GET /v1/runs/{id}/file` provides run/snapshot content); Files uses the adapted OpenCode file-tree model; the terminal renders through the imported `ghostty-web` presentation against the server-owned PTY (with server-side PTY resize); Context/Knowledge/Recovery render structured sections (raw JSON only behind the debug inspector); pairing is a guided identity-verify → invitation-code → device-credential flow. The TUI command palette uses the adapted `DialogSelect`.
 - **Known incomplete**: Desktop/Android on-device runtime unverified here; the TUI does not adapt every deep OpenCode route (session/home) component.
+
+### Pass 1E release-path and pairing remediation
+
+- **Shipped interactive TUI**: the official `wayshard` binary, invoked with no
+  subcommand, launches the packaged OpenCode-derived TUI companion
+  (`wayshard-tui`, an OpenTUI/Solid executable built from `clients/tui` via
+  `clients/tui/build.ts`). The retired handwritten `wayshard>` loop is removed;
+  `cmd/wayshard` resolves the companion only from the running executable's own
+  directory (or an explicit `WAYSHARD_TUI` override), never via `PATH`, and fails
+  clearly when it is missing. Scriptable subcommands (`status`, `projects`,
+  `send`, `run`, `cancel`, `integrate`, …) remain. Proof:
+  `cmd/wayshard/launch_test.go`, `scripts/ci/tui_smoke.sh`, the CI `tui` job, and
+  the release `tui` matrix (linux amd64/arm64, macOS amd64/arm64, windows amd64).
+- **Pairing binds the expected application identity**: the challenge endpoint
+  requires a fresh client nonce and returns the identity public key; clients
+  verify the Ed25519 signature over the nonce, the fingerprint, and the server
+  id against the trusted invitation before completing pairing with
+  `expectedServerId`/`expectedFingerprint`, re-check the returned identity, and
+  only then persist a credential. This proves application identity; transport
+  security remains user-owned. Proof: `internal/api/pairing_identity_test.go`,
+  `internal/auth` pairing tests, `clients/sdk/src/identity.test.ts`,
+  `cmd/wayshard/pairing_test.go`.

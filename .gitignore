@@ -73,3 +73,6 @@ Thumbs.db
 
 # Local scratch (never an OpenCode upstream remote)
 /tmp/
+
+# Packaged TUI build output
+/clients/tui/bin/

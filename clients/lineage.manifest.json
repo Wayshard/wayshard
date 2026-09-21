@@ -175,14 +175,14 @@
     },
     {
       "upstream": "packages/tui/src/keymap.tsx",
-      "upstreamBlob": "",
+      "upstreamBlob": "8d0aefc8f5dcc9f9800c3668b629a11ddd14a99c",
       "destination": "tui/src/keymap.tsx",
       "mode": "adapted",
       "marker": "imported OpenCode TUI keymap"
     },
     {
       "upstream": "packages/tui/src/context/theme.tsx",
-      "upstreamBlob": "",
+      "upstreamBlob": "909dd69ac2493cb0554520e25c3a0ecbebad6252",
       "destination": "tui/src/context/theme.tsx",
       "mode": "adapted",
       "marker": "imported OpenCode TUI theme context"
