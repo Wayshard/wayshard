@@ -57,6 +57,10 @@ jobs:
       - name: Build web (shared graphical client)
         run: bun run build
         working-directory: clients/web
+      - name: Rendered UI smoke (production build, headless Chrome)
+        run: node scripts/ci/ui_render_smoke.mjs
+        env:
+          UI_SMOKE_SHOTS: ${{ runner.temp }}/ui-smoke
 
 
   tui:

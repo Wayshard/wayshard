@@ -306,3 +306,36 @@ The live clients are adapted from the imported OpenCode 2 client source, not rec
 - **CLI help accuracy.** `wayshard help` documents verified pairing
   (`--invitation` or `--server-id`/`--fingerprint`); a bare code remains refused.
   Pairing security behavior is unchanged.
+
+### Pass 1E rendered-UI remediation (R1–R3)
+
+Rendered browser validation of the production graphical build reopened Pass 1E:
+the live client imported only the general adapted UI Tailwind layer and mounted
+no runtime theme provider, so the v2 palette/theme tokens were undefined and the
+app rendered white text on a near-white fallback canvas.
+
+- **R1 — restored theme pipeline.** `clients/gui/src/styles.css` now imports the
+  adapted `@wayshard/ui/v2/styles/tailwind.css` and the adapted
+  `session-ui/styles/index.css`, matching upstream `packages/app/src/index.css`.
+  `WayshardApp` mounts the adapted `ThemeProvider` from
+  `@wayshard/ui/theme/context` with `defaultTheme="oc-2"` and
+  `defaultColorScheme="dark"` (the provider gained a `defaultColorScheme` prop),
+  matching upstream `packages/app/src/app.tsx`. Rendered evidence: `data-theme`
+  is `oc-2`, `--v2-background-bg-deep` resolves to `#080808ff`, body background
+  is `rgb(8,8,8)` with white text (contrast ≈ 20:1). No CSS color patch.
+- **R2 — "More" overflow works.** The advanced-surfaces menu is mounted through
+  the shared dialog provider (`dialog.show`), which creates the adapted Kobalte
+  dialog root/portal. Rendering `<Dialog>` inline from a `moreOpen` signal
+  produced no visible dialog. All ten advanced destinations now open visibly,
+  selecting one opens its surface, and Escape/reopen work.
+- **R3 — narrow/mobile shell.** Below 820px the sidebar is an off-canvas drawer
+  toggled from a titlebar button, with a backdrop, close-on-select, and
+  horizontally scrollable primary tabs; desktop keeps the fixed sidebar. Geometry
+  is asserted at 390/820/900.
+- **Evidence.** `scripts/ci/ui_render_smoke.mjs` drives the installed Chrome over
+  CDP against the production Web build with a mocked Wayshard API and asserts 39
+  rendered conditions (theme tokens/contrast, More dialog visibility, palette
+  rows, mobile geometry). Source-level guards live in
+  `clients/gui/src/theme-integration.test.ts`. Screenshots are written outside
+  the repository. The client is legible and themed by default with no test-only
+  overrides.

@@ -41,6 +41,16 @@ Adaptations:
   subscription copy and desktop Electron shell removed.
 - Branding removed from live UI; attribution retained in legal notices.
 
+### Theme pipeline
+
+The live graphical app imports the adapted v2 theme layer
+(`@wayshard/ui/v2/styles/tailwind.css`) and the adapted session-ui component
+styles (`clients/gui/src/session-ui/styles/index.css`), and mounts the adapted
+runtime `ThemeProvider` (`@wayshard/ui/theme/context`, default theme `oc-2`,
+dark). This mirrors upstream `packages/app/src/index.css` and
+`packages/app/src/app.tsx`; without it the v2 design tokens are undefined and
+the client renders unreadably.
+
 ## TUI
 
 | OpenCode source | Wayshard destination | Mode |

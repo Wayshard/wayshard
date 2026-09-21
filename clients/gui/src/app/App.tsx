@@ -13,6 +13,7 @@ import { Tag } from "@wayshard/ui/tag"
 import { Spinner } from "@wayshard/ui/spinner"
 import { Dialog } from "@wayshard/ui/dialog"
 import { DialogProvider, useDialog } from "@wayshard/ui/context/dialog"
+import { ThemeProvider } from "@wayshard/ui/theme/context"
 import { FileComponentProvider } from "@wayshard/ui/context/file"
 import { DataProvider } from "@wayshard/gui/session-ui/context"
 import { SessionTurn } from "@wayshard/gui/session-ui/components/session-turn"
@@ -53,6 +54,19 @@ const [pairingOpen, setPairingOpen] = createSignal(false)
 
 export { activeTab, setActiveTab }
 
+// useNarrow tracks the narrow/mobile breakpoint that turns the sidebar into a
+// closable drawer. Desktop behaviour is unchanged.
+function useNarrow() {
+  const mq = typeof window === "object" && window.matchMedia ? window.matchMedia("(max-width: 820px)") : undefined
+  const [narrow, setNarrow] = createSignal(mq?.matches ?? false)
+  if (mq) {
+    const onChange = () => setNarrow(mq.matches)
+    mq.addEventListener?.("change", onChange)
+    onCleanup(() => mq.removeEventListener?.("change", onChange))
+  }
+  return narrow
+}
+
 function FileFallback(props: { path?: string; content?: string }) {
   return <pre class="wh-file-view">{props.content ?? ""}</pre>
 }
@@ -61,14 +75,14 @@ function Shell() {
   const ws = useWayshard()
   const command = useCommand()
   const dialog = useDialog()
-  const [moreOpen, setMoreOpen] = createSignal(false)
+  const narrow = useNarrow()
+  const [sidebarOpen, setSidebarOpen] = createSignal(false)
 
   function openPalette() {
     dialog.show(() => <CommandPalette />)
   }
 
   function openAdvanced(key: AdvancedSurfaceKey) {
-    setMoreOpen(false)
     dialog.show(() => (
       <Dialog title={ADVANCED_SURFACES.find((s) => s.key === key)?.label ?? key} size="x-large">
         <div class="wh-dialog-surface">
@@ -78,11 +92,30 @@ function Shell() {
     ))
   }
 
+  // The advanced-surfaces overflow menu. It must mount through the shared
+  // dialog provider (dialog.show) so the adapted Kobalte dialog root/portal
+  // lifecycle is created; rendering <Dialog> inline produces no visible dialog.
+  function openMore() {
+    dialog.show(() => (
+      <Dialog title="More surfaces" size="large">
+        <div class="wh-more-grid">
+          <For each={ADVANCED_SURFACES}>
+            {(s) => (
+              <button class="wh-more-item" onClick={() => openAdvanced(s.key)}>
+                {s.label}
+              </button>
+            )}
+          </For>
+        </div>
+      </Dialog>
+    ))
+  }
+
   onMount(() => {
     const dispose = command.register({
       options: () => [
         { id: "command.palette", title: "Command palette", category: "Navigation", keybind: "mod+k", onSelect: openPalette },
-        { id: "surface.more", title: "More surfaces…", category: "Navigation", keybind: "mod+shift+m", onSelect: () => setMoreOpen(true) },
+        { id: "surface.more", title: "More surfaces…", category: "Navigation", keybind: "mod+shift+m", onSelect: openMore },
         ...PRIMARY_TABS.map((t) => ({
           id: `tab.${t.key}`,
           title: `Go to ${t.label}`,
@@ -131,6 +164,15 @@ function Shell() {
       titlebar={
         <header class="wh-titlebar">
           <div class="wh-titlebar-left">
+            <button
+              class="wh-sidebar-toggle"
+              type="button"
+              aria-label="Toggle navigation"
+              aria-expanded={sidebarOpen()}
+              onClick={() => setSidebarOpen(!sidebarOpen())}
+            >
+              <Icon name="bullet-list" size="small" />
+            </button>
             <span class="wh-wordmark">Wayshard</span>
             <span class="wh-truncate">{ws.activeProject()?.name ?? "No project"}</span>
           </div>
@@ -143,7 +185,7 @@ function Shell() {
                 </button>
               )}
             </For>
-            <button class="wh-tab-button" data-active={moreOpen()} onClick={() => setMoreOpen(true)}>
+            <button class="wh-tab-button" type="button" onClick={openMore}>
               <Icon name="bullet-list" size="small" />
               More
             </button>
@@ -167,8 +209,11 @@ function Shell() {
           </Button>
         </div>
       </Show>
+      <Show when={narrow() && sidebarOpen()}>
+        <div class="wh-backdrop" aria-hidden="true" onClick={() => setSidebarOpen(false)} />
+      </Show>
       <div class="wh-body">
-        <Sidebar />
+        <Sidebar open={sidebarOpen()} onNavigate={() => setSidebarOpen(false)} />
         <div class="wh-content">
           <Show when={activeTab() === "session"} fallback={<PrimaryView tab={activeTab()} />}>
             <DataProvider data={data()} directory={ws.activeProject()?.path ?? ""} sessionID={ws.state.activeConversationID ?? undefined}>
@@ -177,19 +222,6 @@ function Shell() {
           </Show>
         </div>
       </div>
-      <Show when={moreOpen()}>
-        <Dialog title="More surfaces" size="large">
-          <div class="wh-more-grid">
-            <For each={ADVANCED_SURFACES}>
-              {(s) => (
-                <button class="wh-more-item" onClick={() => openAdvanced(s.key)}>
-                  {s.label}
-                </button>
-              )}
-            </For>
-          </div>
-        </Dialog>
-      </Show>
     </AppLayout>
   )
 }
@@ -202,16 +234,16 @@ function PrimaryView(props: { tab: PrimaryTab }) {
   )
 }
 
-function Sidebar() {
+function Sidebar(props: { open?: boolean; onNavigate: () => void }) {
   const ws = useWayshard()
   return (
-    <aside class="wh-sidebar">
+    <aside class="wh-sidebar" data-open={props.open}>
       <div class="wh-sidebar-section">
         <div class="wh-sidebar-label">Projects</div>
         <Show when={ws.state.projects.length} fallback={<div class="wh-empty">No projects</div>}>
           <For each={ws.state.projects}>
             {(p) => (
-              <button class="wh-nav-item" data-active={p.id === ws.state.activeProjectID} onClick={() => void ws.selectProject(p.id)}>
+              <button class="wh-nav-item" data-active={p.id === ws.state.activeProjectID} onClick={() => { void ws.selectProject(p.id); props.onNavigate() }}>
                 <Icon name="bullet-list" size="small" />
                 <span class="wh-truncate">{p.name}</span>
               </button>
@@ -224,14 +256,14 @@ function Sidebar() {
         <Show when={ws.state.conversations.length} fallback={<div class="wh-empty">No sessions</div>}>
           <For each={ws.state.conversations}>
             {(c) => (
-              <button class="wh-nav-item" data-active={c.id === ws.state.activeConversationID} onClick={() => void ws.selectConversation(c.id)}>
+              <button class="wh-nav-item" data-active={c.id === ws.state.activeConversationID} onClick={() => { void ws.selectConversation(c.id); props.onNavigate() }}>
                 <Icon name="bubble-5" size="small" />
                 <span class="wh-truncate">{c.title || "Session"}</span>
               </button>
             )}
           </For>
         </Show>
-        <Button size="small" variant="ghost" icon="arrow-right" onClick={() => void ws.newConversation()}>
+        <Button size="small" variant="ghost" icon="arrow-right" onClick={() => { void ws.newConversation(); props.onNavigate() }}>
           New session
         </Button>
       </div>
@@ -326,14 +358,16 @@ function Gate() {
 
 export function WayshardApp() {
   return (
-    <StateProvider>
-      <CommandProvider>
-        <DialogProvider>
-          <FileComponentProvider component={FileFallback}>
-            <Gate />
-          </FileComponentProvider>
-        </DialogProvider>
-      </CommandProvider>
-    </StateProvider>
+    <ThemeProvider defaultTheme="oc-2" defaultColorScheme="dark">
+      <StateProvider>
+        <CommandProvider>
+          <DialogProvider>
+            <FileComponentProvider component={FileFallback}>
+              <Gate />
+            </FileComponentProvider>
+          </DialogProvider>
+        </CommandProvider>
+      </StateProvider>
+    </ThemeProvider>
   )
 }

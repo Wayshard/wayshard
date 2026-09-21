@@ -12,12 +12,12 @@ COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE      ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS   := -s -w -X github.com/Wayshard/wayshard/internal/version.Version=$(VERSION) -X github.com/Wayshard/wayshard/internal/version.Commit=$(COMMIT) -X github.com/Wayshard/wayshard/internal/version.Date=$(DATE)
 
-.PHONY: all help fmt vet test test-race build build-server build-cli build-fake-acp build-tui build-tui-versioned build-cross build-all tidy ci web desktop android clean
+.PHONY: all help fmt vet test test-race build build-server build-cli build-fake-acp build-tui build-tui-versioned build-cross build-all tidy ci web desktop android ui-render-smoke clean
 
 all: test build
 
 help:
-	@echo "Targets: fmt vet test build build-server build-cli build-tui build-tui-versioned build-cross build-all web desktop android release-scripts-test ci clean"
+	@echo "Targets: fmt vet test build build-server build-cli build-tui build-tui-versioned build-cross build-all web desktop android ui-render-smoke release-scripts-test ci clean"
 
 fmt:
 	$(GO) fmt ./...
@@ -108,6 +108,13 @@ release-scripts-test:
 	bash scripts/release/minisign_test.sh
 	bash scripts/release/release_policy_test.sh
 	bash scripts/release/set_tauri_version_test.sh
+
+# Rendered smoke test for the production graphical client (builds the Web
+# client, then drives the installed Chrome over CDP). Skips if no Chrome.
+ui-render-smoke:
+	cd clients && bun install --frozen-lockfile
+	cd clients/web && bun run build
+	node scripts/ci/ui_render_smoke.mjs
 
 clean:
 	rm -rf $(BINDIR) coverage.out
