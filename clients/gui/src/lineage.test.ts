@@ -82,3 +82,21 @@ describe("client source lineage — per-file ancestry", () => {
     })
   }
 })
+
+describe("client source lineage — production usage", () => {
+  const manifest2 = JSON.parse(readFileSync(join(clientsRoot, "lineage.manifest.json"), "utf8"))
+  const used = manifest2.fileAncestry.filter((f: any) => Array.isArray(f.usage) && f.usage.length > 0)
+  test("signature adapted surfaces are reachable from production imports", () => {
+    expect(used.length).toBeGreaterThanOrEqual(5)
+  })
+  for (const entry of used) {
+    test(`${entry.destination} is used by ${entry.usage.join(", ")}`, () => {
+      const base = entry.destination.split("/").pop()!.replace(/\.(ts|tsx)$/, "")
+      for (const usage of entry.usage) {
+        const text = readFileSync(join(clientsRoot, usage), "utf8")
+        const references = text.includes(base) || text.includes(entry.marker.slice(0, 20))
+        expect(references).toBe(true)
+      }
+    })
+  }
+})

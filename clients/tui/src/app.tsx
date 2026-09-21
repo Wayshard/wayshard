@@ -14,13 +14,14 @@ import { ThemeProvider, useTheme } from "./context/theme"
 import { KVProvider } from "./context/kv"
 import { ClipboardProvider } from "./context/clipboard"
 import { DialogProvider, Dialog, useDialog } from "./ui/dialog"
+import { DialogSelect } from "./ui/dialog-select"
 import { ToastProvider, Toast, useToast } from "./ui/toast"
 import { useBindings } from "./keymap"
 import { Spinner } from "./component/spinner"
-import { filterCommands, stageDisplay } from "./model"
+import { cycleTab as cycleTabModel, filterCommands, stageDisplay, TUI_TABS, type TuiTab } from "./model"
 
-type Tab = "session" | "changes" | "files" | "routing" | "usage" | "approvals" | "settings"
-const TABS: Tab[] = ["session", "changes", "files", "routing", "usage", "approvals", "settings"]
+type Tab = TuiTab
+const TABS = TUI_TABS
 
 interface TuiState {
   connected: boolean
@@ -175,20 +176,17 @@ function Shell() {
   ])
 
   function openPalette() {
-    dialog.replace(
-      () => (
-        <Dialog size="large" onClose={() => dialog.clear()}>
-          <Palette
-            commands={commands()}
-            onPick={(cmd) => {
-              void cmd.run()
-              dialog.clear()
-            }}
-          />
-        </Dialog>
-      ),
-      () => dialog.clear(),
-    )
+    dialog.replace(() => (
+      <DialogSelect<{ id: string; title: string; run: () => void | Promise<void> }>
+        title="Command palette"
+        placeholder="Type a command…"
+        options={commands().map((c) => ({ title: c.title, value: c, category: c.id.split(".")[0] }))}
+        onSelect={(option) => {
+          void option.value.run()
+          dialog.clear()
+        }}
+      />
+    ))
   }
 
   function openSettings() {
@@ -222,8 +220,7 @@ function Shell() {
   }))
 
   function cycleTab(delta: number) {
-    const i = TABS.indexOf(state.tab)
-    setState("tab", TABS[(i + delta + TABS.length) % TABS.length])
+    setState("tab", cycleTabModel(state.tab, delta))
   }
 
   const activeProject = () => state.projects.find((p) => p.id === state.activeProjectID)
@@ -428,30 +425,6 @@ function Approvals(props: { state: TuiState; resolve: (id: string, status: "allo
         </For>
       </Show>
     </scrollbox>
-  )
-}
-
-function Palette(props: {
-  commands: { id: string; title: string; run: () => void | Promise<void> }[]
-  onPick: (cmd: { id: string; title: string; run: () => void | Promise<void> }) => void
-}) {
-  const { theme } = useTheme()
-  const [query, setQuery] = createSignal("")
-  const filtered = createMemo(() => filterCommands(props.commands, query()))
-  return (
-    <box flexDirection="column" paddingLeft={2} paddingRight={2} gap={1}>
-      <text fg={theme.primary} attributes={TextAttributes.BOLD}>
-        Command palette
-      </text>
-      <input placeholder="Type a command…" value={query()} onInput={(v: string) => setQuery(v)} onSubmit={() => filtered()[0] && props.onPick(filtered()[0])} />
-      <For each={filtered()}>
-        {(c) => (
-          <text fg={theme.text} onMouseDown={() => props.onPick(c)}>
-            {` ${c.title}`}
-          </text>
-        )}
-      </For>
-    </box>
   )
 }
 

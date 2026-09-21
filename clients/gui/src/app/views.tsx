@@ -8,6 +8,9 @@ import { Tag } from "@wayshard/ui/tag"
 import { Spinner } from "@wayshard/ui/spinner"
 import { TextField } from "@wayshard/ui/text-field"
 import { EmptyState, ErrorState } from "./App"
+import { File as DiffFile } from "@wayshard/gui/session-ui/components/file"
+import { FileTree } from "./file-tree"
+import { Terminal } from "./terminal"
 import { useWayshard } from "../wayshard/state"
 
 export type AdvancedSurfaceKey =
@@ -79,6 +82,63 @@ function DebugInspector(props: { value: unknown }) {
         <pre class="wh-json">{JSON.stringify(props.value, null, 2)}</pre>
       </Show>
     </div>
+  )
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+}
+
+function labelize(key: string): string {
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .replace(/^./, (c) => c.toUpperCase())
+}
+
+function Scalar(props: { value: unknown }) {
+  const v = props.value
+  if (v === null || v === undefined || v === "") return <span class="wh-muted">—</span>
+  if (typeof v === "boolean") return <Tag>{v ? "yes" : "no"}</Tag>
+  if (Array.isArray(v)) return <span>{v.map((x) => String(x)).join(", ") || "—"}</span>
+  return <span>{String(v)}</span>
+}
+
+// Structured renders an object as labeled sections, lists and tables rather than
+// a raw JSON dump. Raw data remains behind the explicit debug inspector.
+export function Structured(props: { value: unknown; depth?: number }) {
+  const depth = () => props.depth ?? 0
+  return (
+    <Show when={isPlainObject(props.value)} fallback={<pre class="wh-json">{JSON.stringify(props.value, null, 2)}</pre>}>
+      <div class="wh-structured">
+        <For each={Object.entries(props.value as Record<string, unknown>)}>
+          {([key, value]) => (
+            <Show when={value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)}>
+              <div class="wh-structured-section" data-depth={depth()}>
+                <div class="wh-structured-label">{labelize(key)}</div>
+                <Show
+                  when={Array.isArray(value) && value.length > 0 && isPlainObject(value[0])}
+                  fallback={
+                    <Show when={isPlainObject(value)} fallback={<div class="wh-structured-value"><Scalar value={value} /></div>}>
+                      <Structured value={value} depth={depth() + 1} />
+                    </Show>
+                  }
+                >
+                  <Table
+                    columns={Array.from(new Set((value as Record<string, unknown>[]).flatMap((row) => Object.keys(row)))).slice(0, 6)}
+                    rows={(value as Record<string, unknown>[]).slice(0, 200).map((row) =>
+                      Array.from(new Set((value as Record<string, unknown>[]).flatMap((r) => Object.keys(r))))
+                        .slice(0, 6)
+                        .map((c) => String(row[c] ?? "")),
+                    )}
+                  />
+                </Show>
+              </div>
+            </Show>
+          )}
+        </For>
+      </div>
+    </Show>
   )
 }
 
@@ -183,25 +243,68 @@ export function ChangesView() {
         </Show>
       </Show>
       <Show when={selected() && projectID()}>
-        <FilePeek path={selected()!} />
+        <FilePeek path={selected()!} mode={mode()} runID={runID()} />
       </Show>
     </div>
   )
 }
 
-function FilePeek(props: { path: string }) {
+function FilePeek(props: { path: string; mode: "run" | "workspace"; runID: string | null }) {
   const ws = useWayshard()
-  const [file] = createResource(
-    () => ({ id: ws.state.activeProjectID!, path: props.path }),
+  const [before] = createResource(
+    () => (props.mode === "run" && props.runID ? { runID: props.runID, path: props.path } : null),
+    (args) => ws.client().runFile(args.runID, args.path, "snapshot"),
+  )
+  const [after] = createResource(
+    () => (props.mode === "run" && props.runID ? { runID: props.runID, path: props.path } : null),
+    (args) => ws.client().runFile(args.runID, args.path, "run"),
+  )
+  const [workspace] = createResource(
+    () => (props.mode === "workspace" && ws.state.activeProjectID ? { id: ws.state.activeProjectID, path: props.path } : null),
     (args) => ws.client().readFile(args.id, args.path),
   )
+
   return (
     <div class="wh-peek">
-      <div class="wh-peek-header">{props.path}</div>
-      <Show when={!file.loading} fallback={<Loading />}>
-        <Show when={file()} fallback={<ErrorState title="Unable to read file" />}>
-          <Show when={(file() as { binary?: boolean }).binary} fallback={<pre class="wh-file-view">{(file() as { content: string }).content}</pre>}>
-            <EmptyState title="Binary file" body="This file cannot be shown as text." />
+      <div class="wh-peek-header">
+        <span class="wh-truncate">{props.path}</span>
+        <Show when={props.mode === "run"}>
+          <Tag>run start → run final</Tag>
+        </Show>
+        <Show when={props.mode === "workspace"}>
+          <Tag>current workspace</Tag>
+        </Show>
+      </div>
+      <Show when={props.mode === "run"}>
+        <Show when={!before.loading && !after.loading} fallback={<Loading label="Loading diff…" />}>
+          <Show
+            when={before() || after()}
+            fallback={<EmptyState title="No diff available" />}
+          >
+            <Show
+              when={!(before()?.binary || after()?.binary)}
+              fallback={<EmptyState title="Binary change" body="This file cannot be shown as text." />}
+            >
+              <div class="wh-diff">
+                <DiffFile
+                  mode="diff"
+                  before={{ name: props.path, contents: before()?.content ?? "" }}
+                  after={{ name: props.path, contents: after()?.content ?? "" }}
+                />
+              </div>
+            </Show>
+          </Show>
+        </Show>
+      </Show>
+      <Show when={props.mode === "workspace"}>
+        <Show when={!workspace.loading} fallback={<Loading />}>
+          <Show when={workspace()} fallback={<ErrorState title="Unable to read file" />}>
+            <Show
+              when={!workspace()!.binary}
+              fallback={<EmptyState title="Binary file" body="This file cannot be shown as text." />}
+            >
+              <pre class="wh-file-view">{workspace()!.content}</pre>
+            </Show>
           </Show>
         </Show>
       </Show>
@@ -213,17 +316,36 @@ function FilePeek(props: { path: string }) {
 
 export function FilesView() {
   const ws = useWayshard()
-  const [path, setPath] = createSignal("")
   const [selected, setSelected] = createSignal<string | null>(null)
   const [content, setContent] = createSignal("")
   const [hash, setHash] = createSignal("")
+  const [binary, setBinary] = createSignal(false)
   const [status, setStatus] = createSignal("")
   const projectID = () => ws.state.activeProjectID
 
-  const [entries, { refetch }] = createResource(
-    () => (projectID() ? { id: projectID()!, path: path() } : null),
-    (args) => ws.client().listFiles(args.id, args.path),
+  const [tree, { refetch }] = createResource(
+    () => projectID(),
+    async (id) => {
+      const out: string[] = []
+      async function walk(dir: string, depth: number) {
+        if (depth > 6 || out.length > 2000) return
+        const entries = await ws.client().listFiles(id, dir)
+        for (const e of entries) {
+          const p = dir ? `${dir}/${e.name}` : e.name
+          if (e.dir) await walk(p, depth + 1)
+          else out.push(p)
+        }
+      }
+      await walk("", 0)
+      return out.sort()
+    },
   )
+
+  const changed = createMemo<Record<string, string>>(() => {
+    const map: Record<string, string> = {}
+    for (const path of ws.state.runChanges) map[path] = "changed"
+    return map
+  })
 
   async function open(p: string) {
     if (!projectID()) return
@@ -232,6 +354,7 @@ export function FilesView() {
       setSelected(p)
       setContent(file.content)
       setHash(file.hash)
+      setBinary(file.binary)
       setStatus("")
     } catch (err) {
       setStatus(String(err))
@@ -253,45 +376,34 @@ export function FilesView() {
     <div class="wh-panel">
       <div class="wh-panel-header">
         <h2>Files</h2>
-        <div class="wh-breadcrumb">
-          <Button size="small" variant="ghost" onClick={() => setPath("")}>
-            root
-          </Button>
-          <span class="wh-muted">/{path()}</span>
-        </div>
+        <Button size="small" variant="ghost" onClick={() => void refetch()}>
+          Refresh
+        </Button>
       </div>
       <Show when={projectID()} fallback={<EmptyState title="No project selected" />}>
-        <Show when={!entries.loading} fallback={<Loading />}>
-          <ul class="wh-file-list">
-            <For each={entries() ?? []}>
-              {(e) => (
-                <li>
-                  <button
-                    class="wh-file-row"
-                    onClick={() => (e.dir ? setPath(path() ? `${path()}/${e.name}` : e.name) : void open(path() ? `${path()}/${e.name}` : e.name))}
-                  >
-                    <Icon name={e.dir ? "bullet-list" : "console"} size="small" />
-                    <span class="wh-truncate">{e.name}</span>
-                  </button>
-                </li>
-              )}
-            </For>
-          </ul>
-        </Show>
-      </Show>
-      <Show when={selected()}>
-        <div class="wh-peek">
-          <div class="wh-peek-header">
-            <span>{selected()}</span>
-            <Button size="small" variant="primary" onClick={() => void save()}>
-              Save
-            </Button>
+        <Show when={!tree.loading} fallback={<Loading />}>
+          <div class="wh-files-layout">
+            <div class="wh-files-tree">
+              <FileTree paths={tree() ?? []} selected={selected() ?? undefined} changed={changed()} onSelect={(p) => void open(p)} />
+            </div>
+            <div class="wh-files-view">
+              <Show when={selected()} fallback={<EmptyState title="Select a file" body="Choose a file from the tree to view or edit." />}>
+                <div class="wh-peek-header">
+                  <span class="wh-truncate">{selected()}</span>
+                  <Button size="small" variant="primary" onClick={() => void save()} disabled={binary()}>
+                    Save
+                  </Button>
+                </div>
+                <Show when={!binary()} fallback={<EmptyState title="Binary file" body="This file cannot be edited as text." />}>
+                  <textarea class="wh-editor" value={content()} onInput={(e) => setContent(e.currentTarget.value)} />
+                </Show>
+                <Show when={status()}>
+                  <div class="wh-muted">{status()}</div>
+                </Show>
+              </Show>
+            </div>
           </div>
-          <textarea class="wh-editor" value={content()} onInput={(e) => setContent(e.currentTarget.value)} />
-          <Show when={status()}>
-            <div class="wh-muted">{status()}</div>
-          </Show>
-        </div>
+        </Show>
       </Show>
     </div>
   )
@@ -301,53 +413,10 @@ export function FilesView() {
 
 export function TerminalView() {
   const ws = useWayshard()
-  const [terminalID, setTerminalID] = createSignal<string | null>(null)
-  const [output, setOutput] = createSignal("")
-  const [input, setInput] = createSignal("")
-  const [lost, setLost] = createSignal(false)
-  let socket: WebSocket | undefined
-
-  onCleanup(() => socket?.close())
-
-  async function start() {
-    if (!ws.state.activeProjectID) return
-    const t = await ws.client().startTerminal(ws.state.activeProjectID)
-    setTerminalID(t.id)
-    setLost(false)
-    socket = ws.client().ptySocket(t.id)
-    socket.onmessage = (ev) => setOutput((o) => o + String(ev.data))
-    socket.onclose = () => setLost(true)
-    socket.onerror = () => setLost(true)
-  }
-
-  function send() {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return
-    socket.send(input())
-    setInput("")
-  }
-
   return (
-    <div class="wh-panel">
-      <div class="wh-panel-header">
-        <h2>Terminal</h2>
-        <Button size="small" variant="primary" onClick={() => void start()} disabled={!ws.state.activeProjectID}>
-          New terminal
-        </Button>
-      </div>
-      <p class="wh-muted">Terminals are server-owned PTYs. The client never executes local shell commands.</p>
-      <Show when={terminalID()} fallback={<EmptyState title="No terminal attached" body="Create a server-owned terminal." />}>
-        <Show when={lost()}>
-          <ErrorState title="Terminal lost" detail="The server restarted or the PTY closed. Create a new terminal." />
-        </Show>
-        <pre class="wh-terminal">{output()}</pre>
-        <div class="wh-composer-actions">
-          <TextField value={input()} onInput={(e: InputEvent) => setInput((e.currentTarget as HTMLInputElement).value)} onKeyDown={(e: KeyboardEvent) => e.key === "Enter" && send()} />
-          <Button size="small" onClick={send}>
-            Send
-          </Button>
-        </div>
-      </Show>
-    </div>
+    <Show when={ws.state.activeProjectID} fallback={<EmptyState title="No project selected" />}>
+      <Terminal projectId={ws.state.activeProjectID!} />
+    </Show>
   )
 }
 
@@ -435,8 +504,9 @@ export function ContextView() {
   return (
     <Panel title="Context" hint="The context bundle delivered to the planning stage.">
       <Show when={context()} fallback={<EmptyState title="No context manifest available" />}>
-        <pre class="wh-json">{JSON.stringify(context(), null, 2)}</pre>
+        <Structured value={context()} />
       </Show>
+      <DebugInspector value={context() ?? null} />
     </Panel>
   )
 }
@@ -478,9 +548,10 @@ export function KnowledgeView() {
     <Panel title="Project knowledge" hint="Repository-owned instruction and specification documents.">
       <Show when={ws.state.activeProjectID} fallback={<EmptyState title="No project selected" />}>
         <Show when={!knowledge.loading} fallback={<Loading />}>
-          <pre class="wh-json">{JSON.stringify(knowledge(), null, 2)}</pre>
+          <Structured value={knowledge()} />
         </Show>
       </Show>
+      <DebugInspector value={knowledge() ?? null} />
     </Panel>
   )
 }
@@ -531,15 +602,16 @@ export function RecoveryView() {
   const [storage] = createResource(() => ws.client().storage())
   const [sandbox] = createResource(() => ws.client().sandbox())
   return (
-    <Panel title="Recovery & diagnostics" hint="Storage pressure, sandbox capability and server status.">
-      <h3>Sandbox</h3>
+    <Panel title="Recovery & diagnostics" hint="Sandbox, provider networking, storage pressure and server health.">
+      <h3>Sandbox capability</h3>
       <Show when={!sandbox.loading} fallback={<Loading />}>
-        <pre class="wh-json">{JSON.stringify(sandbox(), null, 2)}</pre>
+        <Structured value={sandbox()} />
       </Show>
       <h3>Storage</h3>
       <Show when={!storage.loading} fallback={<Loading />}>
-        <pre class="wh-json">{JSON.stringify(storage(), null, 2)}</pre>
+        <Structured value={storage()} />
       </Show>
+      <DebugInspector value={{ sandbox: sandbox() ?? null, storage: storage() ?? null }} />
     </Panel>
   )
 }

@@ -58,6 +58,7 @@ export interface State {
   run: Run | null
   stages: Stage[]
   artifacts: Artifact[]
+  runChanges: string[]
   approvals: Approval[]
   notifications: Notification[]
   busy: boolean
@@ -80,6 +81,7 @@ function initialState(): State {
     run: null,
     stages: [],
     artifacts: [],
+    runChanges: [],
     approvals: [],
     notifications: [],
     busy: false,
@@ -157,6 +159,12 @@ function createStateAPI(): StateAPI {
     setState("run", run)
     setState("stages", stages)
     setState("artifacts", artifacts)
+    try {
+      const changes = (await client().runChanges(id)) as { delta?: { files?: Array<{ path: string }> } }
+      setState("runChanges", (changes.delta?.files ?? []).map((f) => f.path))
+    } catch {
+      setState("runChanges", [])
+    }
     if (state.activeConversationID) setState("runsByConversation", state.activeConversationID, run)
   }
 

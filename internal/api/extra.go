@@ -2,8 +2,13 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"github.com/Wayshard/wayshard/internal/auth"
@@ -268,11 +273,58 @@ func (s *Server) ptyWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	for {
-		_, data, err := c.Read(ctx)
+		msgType, data, err := c.Read(ctx)
 		if err != nil {
 			// detach; do not kill PTY
 			return
 		}
+		// A JSON resize control frame from the inherited terminal renderer;
+		// anything else is raw terminal input to the server-owned PTY.
+		if msgType == websocket.MessageText && len(data) > 0 && data[0] == '{' {
+			var ctrl struct {
+				Wayshard string `json:"wayshard"`
+				Cols     int    `json:"cols"`
+				Rows     int    `json:"rows"`
+			}
+			if json.Unmarshal(data, &ctrl) == nil && ctrl.Wayshard == "resize" {
+				_ = sess.Resize(ctrl.Cols, ctrl.Rows)
+				continue
+			}
+		}
 		_, _ = sess.File.Write(data)
 	}
+}
+
+// runFile returns the content of a file in the run workspace or its starting
+// snapshot. It powers the Changes diff view (run start -> run final) without
+// exposing the whole workspace over the API.
+func (s *Server) runFile(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
+	ws, err := s.Store.GetWorkspaceByRun(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	root := ws.RunPath
+	if r.URL.Query().Get("side") == "snapshot" {
+		if snap, serr := workspace.LoadSnapshot(filepath.Join(filepath.Dir(ws.RunPath), "snapshot")); serr == nil && snap.TreePath != "" {
+			root = snap.TreePath
+		}
+	}
+	rel := r.URL.Query().Get("path")
+	full, err := safeJoin(root, rel)
+	if err != nil {
+		http.Error(w, `{"error":"path escapes root"}`, http.StatusBadRequest)
+		return
+	}
+	b, err := os.ReadFile(full)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			writeJSON(w, 200, map[string]any{"path": rel, "content": "", "hash": "", "binary": false, "missing": true})
+			return
+		}
+		writeErr(w, err)
+		return
+	}
+	sum := sha256.Sum256(b)
+	writeJSON(w, 200, map[string]any{"path": rel, "content": string(b), "hash": hex.EncodeToString(sum[:]), "binary": !isText(b), "missing": false})
 }

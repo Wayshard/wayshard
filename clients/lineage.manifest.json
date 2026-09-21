@@ -193,6 +193,63 @@
       "destination": "tui/bunfig.toml",
       "mode": "copied",
       "marker": "opentui/solid/preload"
+    },
+    {
+      "upstream": "packages/session-ui/src/v2/components/prompt-input/index.tsx",
+      "upstreamBlob": "ff4ff0f1d408ffb22efab6b29f618a78321dea87",
+      "destination": "gui/src/session-ui/v2/components/prompt-input/index.tsx",
+      "mode": "copied+adapted",
+      "marker": "PromptInputV2",
+      "usage": [
+        "gui/src/app/composer.tsx"
+      ]
+    },
+    {
+      "upstream": "packages/session-ui/src/components/file.tsx",
+      "upstreamBlob": "3772b76a4b261437e9537b4792c0a918e256aaa1",
+      "destination": "gui/src/session-ui/components/file.tsx",
+      "mode": "copied+adapted",
+      "marker": "export function File",
+      "usage": [
+        "gui/src/app/views.tsx"
+      ]
+    },
+    {
+      "upstream": "packages/app/src/components/file-tree-v2-model.ts",
+      "upstreamBlob": "27783a9bb16bafa7e0ebe871b8aa6d1daa6ec495",
+      "destination": "gui/src/app/file-tree-model.ts",
+      "mode": "adapted",
+      "marker": "buildFileTreeV2Model",
+      "usage": [
+        "gui/src/app/file-tree.tsx"
+      ]
+    },
+    {
+      "upstream": "packages/app/src/components/file-tree-v2.tsx",
+      "upstreamBlob": "091e489c32c418a01d41243591ba4100772aab76",
+      "destination": "gui/src/app/file-tree.tsx",
+      "mode": "adapted",
+      "marker": "Adapted from the imported OpenCode 2 graphical client file tree"
+    },
+    {
+      "upstream": "packages/app/src/components/terminal.tsx",
+      "upstreamBlob": "0ca42b35bb1b9712c8af6c9d98435942505a28cc",
+      "destination": "gui/src/app/terminal.tsx",
+      "mode": "adapted",
+      "marker": "ghostty-web",
+      "usage": [
+        "gui/src/app/views.tsx"
+      ]
+    },
+    {
+      "upstream": "packages/tui/src/ui/dialog-select.tsx",
+      "upstreamBlob": "df2913ede08c1ffc04078d10f61031001b088ee7",
+      "destination": "tui/src/ui/dialog-select.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/dialog-select.tsx",
+      "usage": [
+        "tui/src/app.tsx"
+      ]
     }
   ]
 }

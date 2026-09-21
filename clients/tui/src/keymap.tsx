@@ -6,10 +6,10 @@ import { useKeyboard } from "@opentui/solid"
 import type { KeyEvent } from "@opentui/core"
 
 export interface Binding {
-  key: string
+  key: unknown
   desc?: string
   group?: string
-  cmd: () => void
+  cmd?: unknown
 }
 
 export interface BindingsInput {
@@ -27,8 +27,9 @@ export function useBindings(input: () => BindingsInput) {
     const name = key.name === "return" ? "return" : key.name
     const combo = `${key.ctrl ? "ctrl+" : ""}${key.shift ? "shift+" : ""}${name}`
     for (const b of cfg.bindings ?? []) {
-      if (b.key === name || b.key === combo) {
-        b.cmd()
+      const bindKey = String(b.key)
+      if (bindKey === name || bindKey === combo) {
+        if (typeof b.cmd === "function") (b.cmd as () => void)()
         return
       }
     }
@@ -39,11 +40,15 @@ export function useCommandShortcut(_name: string): () => string {
   return () => ""
 }
 
-export function useKeymapSelector(): () => unknown {
-  return () => undefined
+export function useKeymapSelector<T = unknown>(_selector?: (keymap: KeymapLike) => T): () => any {
+  return () => new Map<string, unknown>()
 }
 
-export function formatKeyBindings(_bindings: Binding[]): string {
+export interface KeymapLike {
+  getCommandBindings(query?: unknown): Map<string, unknown>
+}
+
+export function formatKeyBindings(_bindings?: unknown, _config?: unknown): string {
   return ""
 }
 

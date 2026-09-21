@@ -23,6 +23,8 @@ import { AppLayout } from "./layout"
 import { CommandPalette } from "./command-palette"
 import { SessionTab } from "./session-tab"
 import { ChangesView, FilesView, TerminalView, AdvancedSurface, type AdvancedSurfaceKey } from "./views"
+import { Composer } from "./composer"
+import { PairingGate } from "./pairing"
 
 export type PrimaryTab = "session" | "changes" | "files" | "terminal"
 
@@ -47,6 +49,7 @@ export const ADVANCED_SURFACES: { key: AdvancedSurfaceKey; label: string }[] = [
 ]
 
 const [activeTab, setActiveTab] = createSignal<PrimaryTab>("session")
+const [pairingOpen, setPairingOpen] = createSignal(false)
 
 export { activeTab, setActiveTab }
 
@@ -102,6 +105,7 @@ function Shell() {
             if (path) await ws.openProject(path)
           },
         },
+        { id: "connect.pair", title: "Connect / pair device…", category: "Connection", onSelect: () => setPairingOpen(true) },
         { id: "session.new", title: "New session", category: "Session", onSelect: () => void ws.newConversation() },
         { id: "run.cancel", title: "Cancel run", category: "Run", onSelect: () => void ws.cancelRun() },
         { id: "run.retry", title: "Retry run", category: "Run", onSelect: () => void ws.retryRun() },
@@ -237,18 +241,7 @@ function Sidebar() {
 
 function SessionView() {
   const ws = useWayshard()
-  const [draft, setDraft] = createSignal("")
-  const [artifactOnly, setArtifactOnly] = createSignal(false)
-  const [profile, setProfile] = createSignal("auto")
-
   const userMessages = createMemo(() => ws.state.messages.filter((m) => m.role === "user"))
-
-  async function send() {
-    const text = draft().trim()
-    if (!text) return
-    setDraft("")
-    await ws.send(text, { artifactOnly: artifactOnly(), profile: profile() })
-  }
 
   return (
     <div class="wh-session">
@@ -260,39 +253,10 @@ function SessionView() {
           <RunTimeline />
         </Show>
       </div>
-      <div class="wh-composer">
-        <textarea
-          class="wh-composer-input"
-          placeholder="Describe a task…"
-          value={draft()}
-          disabled={ws.state.busy}
-          onInput={(e) => setDraft(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
-              void send()
-            }
-          }}
-        />
-        <div class="wh-composer-actions">
-          <label class="wh-checkbox">
-            <input type="checkbox" checked={artifactOnly()} onChange={(e) => setArtifactOnly(e.currentTarget.checked)} />
-            Artifact only
-          </label>
-          <select class="wh-select" value={profile()} onChange={(e) => setProfile(e.currentTarget.value)}>
-            <option value="auto">Auto</option>
-            <option value="quality">Quality</option>
-            <option value="speed">Speed</option>
-            <option value="economy">Economy</option>
-          </select>
-          <Show when={ws.state.busy} fallback={<span class="wh-muted">⌘/Ctrl+Enter to send</span>}>
-            <Spinner />
-          </Show>
-          <Button variant="primary" size="small" onClick={() => void send()} disabled={ws.state.busy}>
-            Send
-          </Button>
-        </div>
-      </div>
+      <Composer
+        onSubmit={(input) => void ws.send(input.text, { artifactOnly: input.artifactOnly, profile: input.profile })}
+        onCancel={() => void ws.cancelRun()}
+      />
     </div>
   )
 }
@@ -350,13 +314,23 @@ export function ErrorState(props: { title: string; detail?: string }) {
   )
 }
 
+function Gate() {
+  const ws = useWayshard()
+  const needsPairing = () => pairingOpen() || (!ws.state.connected && !ws.state.connection.token)
+  return (
+    <Show when={needsPairing()} fallback={<Shell />}>
+      <PairingGate />
+    </Show>
+  )
+}
+
 export function WayshardApp() {
   return (
     <StateProvider>
       <CommandProvider>
         <DialogProvider>
           <FileComponentProvider component={FileFallback}>
-            <Shell />
+            <Gate />
           </FileComponentProvider>
         </DialogProvider>
       </CommandProvider>

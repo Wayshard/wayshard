@@ -13,9 +13,20 @@
     "noEmit": true,
     "jsx": "preserve",
     "jsxImportSource": "@opentui/solid",
-    "lib": ["es2023"],
-    "types": ["bun", "node"]
+    "lib": [
+      "es2023",
+      "dom",
+      "dom.iterable"
+    ],
+    "types": [
+      "bun",
+      "node"
+    ]
   },
-  "include": ["src"],
-  "exclude": ["**/*.test.*"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "**/*.test.*"
+  ]
 }

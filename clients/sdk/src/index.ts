@@ -177,6 +177,11 @@ export class WayshardClient {
   runChanges(runId: string) {
     return this.get<Record<string, unknown>>(`/v1/runs/${runId}/changes`);
   }
+  runFile(runId: string, path: string, side: "run" | "snapshot" = "run") {
+    return this.get<{ path: string; content: string; hash: string; binary: boolean; missing: boolean }>(
+      `/v1/runs/${runId}/file?path=${encodeURIComponent(path)}&side=${side}`,
+    );
+  }
   workspaceChanges(projectId: string) {
     return this.get<Record<string, unknown>>(`/v1/projects/${projectId}/changes`);
   }
@@ -252,7 +257,16 @@ export class WayshardClient {
     return this.post("/v1/pairing/invitations", { advertisedUrl });
   }
   pair(code: string, deviceName: string, deviceKind: string) {
-    return this.post("/v1/pairing/complete", { code, deviceName, deviceKind });
+    return this.post<{ credential?: string; session?: string; device?: unknown }>("/v1/pairing/complete", {
+      code,
+      deviceName,
+      deviceKind,
+    });
+  }
+  pairingChallenge(nonce = "wayshard-pairing") {
+    return this.get<{ serverId: string; fingerprint: string; signature: string }>(
+      `/v1/pairing/challenge?nonce=${encodeURIComponent(nonce)}`,
+    );
   }
   terminals(projectId: string) {
     return this.get(`/v1/projects/${projectId}/terminals`);

@@ -95,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/projects/{id}/file", s.requireAuth(s.writeFile))
 	mux.HandleFunc("GET /v1/projects/{id}/changes", s.requireAuth(s.projectChanges))
 	mux.HandleFunc("GET /v1/runs/{id}/changes", s.requireAuth(s.runChanges))
+	mux.HandleFunc("GET /v1/runs/{id}/file", s.requireAuth(s.runFile))
 	mux.HandleFunc("GET /v1/projects/{id}/knowledge", s.requireAuth(s.projectKnowledge))
 	mux.HandleFunc("GET /v1/runs/{id}/context", s.requireAuth(s.runContext))
 	mux.HandleFunc("GET /v1/runs/{id}/details", s.requireAuth(s.runDetails))

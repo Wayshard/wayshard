@@ -126,3 +126,24 @@ substantial size, every `fileAncestry` destination must exist, be non-trivial an
 contain its provenance marker, and no live client source may contain an
 `@opencode-ai/` import specifier. This makes it impossible to delete the adapted
 application/TUI foundation and replace it with a small fresh app while passing.
+
+## Signature surface ancestry (final Pass 1E)
+
+| OpenCode source | Wayshard live file | Mode | Production use |
+| --- | --- | --- | --- |
+| `packages/session-ui/src/v2/components/prompt-input/index.tsx` | `clients/gui/src/session-ui/v2/components/prompt-input/index.tsx` | copied+adapted | `clients/gui/src/app/composer.tsx` |
+| `packages/session-ui/src/components/file.tsx` | `clients/gui/src/session-ui/components/file.tsx` | copied+adapted | `clients/gui/src/app/views.tsx` (Changes diff) |
+| `packages/app/src/components/file-tree-v2-model.ts` | `clients/gui/src/app/file-tree-model.ts` | adapted | `clients/gui/src/app/file-tree.tsx` |
+| `packages/app/src/components/file-tree-v2.tsx` | `clients/gui/src/app/file-tree.tsx` | adapted | Files view |
+| `packages/app/src/components/terminal.tsx` | `clients/gui/src/app/terminal.tsx` | adapted | Terminal view (ghostty-web renderer) |
+| `packages/tui/src/ui/dialog-select.tsx` | `clients/tui/src/ui/dialog-select.tsx` | copied+adapted | `clients/tui/src/app.tsx` (command palette) |
+
+The composer renders the imported `PromptInputV2` editor/interaction machine;
+Changes renders the imported `File` diff component; Files uses the adapted
+file-tree model; the terminal renders through the imported ghostty-web
+presentation against the Wayshard server-owned PTY; the TUI command palette uses
+the adapted `DialogSelect`.
+
+The lineage test additionally verifies production usage: each entry with a
+`usage` list must be referenced by the listed live file, so the adapted
+components cannot be present-but-unused.

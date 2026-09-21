@@ -35,4 +35,8 @@ export function useTheme() {
   return ctx
 }
 
+export function selectedForeground(theme: Theme, _bg?: RGBA): RGBA {
+  return theme.selectedListItemText ?? theme.text
+}
+
 export { RGBA }
