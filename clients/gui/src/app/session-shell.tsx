@@ -12,20 +12,17 @@ import { Icon } from "@wayshard/ui/icon"
 import { Tag } from "@wayshard/ui/tag"
 import { Spinner } from "@wayshard/ui/spinner"
 import { Dialog } from "@wayshard/ui/dialog"
-import { DialogProvider, useDialog } from "@wayshard/ui/context/dialog"
-import { ThemeProvider } from "@wayshard/ui/theme/context"
-import { FileComponentProvider } from "@wayshard/ui/context/file"
+import { useDialog } from "@wayshard/ui/context/dialog"
 import { DataProvider } from "@wayshard/gui/session-ui/context"
 import { SessionTurn } from "@wayshard/gui/session-ui/components/session-turn"
-import { StateProvider, useWayshard } from "../wayshard/state"
+import { useWayshard } from "../wayshard/state"
 import { buildData, stageDisplay } from "../wayshard/adapter"
-import { CommandProvider, useCommand } from "./command"
+import { useCommand } from "./command"
 import { AppLayout } from "./layout"
 import { CommandPalette } from "./command-palette"
 import { SessionTab } from "./session-tab"
 import { ChangesView, FilesView, TerminalView, AdvancedSurface, type AdvancedSurfaceKey } from "./views"
 import { Composer } from "./composer"
-import { PairingGate } from "./pairing"
 
 export type PrimaryTab = "session" | "changes" | "files" | "terminal"
 
@@ -52,7 +49,7 @@ export const ADVANCED_SURFACES: { key: AdvancedSurfaceKey; label: string }[] = [
 const [activeTab, setActiveTab] = createSignal<PrimaryTab>("session")
 const [pairingOpen, setPairingOpen] = createSignal(false)
 
-export { activeTab, setActiveTab }
+export { activeTab, setActiveTab, pairingOpen, setPairingOpen }
 
 // useNarrow tracks the narrow/mobile breakpoint that turns the sidebar into a
 // closable drawer. Desktop behaviour is unchanged.
@@ -67,11 +64,11 @@ function useNarrow() {
   return narrow
 }
 
-function FileFallback(props: { path?: string; content?: string }) {
+export function FileFallback(props: { path?: string; content?: string }) {
   return <pre class="wh-file-view">{props.content ?? ""}</pre>
 }
 
-function Shell() {
+export function SessionShell() {
   const ws = useWayshard()
   const command = useCommand()
   const dialog = useDialog()
@@ -343,31 +340,5 @@ export function ErrorState(props: { title: string; detail?: string }) {
         <pre class="wh-error-detail">{props.detail}</pre>
       </Show>
     </div>
-  )
-}
-
-function Gate() {
-  const ws = useWayshard()
-  const needsPairing = () => pairingOpen() || (!ws.state.connected && !ws.state.connection.token)
-  return (
-    <Show when={needsPairing()} fallback={<Shell />}>
-      <PairingGate />
-    </Show>
-  )
-}
-
-export function WayshardApp() {
-  return (
-    <ThemeProvider defaultTheme="oc-2" defaultColorScheme="dark">
-      <StateProvider>
-        <CommandProvider>
-          <DialogProvider>
-            <FileComponentProvider component={FileFallback}>
-              <Gate />
-            </FileComponentProvider>
-          </DialogProvider>
-        </CommandProvider>
-      </StateProvider>
-    </ThemeProvider>
   )
 }

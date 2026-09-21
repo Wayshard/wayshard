@@ -8,7 +8,8 @@ import { join } from "node:path"
 
 const src = import.meta.dir
 const styles = readFileSync(join(src, "styles.css"), "utf8")
-const app = readFileSync(join(src, "app", "App.tsx"), "utf8")
+const app = readFileSync(join(src, "app", "app.tsx"), "utf8")
+const shell = readFileSync(join(src, "app", "session-shell.tsx"), "utf8")
 
 describe("graphical theme integration (R1)", () => {
   test("styles entry imports the adapted v2 theme layer", () => {
@@ -28,18 +29,18 @@ describe("graphical theme integration (R1)", () => {
 
 describe("More overflow control (R2)", () => {
   test("More opens through the shared dialog provider", () => {
-    expect(app).toContain("function openMore()")
-    expect(app).toMatch(/openMore[\s\S]*dialog\.show\(/)
+    expect(shell).toContain("function openMore()")
+    expect(shell).toMatch(/openMore[\s\S]*dialog\.show\(/)
   })
   test("no inline dialog rendered from a moreOpen signal", () => {
-    expect(app).not.toContain("moreOpen")
+    expect(shell).not.toContain("moreOpen")
   })
 })
 
 describe("narrow/mobile shell (R3)", () => {
   test("shell exposes a sidebar drawer toggle", () => {
-    expect(app).toContain("wh-sidebar-toggle")
-    expect(app).toContain("setSidebarOpen")
+    expect(shell).toContain("wh-sidebar-toggle")
+    expect(shell).toContain("setSidebarOpen")
   })
   test("styles provide an off-canvas drawer below the breakpoint", () => {
     expect(styles).toMatch(/\.wh-sidebar\[data-open="true"\]\s*\{\s*transform/)

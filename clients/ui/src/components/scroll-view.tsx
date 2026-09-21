@@ -207,7 +207,7 @@ export function ScrollView(props: ScrollViewProps) {
     }
 
     createResizeObserver(
-      () => [viewportRef, viewportRef.firstElementChild, thumbMount()].filter(Boolean) as HTMLElement[],
+      () => [viewportRef, viewportRef?.firstElementChild, thumbMount()].filter(Boolean) as HTMLElement[],
       updateThumb,
     )
 

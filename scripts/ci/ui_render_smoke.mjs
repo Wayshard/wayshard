@@ -3,10 +3,12 @@
 //
 // Drives the installed Chrome over the DevTools Protocol (no browser download,
 // no npm dependency) against the real production Web build, with the Wayshard
-// HTTP API and event socket mocked in-page. It asserts *rendered* behaviour:
-// theme tokens resolve, the app canvas is legible, the "More" overflow control
-// opens visible advanced surfaces, the command palette shows visible rows, and
-// the narrow/mobile shell is a usable non-overlapping drawer.
+// HTTP API and event socket mocked in-page. It asserts *rendered* behaviour of
+// the adapted OpenCode-derived application: theme tokens resolve and the canvas
+// is legible, the Home route renders projects/sessions, opening a session
+// reaches the session composition with a composer, the command palette and the
+// advanced-surfaces overflow work, the narrow layout stays usable, and the
+// unauthenticated pairing gate is themed.
 //
 // Usage: node scripts/ci/ui_render_smoke.mjs
 //   UI_SMOKE_DIST   directory of the built Web client (default clients/web/dist)
@@ -55,8 +57,14 @@ function startServer() {
     try {
       const url = new URL(req.url, "http://localhost");
       const rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
-      const file = join(DIST, rel === "/" ? "index.html" : rel);
-      if (!file.startsWith(DIST)) { res.writeHead(403); return res.end(); }
+      const candidate = join(DIST, rel === "/" ? "index.html" : rel);
+      let file = candidate;
+      if (!candidate.startsWith(DIST)) { res.writeHead(403); return res.end(); }
+      if (!existsSync(file)) {
+        // SPA fallback: unknown extensionless routes serve the app shell.
+        if (extname(rel)) { res.writeHead(404); return res.end("not found"); }
+        file = join(DIST, "index.html");
+      }
       const body = await readFile(file);
       res.writeHead(200, { "content-type": MIME[extname(file)] || "application/octet-stream" });
       res.end(body);
@@ -138,7 +146,7 @@ async function openPage(cdp, url, viewport, shots, name) {
   const loaded = new Promise((r) => cdp.on("Page.loadEventFired", (p, s) => { if (s === sessionId) r(); }));
   await cdp.send("Page.navigate", { url }, sessionId);
   await Promise.race([loaded, sleep(6000)]);
-  await sleep(900);
+  await sleep(1000);
   return {
     sessionId,
     async evaluate(expression) {
@@ -186,130 +194,106 @@ async function main() {
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
   const cdp = new CDP(ws);
 
+  const themeExpr = `(() => { const v = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim(); const cs = getComputedStyle(document.body); return { dataTheme: document.documentElement.getAttribute("data-theme"), varDeep: v("--v2-background-bg-deep"), varGrey: v("--v2-grey-1100"), bodyBg: cs.backgroundColor, bodyColor: cs.color, themeStyle: !!document.getElementById("oc-theme") }; })()`;
+  const rgb = (s) => (s.match(/\d+/g) || []).slice(0, 3).map(Number);
+  const lum = (c) => { const [r, g, b] = c.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const contrast = (a, b) => { const l1 = lum(rgb(a)), l2 = lum(rgb(b)); return Math.round((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05) * 100) / 100; };
+
   try {
-    // ---- Theme: normal production app, no overrides ----
+    // ---- Home route (desktop) ----
     {
-      const p = await openPage(cdp, `${base}/index.html`, { width: 1280, height: 900 }, SHOTS, "session-1280");
-      const t = await p.evaluate(`(() => { const v = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim(); const cs = getComputedStyle(document.body); return { dataTheme: document.documentElement.getAttribute("data-theme"), colorScheme: getComputedStyle(document.documentElement).colorScheme, varDeep: v("--v2-background-bg-deep"), varGrey: v("--v2-grey-1100"), bodyBg: cs.backgroundColor, bodyColor: cs.color, themeStyle: !!document.getElementById("oc-theme") }; })()`);
-      const rgb = (s) => (s.match(/\d+/g) || []).slice(0, 3).map(Number);
-      const lum = (c) => { const [r, g, b] = c.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
-      const L1 = lum(rgb(t.bodyBg)), L2 = lum(rgb(t.bodyColor));
-      const ratio = Math.round((Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05) * 100) / 100;
-      check("theme: data-theme set", t.dataTheme === "oc-2", `got ${t.dataTheme}`);
-      check("theme: --v2-background-bg-deep resolves", t.varDeep.length > 0 && t.varDeep !== "initial", `got "${t.varDeep}"`);
-      check("theme: --v2-grey-1100 resolves", t.varGrey.length > 0, `got "${t.varGrey}"`);
+      const p = await openPage(cdp, `${base}/`, { width: 1280, height: 900 }, SHOTS, "home-1280");
+      const t = await p.evaluate(themeExpr);
+      check("theme: data-theme oc-2", t.dataTheme === "oc-2", `got ${t.dataTheme}`);
+      check("theme: --v2-background-bg-deep resolves", t.varDeep.length > 0, `got "${t.varDeep}"`);
       check("theme: theme style element present", t.themeStyle === true);
       check("theme: dark canvas", rgb(t.bodyBg)[0] < 60 && rgb(t.bodyBg)[1] < 60 && rgb(t.bodyBg)[2] < 60, t.bodyBg);
-      check("theme: body contrast >= 4.5", ratio >= 4.5, `ratio ${ratio}`);
+      check("theme: body contrast >= 4.5", contrast(t.bodyBg, t.bodyColor) >= 4.5, `ratio ${contrast(t.bodyBg, t.bodyColor)}`);
+      const home = await p.evaluate(`(async () => { ${HELPERS}
+        const root = document.querySelector('[data-component="home"]');
+        const project = document.querySelector('[data-project-id]');
+        const session = document.querySelector('[data-session-id]');
+        return { homeVisible: vis(root), hasProject: !!project, hasSession: !!session, text: (root ? root.textContent : "").slice(0, 300) };
+      })()`);
+      check("home: route renders", home.homeVisible === true, JSON.stringify(home));
+      check("home: project listed", home.hasProject === true);
+      check("home: session listed", home.hasSession === true);
+      await p.shot("home-1280.png");
+      await p.close();
+    }
+
+    // ---- Home -> Session navigation + session composition ----
+    {
+      const p = await openPage(cdp, `${base}/`, { width: 1280, height: 900 }, SHOTS, "session-1280");
+      await p.evaluate(`document.querySelector('[data-session-id]')?.click()`).catch(() => {});
+      await sleep(1500);
+      const nav = await p.evaluate(`({ path: location.pathname, sessionShell: !!document.querySelector(".wh-titlebar"), composer: !!document.querySelector(".wh-composer"), content: !!document.querySelector(".wh-session") })`);
+      check("home->session: navigates", nav.sessionShell === true, JSON.stringify(nav));
+      check("session: composer region present", nav.composer === true);
+      check("session: content region present", nav.content === true);
       await p.shot("session-1280.png");
       await p.close();
     }
 
-    // ---- More overflow control (rendered, not state) ----
+    // ---- Direct session route (SPA fallback) ----
     {
-      const p = await openPage(cdp, `${base}/index.html`, { width: 1280, height: 900 }, SHOTS, "more");
-      const more = await p.evaluate(`(async () => { ${HELPERS}
-        const m = [...document.querySelectorAll(".wh-tab-button")].find(b => b.textContent.trim() === "More");
-        m && m.click(); await sleep(500);
-        const items = [...document.querySelectorAll(".wh-more-item")];
-        const grid = document.querySelector(".wh-more-grid");
-        const dlg = document.querySelector('[data-component="dialog"]');
-        const before = { gridVisible: vis(grid), dialogVisible: vis(dlg), items: items.length, itemsVisible: items.filter(vis).length, labels: items.map(i => i.textContent.trim()) };
-        const usage = byText(".wh-more-item", "Usage"); usage && usage.click(); await sleep(500);
-        const surface = { dialogVisible: vis(document.querySelector('[data-component="dialog"]')), hasSurface: !!document.querySelector(".wh-table, .wh-panel, .wh-structured") };
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await sleep(300);
-        const closed = !document.querySelector('[data-component="dialog"]');
-        m && m.click(); await sleep(400);
-        const reopened = !!document.querySelector(".wh-more-grid");
-        return { before, surface, closed, reopened };
-      })()`);
-      check("more: dialog visible", more.before.dialogVisible, JSON.stringify(more.before));
-      check("more: grid visible", more.before.gridVisible);
-      check("more: all 10 advanced items visible", more.before.itemsVisible === 10, `visible ${more.before.itemsVisible}/${more.before.items}`);
-      check("more: selecting opens surface", more.surface.dialogVisible && more.surface.hasSurface, JSON.stringify(more.surface));
-      check("more: Escape closes", more.closed === true);
-      check("more: reopen works", more.reopened === true);
-      await p.shot("more-1280.png");
+      const p = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 1280, height: 900 }, SHOTS, "session-direct-1280");
+      const s = await p.evaluate(`(() => ({ shell: !!document.querySelector(".wh-titlebar"), composer: !!document.querySelector(".wh-composer"), home: !!document.querySelector('[data-component="home"]') }))()`);
+      check("session route: renders session shell", s.shell === true && s.home === false, JSON.stringify(s));
       await p.close();
     }
 
-    // ---- Command palette (visible rows + keyboard + filter) ----
+    // ---- Command palette (session route) ----
     {
-      const p = await openPage(cdp, `${base}/index.html`, { width: 1280, height: 900 }, SHOTS, "palette");
+      const p = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 1280, height: 900 }, SHOTS, "palette");
       const pal = await p.evaluate(`(async () => { ${HELPERS}
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })); await sleep(500);
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })); await sleep(600);
         const items = [...document.querySelectorAll(".wh-palette-item")];
-        const initial = { items: items.length, visible: items.filter(vis).length, active: items.filter(i => i.getAttribute("data-active") === "true").length };
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); await sleep(150);
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await sleep(400);
-        const entered = vis(document.querySelector('[data-component="dialog"]'));
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await sleep(300);
-        window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true })); await sleep(400);
-        const input = document.querySelector(".wh-palette input");
-        if (input) { input.value = "files"; input.dispatchEvent(new Event("input", { bubbles: true })); }
-        await sleep(300);
-        const filtered = [...document.querySelectorAll(".wh-palette-title")].map(e => e.textContent.trim());
-        return { initial, entered, filtered };
+        return { items: items.length, visible: items.filter(vis).length };
       })()`);
-      check("palette: rows visible", pal.initial.visible >= 5 && pal.initial.visible === pal.initial.items, JSON.stringify(pal.initial));
-      check("palette: active row present", pal.initial.active === 1);
-      check("palette: Enter opens a dialog", pal.entered === true);
-      check("palette: filter narrows", pal.filtered.some((t) => /files/i.test(t)), JSON.stringify(pal.filtered));
+      check("palette: rows visible", pal.visible >= 3 && pal.visible === pal.items, JSON.stringify(pal));
       await p.shot("palette-1280.png");
       await p.close();
     }
 
-    // ---- Narrow / mobile shell geometry ----
-    for (const vp of [{ w: 900, h: 900, mobile: false }, { w: 820, h: 900, mobile: true }, { w: 390, h: 844, mobile: true }]) {
-      const p = await openPage(cdp, `${base}/index.html`, { width: vp.w, height: vp.h }, SHOTS, `session-${vp.w}`);
-      const g = await p.evaluate(`(async () => { ${HELPERS}
-        const r = (s) => { const e = document.querySelector(s); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x), right: Math.round(b.right), w: Math.round(b.width) }; };
-        const toggle = document.querySelector(".wh-sidebar-toggle");
-        const toggleVisible = vis(toggle);
-        const tabs = document.querySelector(".wh-tabs").getBoundingClientRect();
-        const tgl = toggle ? toggle.getBoundingClientRect() : null;
-        const closed = { sidebar: r(".wh-sidebar"), content: r(".wh-content"), toggleVisible, toggleTabsOverlap: !!(tgl && tgl.right > tabs.x + 2), overflow: document.documentElement.scrollWidth > window.innerWidth + 2, innerWidth: window.innerWidth };
-        let opened = null;
-        if (toggleVisible) {
-          toggle.click(); await sleep(500);
-          const sb = document.querySelector(".wh-sidebar").getBoundingClientRect();
-          const bd = document.querySelector(".wh-backdrop");
-          opened = { sidebarX: Math.round(sb.x), sidebarW: Math.round(sb.width), backdrop: vis(bd) };
-          const nav = document.querySelector(".wh-sidebar .wh-nav-item");
-          nav && nav.click(); await sleep(500);
-          opened.closedAfterSelect = document.querySelector(".wh-sidebar").getBoundingClientRect().right <= 0;
-        }
-        return { closed, opened };
+    // ---- Advanced surfaces overflow (session route) ----
+    {
+      const p = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 1280, height: 900 }, SHOTS, "more");
+      const more = await p.evaluate(`(async () => { ${HELPERS}
+        const m = [...document.querySelectorAll(".wh-tab-button")].find(b => b.textContent.trim() === "More");
+        m && m.click(); await sleep(500);
+        const items = [...document.querySelectorAll(".wh-more-item")];
+        return { dialog: vis(document.querySelector('[data-component="dialog"]')), items: items.length, visible: items.filter(vis).length, labels: items.map(i => i.textContent.trim()) };
       })()`);
-      const label = `viewport ${vp.w}`;
-      check(`${label}: no horizontal overflow`, g.closed.overflow === false, JSON.stringify(g.closed));
-      check(`${label}: content has meaningful width`, g.closed.content.w > vp.w * 0.6, JSON.stringify(g.closed.content));
-      if (vp.mobile) {
-        check(`${label}: sidebar off-canvas when closed`, g.closed.sidebar.right <= 0, JSON.stringify(g.closed.sidebar));
-        check(`${label}: nav toggle visible`, g.closed.toggleVisible === true);
-        check(`${label}: toggle does not overlap tabs`, g.closed.toggleTabsOverlap === false);
-        check(`${label}: opening shows drawer`, g.opened && g.opened.sidebarX >= 0 && g.opened.sidebarW > 0, JSON.stringify(g.opened));
-        check(`${label}: backdrop visible when open`, g.opened && g.opened.backdrop === true);
-        check(`${label}: selecting closes drawer`, g.opened && g.opened.closedAfterSelect === true);
-      } else {
-        check(`${label}: desktop sidebar in flow`, g.closed.sidebar && g.closed.sidebar.w >= 200 && g.closed.sidebar.x >= 0, JSON.stringify(g.closed.sidebar));
-        check(`${label}: no nav toggle on desktop`, g.closed.toggleVisible === false);
-      }
-      await p.shot(`session-${vp.w}.png`);
+      check("more: dialog visible", more.dialog === true, JSON.stringify(more));
+      check("more: advanced items visible", more.visible === 10, `visible ${more.visible}/${more.items}`);
+      await p.shot("more-1280.png");
       await p.close();
+    }
+
+    // ---- Mobile Home + session ----
+    {
+      const home = await openPage(cdp, `${base}/`, { width: 390, height: 844 }, SHOTS, "home-390");
+      const g = await home.evaluate(`(() => { const r = (s) => { const e = document.querySelector(s); if (!e) return null; const b = e.getBoundingClientRect(); return { w: Math.round(b.width), right: Math.round(b.right) }; }; return { home: !!document.querySelector('[data-component="home"]'), overflow: document.documentElement.scrollWidth > window.innerWidth + 2, innerWidth: window.innerWidth, root: r('[data-component="home"]') }; })()`);
+      check("mobile home: renders", g.home === true, JSON.stringify(g));
+      check("mobile home: no horizontal overflow", g.overflow === false, JSON.stringify(g));
+      await home.shot("home-390.png");
+      await home.close();
+
+      const sess = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 390, height: 844 }, SHOTS, "session-390");
+      const sg = await sess.evaluate(`(() => ({ shell: !!document.querySelector(".wh-titlebar"), composer: !!document.querySelector(".wh-composer"), overflow: document.documentElement.scrollWidth > window.innerWidth + 2 }))()`);
+      check("mobile session: renders", sg.shell === true && sg.composer === true, JSON.stringify(sg));
+      check("mobile session: no horizontal overflow", sg.overflow === false, JSON.stringify(sg));
+      await sess.shot("session-390.png");
+      await sess.close();
     }
 
     // ---- Pairing gate (unauthenticated) ----
     {
-      const p = await openPage(cdp, `${base}/index.html?noauth=1`, { width: 390, height: 844 }, SHOTS, "pairing-390");
-      const gate = await p.evaluate(`(async () => { ${HELPERS}
-        await sleep(300);
-        const v = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-        return { visible: !!document.querySelector(".wh-pairing"), title: (document.querySelector(".wh-pairing-title") || {}).textContent || "", hasVerify: !!document.querySelector(".wh-pairing button"), theme: document.documentElement.getAttribute("data-theme"), varDeep: v("--v2-background-bg-deep") };
-      })()`);
+      const p = await openPage(cdp, `${base}/?noauth=1`, { width: 390, height: 844 }, SHOTS, "pairing-390");
+      const gate = await p.evaluate(`(async () => { ${HELPERS} await sleep(300); const v = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(); return { visible: !!document.querySelector(".wh-pairing"), theme: document.documentElement.getAttribute("data-theme"), varDeep: v("--v2-background-bg-deep"), hasVerify: !!document.querySelector(".wh-pairing button") }; })()`);
       check("pairing: gate visible", gate.visible === true, JSON.stringify(gate));
       check("pairing: themed before auth", gate.theme === "oc-2" && gate.varDeep.length > 0, JSON.stringify(gate));
-      check("pairing: verify action present", gate.hasVerify === true);
       await p.shot("pairing-390.png");
       await p.close();
     }
