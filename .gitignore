@@ -57,6 +57,9 @@ local.properties
 .env.*
 !.env.example
 
+# Tooling
+.codegraph/
+
 # IDE
 .idea/
 .vscode/
