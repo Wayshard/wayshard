@@ -135,13 +135,18 @@ func TestConfigRootSyntaxRejects(t *testing.T) {
 }
 
 func TestConfigRootUserPolicy(t *testing.T) {
-	reject := []string{".", "./", ".ssh", ".aws", ".gnupg", ".kube", ".config", ".local", ".cache", "Downloads", "Documents/notes", "..", "/etc"}
+	bases := platformConfigBases()
+	if len(bases) == 0 {
+		t.Fatal("no platform config bases")
+	}
+	base := bases[0]
+	reject := []string{".", "./", ".ssh", ".aws", ".gnupg", ".kube", "Downloads", "Documents/notes", "..", "/etc", base}
 	for _, p := range reject {
 		if err := validateRootPolicy(p, true); err == nil {
 			t.Fatalf("user root %q accepted", p)
 		}
 	}
-	accept := []string{".myagent", ".opencode/bin", ".config/myagent", ".local/share/myagent", ".local/state/myagent", ".cache/myagent"}
+	accept := []string{".myagent", ".opencode/bin", filepath.ToSlash(filepath.Join(base, "myagent"))}
 	for _, p := range accept {
 		if err := validateRootPolicy(p, true); err != nil {
 			t.Fatalf("user root %q rejected: %v", p, err)
@@ -193,8 +198,12 @@ func TestResolveRootSafeSymlinkEscape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("in-home symlink rejected: %v", err)
 	}
-	if got != real {
-		t.Fatalf("resolved = %q, want %q", got, real)
+	want := real
+	if rp, rerr := filepath.EvalSymlinks(real); rerr == nil {
+		want = rp
+	}
+	if got != want {
+		t.Fatalf("resolved = %q, want %q", got, want)
 	}
 	// Symlink onto a sensitive location is rejected.
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
@@ -226,8 +235,12 @@ func TestWellKnownSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := expandHomePattern(home, ".realwk")
-	if len(got) != 1 || got[0] != real {
-		t.Fatalf("in-home well_known dir = %v, want [%s]", got, real)
+	want := real
+	if rp, rerr := filepath.EvalSymlinks(real); rerr == nil {
+		want = rp
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("in-home well_known dir = %v, want [%s]", got, want)
 	}
 }
 

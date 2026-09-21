@@ -706,12 +706,18 @@ func resolveRootSafe(home, r string) (string, error) {
 	if home == "" {
 		return "", fmt.Errorf("home is unknown")
 	}
-	p := filepath.Join(home, r)
-	rel, err := filepath.Rel(home, p)
+	// Canonicalize the home base once: platform temp/home paths may themselves
+	// contain symlinks or short names (for example macOS /var -> /private/var).
+	base := home
+	if rp, err := filepath.EvalSymlinks(home); err == nil {
+		base = rp
+	}
+	p := filepath.Join(base, r)
+	rel, err := filepath.Rel(base, p)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("root %q escapes the home directory", r)
 	}
-	cur := home
+	cur := base
 	for _, comp := range strings.Split(filepath.ToSlash(r), "/") {
 		if comp == "" || comp == "." {
 			continue
@@ -729,7 +735,7 @@ func resolveRootSafe(home, r string) (string, error) {
 			if terr != nil {
 				return "", terr
 			}
-			trel, rerr := filepath.Rel(home, target)
+			trel, rerr := filepath.Rel(base, target)
 			if rerr != nil || trel == ".." || strings.HasPrefix(trel, ".."+string(os.PathSeparator)) {
 				return "", fmt.Errorf("symlink %q escapes the home directory", next)
 			}
@@ -741,7 +747,7 @@ func resolveRootSafe(home, r string) (string, error) {
 		}
 		cur = next
 	}
-	if finalRel, ferr := filepath.Rel(home, cur); ferr == nil && sensitiveRel(finalRel) {
+	if finalRel, ferr := filepath.Rel(base, cur); ferr == nil && sensitiveRel(finalRel) {
 		return "", fmt.Errorf("root %q resolves to a sensitive location", r)
 	}
 	return cur, nil
