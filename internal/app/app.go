@@ -204,11 +204,11 @@ func (s *storeCandidates) Refresh(ctx context.Context) error {
 	if s.Catalog != nil {
 		defs = s.Catalog.EnabledForPlatform(runtime.GOOS)
 	}
-	found, err := harness.Discover(ctx, harness.DiscoverOptions{
-		Probe:       true,
-		Owners:      harness.StoreProbeOwnerSink{Store: s.Store},
-		Definitions: defs,
-	})
+	opts := harness.DefaultDiscoverOptions()
+	opts.Probe = true
+	opts.Owners = harness.StoreProbeOwnerSink{Store: s.Store}
+	opts.Definitions = defs
+	found, err := harness.Discover(ctx, opts)
 	if err != nil {
 		return err
 	}

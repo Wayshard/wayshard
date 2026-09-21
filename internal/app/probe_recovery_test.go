@@ -113,10 +113,11 @@ func TestProcessBoundaryProbeDescendantReconciled(t *testing.T) {
 		}
 	})
 
-	// Wait for the daemonized probe descendant. The window is short: the
-	// version probe timeout is at most 3s.
+	// Wait for the daemonized probe descendant. Discovery probes the effective
+	// catalog (including real installed harnesses) before the fake fixture, so
+	// allow for several probes plus the login-shell PATH probe.
 	var probePids []int
-	deadline := time.Now().Add(2500 * time.Millisecond)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		probePids = pgrepPids(marker)
 		if len(probePids) > 0 {

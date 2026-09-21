@@ -88,6 +88,32 @@ func HarnessEnv(syntheticHome, syntheticTemp string, add map[string]string) []st
 	return BuildEnv(ClassHarness, m)
 }
 
+// probeExcludedEnv lists ambient harness-configuration keys that a real harness
+// run may inherit but an untrusted discovery probe must not: a probe runs with a
+// synthetic HOME and must not read the user's real harness configuration.
+var probeExcludedEnv = map[string]struct{}{
+	"OPENCODE_CONFIG": {}, "OPENCODE_CONFIG_DIR": {}, "XDG_CONFIG_HOME": {},
+	"XDG_DATA_HOME": {}, "XDG_CACHE_HOME": {}, "CODEX_HOME": {},
+}
+
+// ProbeEnv returns an environment for an untrusted discovery probe: a harness
+// environment with all ambient harness-configuration keys removed.
+func ProbeEnv(syntheticHome, syntheticTemp string, add map[string]string) []string {
+	env := HarnessEnv(syntheticHome, syntheticTemp, add)
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			k = kv[:i]
+		}
+		if _, bad := probeExcludedEnv[k]; bad {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // ToolEnv returns an environment for a tool/validation process.
 func ToolEnv(syntheticHome, syntheticTemp string, scoped map[string]string) []string {
 	m := map[string]string{}

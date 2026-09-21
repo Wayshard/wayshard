@@ -33,6 +33,22 @@ func realGitRun(t *testing.T, dir string, args ...string) string {
 	return string(b)
 }
 
+// realPreIntegrateCheck asserts the source tree does not yet contain the agent
+// artifact at the moment integration runs.
+type realPreIntegrateCheck struct {
+	inner interface {
+		Integrate(context.Context, domain.Run, *domain.WorkspaceRecord) (*domain.Integration, error)
+	}
+	src         string
+	sourceClean bool
+}
+
+func (p *realPreIntegrateCheck) Integrate(ctx context.Context, run domain.Run, ws *domain.WorkspaceRecord) (*domain.Integration, error) {
+	_, err := os.Stat(filepath.Join(p.src, "AGENT_RESULT.txt"))
+	p.sourceClean = os.IsNotExist(err)
+	return p.inner.Integrate(ctx, run, ws)
+}
+
 // TestRealHarnessSourceChangingE2E is the Pass 1C-2 milestone: a real installed
 // ACP harness (OpenCode) completes a real source-changing task through the full
 // Wayshard control plane with secure provider networking. Native/local only.
@@ -129,14 +145,15 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 		t.Logf("discovered candidate: %s/%s health=%s network=%s transport=%s model=%s",
 			c.Harness.DefinitionID, c.Harness.Executable, c.Harness.Health, c.Network, c.ProviderTransport, c.ModelID)
 		if c.Harness.DefinitionID == "opencode" && c.Network == domain.NetworkProvider &&
-			c.ProviderTransport == domain.TransportHTTPProxy && c.ModelID == model {
+			c.ProviderTransport == domain.TransportHTTPProxy && c.ModelID == model &&
+			c.Harness.Health == domain.HarnessReady {
 			foundReady = true
 		}
 	}
 	if !foundReady {
 		t.Fatalf("discovery did not produce a route-viable OpenCode candidate: %+v", cands)
 	}
-	spy := &preIntegrateCheck{inner: a.Engine.Integrate, src: src}
+	spy := &realPreIntegrateCheck{inner: a.Engine.Integrate, src: src, sourceClean: true}
 	a.Engine.Integrate = spy
 
 	p := &domain.Project{Name: "real-e2e", Path: src, SourceKind: "git"}

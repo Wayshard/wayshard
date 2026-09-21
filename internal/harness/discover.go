@@ -683,14 +683,14 @@ func beginProbeEnv(ctx context.Context, owners ProbeOwnerSink, kind, home, tmp s
 		add[k] = v
 	}
 	if owners == nil {
-		return sandbox.HarnessEnv(home, tmp, add), nil, nil
+		return sandbox.ProbeEnv(home, tmp, add), nil, nil
 	}
 	lease, err := owners.BeginProbe(ctx, kind)
 	if err != nil {
 		return nil, nil, err
 	}
 	add[process.TokenEnv] = lease.Token()
-	return sandbox.HarnessEnv(home, tmp, add), lease, nil
+	return sandbox.ProbeEnv(home, tmp, add), lease, nil
 }
 
 func probeSetPGID(l ProbeLease, pgid int) {
