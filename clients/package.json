@@ -3,9 +3,19 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.2",
-  "workspaces": ["sdk", "web", "tui", "desktop"],
+  "workspaces": [
+    "sdk",
+    "ui",
+    "gui",
+    "web",
+    "tui",
+    "desktop"
+  ],
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
     "build": "bun run --cwd web build"
+  },
+  "overrides": {
+    "@pierre/diffs": "1.3.0"
   }
 }

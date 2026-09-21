@@ -4,12 +4,27 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "bin": {
+    "wayshard-tui": "./src/index.tsx"
+  },
+  "exports": {
+    ".": "./src/index.tsx"
+  },
   "scripts": {
-    "start": "bun src/index.ts",
-    "typecheck": "echo tui typecheck ok",
-    "test": "bun test src/wayshard.test.ts"
+    "start": "bun src/index.tsx",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test src"
   },
   "dependencies": {
+    "@opentui/core": "^0.5.11",
+    "@opentui/keymap": "^0.5.11",
+    "@opentui/solid": "^0.5.11",
     "@wayshard/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.6.2",
+    "solid-js": "^1.9.15",
+    "typescript": "^7.0.2"
   }
 }

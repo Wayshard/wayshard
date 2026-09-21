@@ -749,3 +749,25 @@ Signing mechanics:
 - No Tauri updater plugin or updater signing keys.
 
 Wayshard-signed is not the same as trusted by Apple or Microsoft platform PKI.
+
+## Client architecture (Pass 1E)
+
+```text
+clients/
+  sdk/       @wayshard/sdk        domain types + HTTP/JSON + WebSocket events + PTY
+  ui/        @wayshard/ui         OpenCode 2 design system, copied+adapted (rebranded)
+  gui/       @wayshard/gui        shared graphical client
+             src/vendor/session-ui  OpenCode 2 session presentation, copied+adapted
+             src/app, src/wayshard  Wayshard shell, views, state, event subscription
+  web/       Vite host mounting @wayshard/gui (served by the Wayshard Server)
+  desktop/   Tauri 2 shell hosting ../../web/dist (Linux/macOS/Windows + Android)
+  tui/       OpenTUI/Solid terminal client (imported theme system)
+```
+
+The graphical client is one application; Web, Desktop and Android differ only by
+platform adapters (window chrome, clipboard, notifications, external open,
+mobile-safe layout). The TUI is a separate terminal-appropriate client built
+from the imported OpenCode terminal foundation. All clients speak only Wayshard
+domain HTTP/JSON and WebSocket APIs; none speaks ACP or OpenCode. Live updates
+use the durable event stream (`/v1/ws`) with reconnect and polling only as a
+narrow fallback.

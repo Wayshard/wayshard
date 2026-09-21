@@ -8,15 +8,18 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "bunx tsc --noEmit -p tsconfig.app.json",
-    "test": "bun test src/wayshard"
+    "test": "bun test src"
   },
   "dependencies": {
+    "@wayshard/gui": "workspace:*",
     "@wayshard/sdk": "workspace:*",
     "solid-js": "1.9.10"
   },
   "devDependencies": {
     "typescript": "5.8.2",
     "vite": "7.1.4",
-    "vite-plugin-solid": "2.11.10"
+    "vite-plugin-solid": "2.11.10",
+    "tailwindcss": "4.3.3",
+    "@tailwindcss/vite": "4.3.3"
   }
 }

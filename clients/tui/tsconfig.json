@@ -1,12 +1,21 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "strict": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
     "skipLibCheck": true,
+    "strict": true,
     "noEmit": true,
-    "jsx": "preserve"
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+    "lib": ["es2023"],
+    "types": ["bun", "node"]
   },
-  "include": ["src/wayshard.test.ts"]
+  "include": ["src"],
+  "exclude": ["**/*.test.*"]
 }

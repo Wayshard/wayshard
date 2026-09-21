@@ -484,3 +484,13 @@ github.com/Wayshard
 - Do not imply that a run is complete before required source integration.
 - Do not hide meaningful recovery or conflicts.
 - Do not turn Wayshard into a Git client, IDE, networking appliance, model credential manager, or workflow-management suite beyond the product requirements.
+
+## 21. Client source lineage (Pass 1E)
+
+The live graphical client and TUI are adapted from the imported OpenCode 2 client
+source, not recreated: the design system, theme, session/message rendering, diff
+and review surfaces, prompt composer and terminal presentation descend from
+`packages/ui` and `packages/session-ui`; the TUI descends from the OpenCode
+OpenTUI terminal client. The product is fully rebranded as Wayshard and the
+domain is Wayshard (projects → sessions → runs → stages → artifacts). See
+`docs/client-source-lineage.md`.

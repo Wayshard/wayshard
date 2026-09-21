@@ -511,3 +511,16 @@ Official artifacts are cryptographically signed with maintainer-generated keys. 
 Web ships inside Server rather than as a separate ordinary download.
 
 Third-party coding harnesses and ACP bridges are never bundled or installed by Wayshard releases.
+
+## 24. Client implementation foundation (Pass 1E)
+
+The Web, Desktop and Android clients are one shared graphical application adapted
+from the imported OpenCode 2 client source (`@wayshard/ui` design system plus the
+adapted session presentation layer), mounted by Web and hosted by Tauri 2 for
+Desktop and Android. The CLI/TUI is a full terminal client adapted from the
+imported OpenCode terminal foundation (OpenTUI/Solid), not a readline prompt.
+All clients use `@wayshard/sdk` and the Wayshard server's HTTP/JSON and WebSocket
+APIs; there is no OpenCode runtime, SDK, API or provider dependency and no
+OpenCode product branding. Source lineage is documented and verified by
+`clients/lineage.manifest.json`, `docs/client-source-lineage.md` and
+`clients/gui/src/lineage.test.ts`.

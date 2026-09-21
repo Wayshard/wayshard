@@ -205,3 +205,11 @@ Wayshard is public and MIT licensed.
 Prefer cohesive changes that preserve the architecture. Avoid speculative frameworks or abstractions unrelated to a concrete requirement. Do not add microservices where the modular Go monolith suffices. Do not add a separate database server where SQLite suffices. Do not turn extension points into mandatory complexity before the product needs them.
 
 When implementation evidence proves a canonical decision is wrong, update the relevant canonical document explicitly rather than silently drifting away from the design.
+
+## Adapted client source rules
+
+- The live graphical client and TUI are adapted from the imported OpenCode 2 client source under `third_party/opencode-v1.18.31` (provenance only). Adapted copies live under Wayshard-owned directories (`clients/ui`, `clients/gui/src/vendor/session-ui`, `clients/tui`).
+- Do not establish an upstream remote, submodule, sync workflow, or OpenCode API/runtime compatibility layer. Do not import `@opencode-ai/*` into live client source; `clients/gui/src/lineage.test.ts` fails the build if you do.
+- Keep `clients/lineage.manifest.json` and `docs/client-source-lineage.md` accurate. If you add or replace adapted source, update the manifest and the lineage test.
+- Wayshard architecture and domain always win over inherited UI structure. Adapt or replace an inherited component rather than bending the product architecture.
+- Keep the product fully rebranded; required MIT attribution stays in `NOTICE`/`THIRD_PARTY_NOTICES.md` and provenance comments.

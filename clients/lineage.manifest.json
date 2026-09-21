@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "upstream": {
+    "project": "OpenCode 2",
+    "tag": "v1.18.31",
+    "commit": "014614d35b397775e5d397a490fc72368c894ec2",
+    "vendoredPath": "third_party/opencode-v1.18.31",
+    "role": "provenance-only; never a runtime or build input of the live clients"
+  },
+  "subtrees": [
+    {
+      "upstream": "packages/ui/src",
+      "destination": "ui/src",
+      "mode": "copied+adapted",
+      "reason": "Design system: theme, tokens, styles, primitives, v2 components. Rebranded to @wayshard/ui and stripped of OpenCode product copy.",
+      "minFiles": 1500,
+      "minLoc": 30000,
+      "markers": [
+        "src/theme/index.ts",
+        "src/components/button.tsx",
+        "src/v2/components/button-v2.tsx"
+      ]
+    },
+    {
+      "upstream": "packages/session-ui/src",
+      "destination": "gui/src/vendor/session-ui",
+      "mode": "copied+adapted",
+      "reason": "Session/message/diff presentation. OpenCode SDK/core/client imports replaced with the Wayshard view-model shim; provider/server logic removed.",
+      "minFiles": 100,
+      "minLoc": 20000,
+      "markers": [
+        "components/message-part.tsx",
+        "components/session-turn.tsx",
+        "components/markdown.tsx",
+        "components/session-review.tsx"
+      ]
+    },
+    {
+      "upstream": "packages/tui/src/theme",
+      "destination": "tui/src/theme",
+      "mode": "copied+adapted",
+      "reason": "Terminal theme system and theme assets used by the Wayshard TUI.",
+      "minFiles": 30,
+      "minLoc": 0,
+      "markers": [
+        "index.ts",
+        "assets/tokyonight.json"
+      ]
+    },
+    {
+      "upstream": "packages/tui/src (structure/patterns)",
+      "destination": "tui/src/app.tsx",
+      "mode": "adapted",
+      "reason": "Terminal layout, OpenTUI/Solid rendering, key handling, dialogs, prompt input and status presentation. Domain and backend are Wayshard.",
+      "minFiles": 1,
+      "minLoc": 200,
+      "markers": [
+        "app.tsx"
+      ]
+    }
+  ],
+  "wayshardAuthored": [
+    "clients/gui/src/app",
+    "clients/gui/src/wayshard",
+    "clients/gui/src/sdk",
+    "clients/tui/src/model.ts",
+    "clients/web/src",
+    "clients/desktop/src",
+    "clients/sdk/src"
+  ],
+  "removedFromUpstream": [
+    "provider/model connection and management UI (Wayshard providers are harness-owned)",
+    "OpenCode server/session/provider contexts and sync reducers",
+    "OpenCode SDK/core/client runtime imports (replaced by @wayshard/sdk)",
+    "OpenCode desktop Electron shell (Wayshard Desktop/Android are Tauri 2)"
+  ]
+}

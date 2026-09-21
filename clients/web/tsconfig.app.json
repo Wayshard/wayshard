@@ -8,7 +8,27 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": []
+    "types": [
+      "vite/client"
+    ],
+    "paths": {
+      "@wayshard/gui/session-ui/*": [
+        "../gui/src/vendor/session-ui/*"
+      ],
+      "@wayshard/gui/*": [
+        "../gui/src/*"
+      ],
+      "@wayshard/gui": [
+        "../gui/src/index.tsx"
+      ]
+    },
+    "lib": [
+      "es2023",
+      "dom",
+      "dom.iterable"
+    ]
   },
-  "include": ["src/wayshard/app.tsx", "src/wayshard/main.tsx"]
+  "include": [
+    "src/wayshard/main.tsx"
+  ]
 }

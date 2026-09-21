@@ -8,9 +8,12 @@
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "typecheck": "echo desktop typecheck ok"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "android:init": "tauri android init",
+    "android:build": "tauri android build --apk"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.5.0"
+    "@tauri-apps/cli": "2.5.0",
+    "typescript": "5.8.2"
   }
 }

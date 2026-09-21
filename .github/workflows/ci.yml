@@ -42,23 +42,19 @@ jobs:
       - name: Install client workspace
         run: bun install --frozen-lockfile
         working-directory: clients
-      - name: Typecheck SDK
+      - name: Typecheck (sdk, ui, gui, web, tui, desktop)
         run: bun run typecheck
-        working-directory: clients/sdk
-      - name: Typecheck web
-        run: bun run typecheck
-        working-directory: clients/web
-      - name: Tests
-        run: |
-          bun run test
-        working-directory: clients/sdk
-      - name: Web tests
+        working-directory: clients
+      - name: SDK tests
         run: bun run test
-        working-directory: clients/web
+        working-directory: clients/sdk
+      - name: Graphical client tests (incl. source lineage)
+        run: bun run test
+        working-directory: clients/gui
       - name: TUI tests
         run: bun run test
         working-directory: clients/tui
-      - name: Build web
+      - name: Build web (shared graphical client)
         run: bun run build
         working-directory: clients/web
 

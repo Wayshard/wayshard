@@ -96,11 +96,13 @@ Status is `done` when code and tests exist in this repository. External-only ite
 
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
-| Web full surfaces (session/changes/files/terminal + overlays) | `clients/web/src/wayshard` | `app.test.ts`, vite build | partial (raw JSON views, polling not WS, no pairing UI, no diff viewer) |
-| CLI/TUI full client same API | `cmd/wayshard` (shipped), `clients/tui` (not packaged) | tui test, go build | partial (shipped CLI is a thin scriptable client; richer bun TUI not built by `make`/`package-go.sh`) |
-| Desktop Tauri 2 + local server provision independent of window | `clients/desktop/src-tauri` | Rust `provision_local_server`; `cargo check` | partial (GUI runtime not exercised; no Linux detach/setsid) |
-| Android is Tauri 2 of the same web client, not a custom WebView | `clients/desktop` identifier `dev.wayshard.app`, `ANDROID.md`, release `tauri android build` | CI release android job | UNVERIFIED runtime (packaging only; no device/emulator run) |
-| Shared SDK | `clients/sdk` | sdk unit test | done |
+| OpenCode-derived shared graphical client | `clients/ui` (`@wayshard/ui`, copied+adapted design system), `clients/gui` (adapted `session-ui` + Wayshard app/state) | `clients/gui/src/lineage.test.ts`, `clients/gui/src/wayshard/adapter.test.ts`, `bun run build` (web) | done |
+| Web mounts the shared graphical client | `clients/web/src/wayshard/main.tsx` → `@wayshard/gui` | vite build | done |
+| Desktop/Android Tauri 2 host the shared GUI | `clients/desktop` (`frontendDist ../../web/dist`), `ANDROID.md` | desktop `tsc` typecheck | done (packaging; on-device runtime unverified) |
+| Real OpenTUI TUI (not readline) | `clients/tui` (`@opentui/solid` + imported theme system) | `clients/tui/src/model.test.ts`; TUI launches and renders | done |
+| Shared SDK + live events | `clients/sdk` (HTTP/WS), `clients/gui/src/wayshard/state.tsx` | sdk unit test | done |
+| Live clients have no OpenCode runtime/import specifier | `clients/{sdk,ui,gui,web,tui}` | `lineage.test.ts` asserts no `@opencode-ai/` in live source | done |
+| Source lineage is verifiable | `clients/lineage.manifest.json`, `docs/client-source-lineage.md` | `lineage.test.ts` (subtree sizes/markers) | done |
 
 ## CI/CD
 
@@ -238,3 +240,14 @@ An independent audit of Pass 1D found three defects; all three are fixed in the 
 - **F3 (was P2) — stale installations remained routable.** Each installation persists the effective definition's fingerprint; `storeCandidates.Refresh` atomically replaces the persisted set with the latest discovery result (`ReplaceHarnessInstallations`), and `Candidates` excludes any row whose definition is missing, disabled or fingerprint-mismatched, re-deriving transport from the current effective definition. Covered by `TestReconcileDisabledDefinitionNotRoutable`, `TestReconcileChangedDefinitionNotRoutable`, `TestReconcileRemovedCustomDefinitionNotRoutable`, `TestReconcileTransportDerivedFromCatalogNotRow`, `TestReplaceHarnessInstallationsClearsStale`.
 
 Non-blocking items: F4 (malformed/unsupported user-catalog errors are now surfaced through the harness-definition diagnostics API), F5 (generous catalog parsing/discovery bounds), F6 (Pi homepage corrected to `github.com/badlogic/pi-mono`). Storage schema 7 adds `harness_installations.definition_fingerprint`.
+
+## P1 Pass 1E — OpenCode 2 client foundation completion
+
+The live clients are adapted from the imported OpenCode 2 client source, not recreated:
+
+- **Graphical client**: `clients/ui` is the imported OpenCode `packages/ui` design system (~1,680 files, ~34k LOC) rebranded as `@wayshard/ui`; `clients/gui/src/vendor/session-ui` is the imported `packages/session-ui` (~118 files, ~21k LOC) with OpenCode SDK/core/client imports replaced by a Wayshard view-model shim; `clients/gui/src/app` + `clients/gui/src/wayshard` are the Wayshard shell/state built on that foundation. Web (`clients/web`) mounts it; Desktop and Android (`clients/desktop`, Tauri 2) host the same build.
+- **TUI**: `clients/tui` is a real OpenTUI/Solid terminal application (`@opentui/*`) using the imported OpenCode TUI theme system/assets. The readline scaffold is gone.
+- **Domain**: `@wayshard/sdk` owns the data path (HTTP/JSON + WebSocket events + PTY); there is no OpenCode server, SDK, API, provider or executable dependency.
+- **Lineage**: `clients/lineage.manifest.json` and `docs/client-source-lineage.md` record the mapping; `clients/gui/src/lineage.test.ts` asserts the adapted subtrees remain substantial and that live source contains no `@opencode-ai/` import specifier.
+- **Branding**: live client source has no OpenCode product branding (theme names/namespaces/i18n renamed to Wayshard; provider icon identifiers and provenance comments retained); MIT attribution remains in `NOTICE`/`THIRD_PARTY_NOTICES.md`.
+- **Known incomplete**: the graphical terminal surface connects to the server-owned PTY but does not yet use the imported `ghostty-web` renderer; pairing/auth UI is basic; Context/knowledge surfaces still expose a structured debug inspector.

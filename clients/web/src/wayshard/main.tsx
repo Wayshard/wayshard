@@ -1,5 +1,7 @@
-import { render } from "solid-js/web";
-import { App } from "./app";
-import "./app.css";
+// Wayshard Web entry point. Web mounts the same shared graphical client that
+// Desktop (Tauri 2) and Android (Tauri 2) host.
+import { render } from "solid-js/web"
+import { WayshardApp } from "@wayshard/gui"
+import "@wayshard/gui/styles"
 
-render(() => <App />, document.getElementById("root")!);
+render(() => <WayshardApp />, document.getElementById("root")!)
