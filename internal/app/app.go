@@ -215,26 +215,29 @@ func (s *storeCandidates) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	next := make([]domain.HarnessInstallation, 0, len(found))
 	for _, inst := range found {
 		caps, _ := json.Marshal(inst.Capabilities)
-		h := &domain.HarnessInstallation{
+		next = append(next, domain.HarnessInstallation{
 			ID: inst.ID, DefinitionID: inst.DefinitionID, DisplayName: inst.DisplayName,
 			Executable: inst.Executable, Version: inst.Version, Adapter: "generic",
 			Health: inst.Health, Compatibility: inst.Compatibility, Isolation: inst.Isolation,
 			AuthStatus: inst.AuthStatus, CapabilitiesJSON: string(caps),
 			Notes:                   strings.Join(inst.Notes, "; "),
 			DefinitionSource:        string(inst.DefinitionSource),
+			DefinitionFingerprint:   inst.DefinitionFingerprint,
 			BridgeExecutable:        inst.BridgeExecutable,
 			BridgePresent:           inst.BridgePresent,
 			ACPStatus:               inst.ACPStatus,
 			BlockingReason:          inst.BlockingReason,
-			ProviderTransport:       harness.VerifiedTransport(inst.DefinitionID),
+			ProviderTransport:       inst.ProviderTransport,
 			ModelSelection:          inst.ModelSelection,
 			RequiresProviderNetwork: inst.RequiresProviderNetwork,
-		}
-		_ = s.Store.UpsertHarnessInstallation(ctx, h)
+		})
 	}
-	return nil
+	// Replace the persisted set atomically so routing can never observe an
+	// installation from a previous catalog or discovery run.
+	return s.Store.ReplaceHarnessInstallations(ctx, next)
 }
 
 func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, error) {
@@ -244,6 +247,18 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 	}
 	var out []routing.Candidate
 	for _, h := range list {
+		// Current candidate state comes only from the latest effective catalog.
+		// A row whose definition is missing, disabled, or whose execution
+		// fingerprint no longer matches is stale and is never routable.
+		if s.Catalog != nil {
+			def, ok := s.Catalog.ByID(h.DefinitionID)
+			if !ok || !def.Enabled || def.ExecutionFingerprint() == "" || def.ExecutionFingerprint() != h.DefinitionFingerprint {
+				continue
+			}
+			// Provider transport trust is derived from the current effective
+			// definition, never from the persisted row.
+			h.ProviderTransport = harness.VerifiedTransport(def)
+		}
 		network := domain.NetworkNone
 		if h.RequiresProviderNetwork {
 			network = domain.NetworkProvider
@@ -272,6 +287,12 @@ func loadHarnessCatalog(log *slog.Logger, path string) *harness.Catalog {
 			log.Error("harness catalog", "err", err)
 		}
 		cat = harness.ShippedCatalog()
+		// Surface the failure through the diagnostics API rather than log-only
+		// fallback, so a malformed/unsupported user catalog is visible.
+		cat.Diagnostics = append(cat.Diagnostics, harness.CatalogDiagnostic{
+			Source:  "user",
+			Message: "user harness catalog rejected: " + err.Error(),
+		})
 	}
 	if log != nil {
 		for _, d := range cat.Diagnostics {

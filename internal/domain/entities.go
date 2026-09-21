@@ -234,6 +234,7 @@ type HarnessInstallation struct {
 
 	// Catalog discovery diagnostics.
 	DefinitionSource        string            `json:"definitionSource,omitempty"`
+	DefinitionFingerprint   string            `json:"definitionFingerprint,omitempty"`
 	BridgeExecutable        string            `json:"bridgeExecutable,omitempty"`
 	BridgePresent           bool              `json:"bridgePresent"`
 	ACPStatus               string            `json:"acpStatus,omitempty"`

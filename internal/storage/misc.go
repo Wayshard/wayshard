@@ -238,8 +238,40 @@ func (s *Store) UpsertHarnessInstallation(ctx context.Context, h *domain.Harness
 	if h.LastProbedAt.IsZero() {
 		h.LastProbedAt = time.Now().UTC()
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO harness_installations(id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	return insertHarnessInstallation(ctx, s.DB, h)
+}
+
+// ReplaceHarnessInstallations atomically replaces the persisted installation
+// set with the latest discovery result. Routing never observes a stale
+// installation from a previous catalog or a previous discovery run.
+func (s *Store) ReplaceHarnessInstallations(ctx context.Context, list []domain.HarnessInstallation) error {
+	return s.WithTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM harness_installations`); err != nil {
+			return err
+		}
+		for i := range list {
+			h := list[i]
+			if h.ID == "" {
+				h.ID = id.New()
+			}
+			if h.LastProbedAt.IsZero() {
+				h.LastProbedAt = time.Now().UTC()
+			}
+			if err := insertHarnessInstallation(ctx, tx, &h); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+type sqlExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func insertHarnessInstallation(ctx context.Context, ex sqlExecer, h *domain.HarnessInstallation) error {
+	_, err := ex.ExecContext(ctx, `INSERT INTO harness_installations(id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network, definition_fingerprint)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(executable) DO UPDATE SET
 			display_name = excluded.display_name,
 			version = excluded.version,
@@ -259,9 +291,10 @@ func (s *Store) UpsertHarnessInstallation(ctx context.Context, h *domain.Harness
 			blocking_reason = excluded.blocking_reason,
 			provider_transport = excluded.provider_transport,
 			model_selection = excluded.model_selection,
-			requires_provider_network = excluded.requires_provider_network`,
+			requires_provider_network = excluded.requires_provider_network,
+			definition_fingerprint = excluded.definition_fingerprint`,
 		h.ID, h.DefinitionID, h.DisplayName, h.Executable, h.Version, h.Adapter, string(h.Health), string(h.Compatibility), string(h.Isolation), h.AuthStatus, h.CapabilitiesJSON, h.ModelsJSON, h.LastProbedAt.Format(time.RFC3339Nano), h.Notes,
-		h.DefinitionSource, h.BridgeExecutable, boolInt(h.BridgePresent), h.ACPStatus, h.BlockingReason, string(h.ProviderTransport), h.ModelSelection, boolInt(h.RequiresProviderNetwork))
+		h.DefinitionSource, h.BridgeExecutable, boolInt(h.BridgePresent), h.ACPStatus, h.BlockingReason, string(h.ProviderTransport), h.ModelSelection, boolInt(h.RequiresProviderNetwork), h.DefinitionFingerprint)
 	return err
 }
 
@@ -273,7 +306,7 @@ func boolInt(b bool) int {
 }
 
 func (s *Store) ListHarnessInstallations(ctx context.Context) ([]domain.HarnessInstallation, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network FROM harness_installations ORDER BY display_name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network, definition_fingerprint FROM harness_installations ORDER BY display_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +317,7 @@ func (s *Store) ListHarnessInstallations(ctx context.Context) ([]domain.HarnessI
 		var health, compat, iso, probed string
 		var bridgePresent, requiresProvider int
 		if err := rows.Scan(&h.ID, &h.DefinitionID, &h.DisplayName, &h.Executable, &h.Version, &h.Adapter, &health, &compat, &iso, &h.AuthStatus, &h.CapabilitiesJSON, &h.ModelsJSON, &probed, &h.Notes,
-			&h.DefinitionSource, &h.BridgeExecutable, &bridgePresent, &h.ACPStatus, &h.BlockingReason, &h.ProviderTransport, &h.ModelSelection, &requiresProvider); err != nil {
+			&h.DefinitionSource, &h.BridgeExecutable, &bridgePresent, &h.ACPStatus, &h.BlockingReason, &h.ProviderTransport, &h.ModelSelection, &requiresProvider, &h.DefinitionFingerprint); err != nil {
 			return nil, err
 		}
 		h.Health = domain.HarnessHealth(health)

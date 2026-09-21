@@ -348,16 +348,23 @@ func (e *ACPExec) policyFor(req orchestrator.StageRequest, cwd, tmp, realHome st
 	} else {
 		pol = sandbox.HarnessPolicy(cwd, tmp)
 	}
-	// Config roots are catalog-declared and home-relative; the catalog validator
-	// rejects absolute paths and "..", so a definition cannot widen host access.
+	// Config roots are catalog-declared and home-relative. Shipped roots are
+	// trusted product configuration; user-supplied roots are additionally
+	// restricted by the catalog validator. Both are canonicalized here so a
+	// user-controlled symlink cannot escape HOME or resolve onto a sensitive
+	// location before the root is granted.
 	for _, r := range def.ConfigRoots {
 		if realHome == "" {
 			continue
 		}
-		p := filepath.Join(realHome, r)
-		if _, err := os.Stat(p); err == nil {
-			pol.ReadWriteRoots = append(pol.ReadWriteRoots, p)
+		p, err := resolveRootSafe(realHome, r)
+		if err != nil {
+			continue
 		}
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		pol.ReadWriteRoots = append(pol.ReadWriteRoots, p)
 	}
 	// A script/symlink harness needs its package tree and interpreter readable
 	// (read-only) to launch; this is scoped to the harness's own package.

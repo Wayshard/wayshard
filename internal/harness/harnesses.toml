@@ -280,7 +280,7 @@ transport = "unknown"
 [[harness]]
 id = "pi"
 display_name = "Pi"
-homepage = "https://github.com/svkozak/pi-acp"
+homepage = "https://github.com/badlogic/pi-mono"
 executables = ["pi"]
 bridges = ["pi-acp"]
 version_args = ["--version"]

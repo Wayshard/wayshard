@@ -66,6 +66,13 @@ type Installation struct {
 	DeclaredTransport       string
 	ConfigRoots             []string
 	ACPRequiresLoopback     bool
+	// DefinitionFingerprint is the execution fingerprint of the effective
+	// definition that produced this installation. A persisted installation is
+	// only current while the fingerprint still matches the effective catalog.
+	DefinitionFingerprint string
+	// ProviderTransport is the verified provider transport for the effective
+	// definition (fingerprint-bound, not id-bound).
+	ProviderTransport domain.ProviderTransport
 }
 
 // ACPArgs returns the argv used to speak ACP for this installation.

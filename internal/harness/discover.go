@@ -225,6 +225,8 @@ func baseInstallation(def Definition, acpExe, cliExe, bridgeExe string) Installa
 		DeclaredTransport:       def.DeclaredTransport,
 		ConfigRoots:             append([]string{}, def.ConfigRoots...),
 		ACPRequiresLoopback:     def.ACPRequiresLoopback,
+		DefinitionFingerprint:   def.ExecutionFingerprint(),
+		ProviderTransport:       VerifiedTransport(def),
 	}
 	if inst.DisplayName == "" {
 		inst.DisplayName = def.ID
@@ -571,16 +573,37 @@ func wellKnownBinDirs(home string) []string {
 
 // expandHomePattern resolves a catalog-declared home-relative well-known path.
 // A glob pattern (for example `.nvm/versions/node/*/bin`) expands within HOME
-// only; the catalog validator rejects absolute paths and `..`.
+// only; the catalog validator rejects absolute paths and `..`. Every resolved
+// directory must remain beneath HOME after symlink resolution, so a symlinked
+// search root cannot become an arbitrary filesystem search grant.
 func expandHomePattern(home, rel string) []string {
+	var candidates []string
 	p := filepath.Join(home, rel)
 	if strings.ContainsAny(rel, "*?[") {
-		if m, err := filepath.Glob(p); err == nil {
-			return m
+		m, err := filepath.Glob(p)
+		if err != nil {
+			return nil
 		}
-		return nil
+		if len(m) > maxGlobMatches {
+			m = m[:maxGlobMatches]
+		}
+		candidates = m
+	} else {
+		candidates = []string{p}
 	}
-	return []string{p}
+	var out []string
+	for _, c := range candidates {
+		cr, err := filepath.Rel(home, c)
+		if err != nil {
+			continue
+		}
+		rp, err := resolveRootSafe(home, cr)
+		if err != nil {
+			continue
+		}
+		out = append(out, rp)
+	}
+	return out
 }
 
 func splitPATH(p string) []string {

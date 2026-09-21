@@ -1,13 +1,17 @@
 package harness
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 
@@ -19,6 +23,21 @@ var shippedCatalogTOML string
 
 // CatalogSchemaVersion is the supported harness catalog schema version.
 const CatalogSchemaVersion = 1
+
+// Resource bounds for a manually edited user catalog. They are generous for
+// real users and only guard against an accidentally or deliberately unbounded
+// catalog causing excessive startup work. They are not a quota framework.
+const (
+	maxUserCatalogBytes   = 1 << 20 // 1 MiB
+	maxCatalogDefinitions = 512
+	maxListEntries        = 64
+	maxArgEntries         = 128
+	maxGlobMatches        = 256
+)
+
+// executionIdentityVersion is part of the execution fingerprint so a future
+// change to the fingerprinted field set is an explicit version bump.
+const executionIdentityVersion = "wayshard-harness-exec-v1"
 
 // DefinitionSource identifies where an effective definition came from.
 type DefinitionSource string
@@ -56,6 +75,65 @@ type Definition struct {
 	DeclaredTransport       string // none|http_proxy|unknown (declared requirement)
 
 	Source DefinitionSource
+
+	// configRootsUser/wellKnownUser record whether the user catalog supplied
+	// these fields. Shipped definitions are trusted product configuration; a
+	// user-supplied value is an untrusted capability request and must satisfy a
+	// stricter policy.
+	configRootsUser bool
+	wellKnownUser   bool
+}
+
+// executionIdentity is the canonical, versioned serialization of the fields
+// that materially change what a harness launches or how it behaves. Cosmetic
+// metadata (display_name, homepage) and bookkeeping (enabled, source) are
+// excluded.
+type executionIdentity struct {
+	Version                 string   `json:"version"`
+	Executables             []string `json:"executables"`
+	Bridges                 []string `json:"bridges"`
+	WellKnown               []string `json:"well_known"`
+	VersionArgs             []string `json:"version_args"`
+	ACP                     string   `json:"acp"`
+	ACPArgs                 []string `json:"acp_args"`
+	BridgeArgs              []string `json:"bridge_args"`
+	ACPRequiresLoopback     bool     `json:"acp_requires_loopback"`
+	InterposeCommands       bool     `json:"interpose_commands"`
+	ModelSelection          string   `json:"model_selection"`
+	ConfigRoots             []string `json:"config_roots"`
+	Platforms               []string `json:"platforms"`
+	RequiresProviderNetwork bool     `json:"requires_provider_network"`
+	DeclaredTransport       string   `json:"transport"`
+}
+
+// ExecutionFingerprint returns a deterministic SHA-256 over the definition's
+// execution-relevant fields. Two definitions with the same execution semantics
+// produce the same fingerprint regardless of TOML key order; any material
+// change produces a different one.
+func (d Definition) ExecutionFingerprint() string {
+	ident := executionIdentity{
+		Version:                 executionIdentityVersion,
+		Executables:             d.Executables,
+		Bridges:                 d.Bridges,
+		WellKnown:               d.WellKnown,
+		VersionArgs:             d.VersionArgs,
+		ACP:                     d.ACP,
+		ACPArgs:                 d.ACPArgs,
+		BridgeArgs:              d.BridgeArgs,
+		ACPRequiresLoopback:     d.ACPRequiresLoopback,
+		InterposeCommands:       d.InterposeCommands,
+		ModelSelection:          d.ModelSelection,
+		ConfigRoots:             d.ConfigRoots,
+		Platforms:               d.Platforms,
+		RequiresProviderNetwork: d.RequiresProviderNetwork,
+		DeclaredTransport:       d.DeclaredTransport,
+	}
+	b, err := json.Marshal(ident)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // CatalogDiagnostic is a per-entry catalog problem. Non-fatal diagnostics leave
@@ -147,6 +225,9 @@ func LoadCatalog(userPath string) (*Catalog, error) {
 		}
 		return nil, fmt.Errorf("user harness catalog %s: %w", userPath, err)
 	}
+	if len(b) > maxUserCatalogBytes {
+		return nil, fmt.Errorf("user harness catalog %s: %d bytes exceeds the %d-byte limit", userPath, len(b), maxUserCatalogBytes)
+	}
 	return buildCatalog(shippedCatalogTOML, string(b))
 }
 
@@ -159,21 +240,45 @@ func ShippedCatalog() *Catalog {
 	return cat
 }
 
-// VerifiedTransport returns Wayshard's evidence-based provider transport for a
-// definition. It is deliberately Wayshard-owned and not user-configurable: a
-// user catalog entry cannot mark an unverified transport as trusted. Unknown
-// definitions fail closed (TransportUnknown).
-func VerifiedTransport(defID string) domain.ProviderTransport {
-	if t, ok := verifiedProviderTransports[defID]; ok {
-		return t
-	}
-	return domain.TransportUnknown
+var (
+	shippedOnce sync.Once
+	shippedVal  *Catalog
+)
+
+// shippedCatalog returns the parsed shipped catalog, cached. It is the trusted
+// reference used for provider-transport verification.
+func shippedCatalog() *Catalog {
+	shippedOnce.Do(func() { shippedVal = ShippedCatalog() })
+	return shippedVal
 }
 
-// verifiedProviderTransports lists harness definitions whose real provider
-// traffic has been observed traversing the secure broker. It is a verification
-// record, not a discovery catalog: adding a harness to the discovery catalog
-// does not grant it provider transport trust.
+// VerifiedTransport returns Wayshard's evidence-based provider transport for an
+// effective definition. Verification binds to the definition's execution
+// fingerprint: the id is only an identity label. A definition receives verified
+// transport only when its execution identity matches the trusted shipped
+// definition exactly, so a user override that changes the executable, ACP mode,
+// args, loopback/interposition behavior, config roots or discovery data loses
+// trust and fails closed (TransportUnknown).
+func VerifiedTransport(def Definition) domain.ProviderTransport {
+	t, ok := verifiedProviderTransports[def.ID]
+	if !ok {
+		return domain.TransportUnknown
+	}
+	shipped, ok := shippedCatalog().ByID(def.ID)
+	if !ok {
+		return domain.TransportUnknown
+	}
+	if def.ExecutionFingerprint() == "" || def.ExecutionFingerprint() != shipped.ExecutionFingerprint() {
+		return domain.TransportUnknown
+	}
+	return t
+}
+
+// verifiedProviderTransports lists shipped harness definitions whose real
+// provider traffic has been observed traversing the secure broker. It is a
+// verification record, not a discovery catalog: adding a harness to the
+// discovery catalog does not grant it provider transport trust, and a user
+// override does not inherit trust merely by reusing an id.
 var verifiedProviderTransports = map[string]domain.ProviderTransport{
 	"opencode":          domain.TransportHTTPProxy,
 	"codex":             domain.TransportHTTPProxy,
@@ -219,11 +324,13 @@ func buildCatalog(shippedText, userText string) (*Catalog, error) {
 			continue
 		}
 		src := SourceShipped
+		var userKeys map[string]bool
 		if user, has := userByID[e.id]; has {
 			fields = mergeFields(fields, user)
 			src = SourceOverridden
+			userKeys = keysOf(user)
 		}
-		def, diags := decodeDefinition(e.id, fields, src)
+		def, diags := decodeDefinition(e.id, fields, src, userKeys)
 		cat.Diagnostics = append(cat.Diagnostics, diags...)
 		if diags == nil {
 			cat.Definitions = append(cat.Definitions, def)
@@ -234,13 +341,21 @@ func buildCatalog(shippedText, userText string) (*Catalog, error) {
 		if seen[id] {
 			continue
 		}
-		def, diags := decodeDefinition(id, userByID[id], SourceUser)
+		def, diags := decodeDefinition(id, userByID[id], SourceUser, keysOf(userByID[id]))
 		cat.Diagnostics = append(cat.Diagnostics, diags...)
 		if diags == nil {
 			cat.Definitions = append(cat.Definitions, def)
 		}
 	}
 	return cat, nil
+}
+
+func keysOf(m map[string]any) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for k := range m {
+		out[k] = true
+	}
+	return out
 }
 
 type rawEntry struct {
@@ -264,6 +379,9 @@ func parseCatalogSource(source, text string) ([]rawEntry, error) {
 	}
 	if *rf.SchemaVersion != CatalogSchemaVersion {
 		return nil, fmt.Errorf("unsupported schema_version %d (expected %d)", *rf.SchemaVersion, CatalogSchemaVersion)
+	}
+	if len(rf.Harness) > maxCatalogDefinitions {
+		return nil, fmt.Errorf("catalog defines %d harnesses, exceeding the %d limit", len(rf.Harness), maxCatalogDefinitions)
 	}
 	_ = md
 	var out []rawEntry
@@ -299,7 +417,7 @@ var (
 	validPlatfs = map[string]struct{}{"linux": {}, "darwin": {}, "windows": {}}
 )
 
-func decodeDefinition(id string, m map[string]any, source DefinitionSource) (Definition, []CatalogDiagnostic) {
+func decodeDefinition(id string, m map[string]any, source DefinitionSource, userKeys map[string]bool) (Definition, []CatalogDiagnostic) {
 	d := Definition{ID: id, Enabled: true, Source: source, ModelSelection: "none", DeclaredTransport: "unknown"}
 	var diags []CatalogDiagnostic
 	fail := func(field, msg string) {
@@ -308,6 +426,8 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource) (Def
 	if !idRe.MatchString(id) {
 		fail("id", "must match ^[a-z0-9][a-z0-9-]*$")
 	}
+	d.configRootsUser = userKeys["config_roots"]
+	d.wellKnownUser = userKeys["well_known"]
 	for k, v := range m {
 		switch k {
 		case "id":
@@ -358,6 +478,25 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource) (Def
 	if diags != nil {
 		return Definition{}, diags
 	}
+	// Bounds.
+	for _, l := range []struct {
+		field string
+		lim   int
+		list  []string
+	}{
+		{"executables", maxListEntries, d.Executables},
+		{"bridges", maxListEntries, d.Bridges},
+		{"well_known", maxListEntries, d.WellKnown},
+		{"version_args", maxListEntries, d.VersionArgs},
+		{"acp_args", maxArgEntries, d.ACPArgs},
+		{"bridge_args", maxArgEntries, d.BridgeArgs},
+		{"config_roots", maxListEntries, d.ConfigRoots},
+		{"platforms", maxListEntries, d.Platforms},
+	} {
+		if len(l.list) > l.lim {
+			fail(l.field, fmt.Sprintf("has %d entries, exceeding the %d limit", len(l.list), l.lim))
+		}
+	}
 	// Security and consistency validation.
 	for _, name := range append(append([]string{}, d.Executables...), d.Bridges...) {
 		if !execNameRe.MatchString(name) {
@@ -368,12 +507,20 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource) (Def
 		}
 	}
 	for _, root := range d.WellKnown {
-		if err := validateHomeRelative(root); err != nil {
+		if err := validateRootSyntax(root); err != nil {
+			fail("well_known", err.Error())
+			continue
+		}
+		if err := validateRootPolicy(root, d.wellKnownUser); err != nil {
 			fail("well_known", err.Error())
 		}
 	}
 	for _, root := range d.ConfigRoots {
-		if err := validateHomeRelative(root); err != nil {
+		if err := validateRootSyntax(root); err != nil {
+			fail("config_roots", err.Error())
+			continue
+		}
+		if err := validateRootPolicy(root, d.configRootsUser); err != nil {
 			fail("config_roots", err.Error())
 		}
 	}
@@ -450,22 +597,159 @@ func asStringList(v any, field string, fail func(string, string)) []string {
 	return out
 }
 
-// validateHomeRelative ensures a catalog path stays under the user's home and
-// cannot point at an arbitrary host root.
-func validateHomeRelative(p string) error {
+// sensitiveRootComponents are home-relative top-level directories that must
+// never be exposed to a harness through a user-supplied catalog root.
+var sensitiveRootComponents = map[string]struct{}{
+	".ssh": {}, ".aws": {}, ".gnupg": {}, ".gpg": {}, ".kube": {}, ".docker": {},
+	".netrc": {}, ".password-store": {}, ".mozilla": {}, ".pki": {}, ".m2": {},
+	".gradle": {}, ".git-credentials": {}, ".gitconfig": {}, ".npmrc": {},
+	".bashrc": {}, ".bash_profile": {}, ".profile": {}, ".zshrc": {}, ".bash_history": {},
+}
+
+// platformConfigBases returns the home-relative platform configuration/state
+// directories a user-supplied root may live beneath.
+func platformConfigBases() []string {
+	switch runtime.GOOS {
+	case "windows":
+		return []string{"AppData/Roaming", "AppData/Local", "AppData/LocalLow"}
+	case "darwin":
+		return []string{"Library/Application Support", "Library/Caches", "Library/Logs", "Library/Preferences"}
+	default:
+		return []string{".config", ".local/share", ".local/state", ".cache", ".local"}
+	}
+}
+
+func firstComponent(p string) string {
+	return strings.Split(filepath.ToSlash(p), "/")[0]
+}
+
+func isPlatformBase(p string) bool {
+	pc := filepath.ToSlash(filepath.Clean(p))
+	for _, b := range platformConfigBases() {
+		if pc == b {
+			return true
+		}
+	}
+	return false
+}
+
+func beneathPlatformBase(p string) bool {
+	pc := filepath.ToSlash(filepath.Clean(p))
+	for _, b := range platformConfigBases() {
+		if strings.HasPrefix(pc, b+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func isSensitiveRoot(p string) bool {
+	_, bad := sensitiveRootComponents[firstComponent(p)]
+	return bad
+}
+
+// validateRootSyntax rejects empty, absolute, traversal and home-root paths.
+func validateRootSyntax(p string) error {
 	if p == "" {
 		return fmt.Errorf("empty path")
 	}
 	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
 		return fmt.Errorf("path %q must be home-relative, not absolute", p)
 	}
-	if strings.Contains(p, "..") {
-		return fmt.Errorf("path %q must not contain '..'", p)
-	}
 	if len(p) >= 2 && p[1] == ':' {
 		return fmt.Errorf("path %q must not contain a drive letter", p)
 	}
+	clean := filepath.ToSlash(filepath.Clean(p))
+	if clean == "." || clean == ".." || clean == "/" || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("path %q must name a location inside the home directory", p)
+	}
+	for _, comp := range strings.Split(filepath.ToSlash(p), "/") {
+		if comp == ".." {
+			return fmt.Errorf("path %q must not contain '..'", p)
+		}
+	}
 	return nil
+}
+
+// validateRootPolicy applies the trusted/untrusted distinction. Shipped roots
+// are trusted product configuration (already narrow). User-supplied roots are
+// untrusted capability requests and must live beneath a platform
+// config/data/state/cache directory or a dot-directory, and must never be a
+// sensitive location, HOME or a platform base itself.
+func validateRootPolicy(p string, userProvided bool) error {
+	if err := validateRootSyntax(p); err != nil {
+		return err
+	}
+	if isPlatformBase(p) {
+		return fmt.Errorf("root %q is a platform directory, not a harness-specific directory", p)
+	}
+	if !userProvided {
+		return nil
+	}
+	if beneathPlatformBase(p) {
+		return nil
+	}
+	if isSensitiveRoot(p) {
+		return fmt.Errorf("user root %q is a sensitive location and is not permitted", p)
+	}
+	if strings.HasPrefix(firstComponent(p), ".") {
+		return nil
+	}
+	return fmt.Errorf("user root %q must be beneath a platform config/data/state/cache directory or a dot-directory", p)
+}
+
+// resolveRootSafe canonicalizes a home-relative root without following a
+// user-controlled symlink out of the home directory, and without resolving onto
+// a sensitive location. It returns the resolved absolute path. Non-existent
+// components are permitted (a harness may create them later).
+func resolveRootSafe(home, r string) (string, error) {
+	if home == "" {
+		return "", fmt.Errorf("home is unknown")
+	}
+	p := filepath.Join(home, r)
+	rel, err := filepath.Rel(home, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("root %q escapes the home directory", r)
+	}
+	cur := home
+	for _, comp := range strings.Split(filepath.ToSlash(r), "/") {
+		if comp == "" || comp == "." {
+			continue
+		}
+		next := filepath.Join(cur, comp)
+		fi, lerr := os.Lstat(next)
+		if lerr != nil {
+			if os.IsNotExist(lerr) {
+				return next, nil
+			}
+			return "", lerr
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			target, terr := filepath.EvalSymlinks(next)
+			if terr != nil {
+				return "", terr
+			}
+			trel, rerr := filepath.Rel(home, target)
+			if rerr != nil || trel == ".." || strings.HasPrefix(trel, ".."+string(os.PathSeparator)) {
+				return "", fmt.Errorf("symlink %q escapes the home directory", next)
+			}
+			if sensitiveRel(trel) {
+				return "", fmt.Errorf("symlink %q resolves to a sensitive location", next)
+			}
+			cur = target
+			continue
+		}
+		cur = next
+	}
+	if finalRel, ferr := filepath.Rel(home, cur); ferr == nil && sensitiveRel(finalRel) {
+		return "", fmt.Errorf("root %q resolves to a sensitive location", r)
+	}
+	return cur, nil
+}
+
+func sensitiveRel(rel string) bool {
+	_, bad := sensitiveRootComponents[firstComponent(rel)]
+	return bad
 }
 
 func platformAllowed(platforms []string, goos string) bool {

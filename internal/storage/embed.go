@@ -19,3 +19,6 @@ var migration005 string
 
 //go:embed migrations/006_harness_catalog.sql
 var migration006 string
+
+//go:embed migrations/007_harness_fingerprint.sql
+var migration007 string
