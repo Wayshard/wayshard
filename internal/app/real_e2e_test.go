@@ -109,12 +109,11 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 	// injected. To keep this test focused on the independently audited OpenCode
 	// path, disable the other shipped harnesses through the user catalog (the
 	// supported CRUD interface) so a second installed provider harness cannot be
-	// selected ahead of OpenCode.
+	// selected ahead of OpenCode. The catalog path is passed explicitly so the
+	// test never redirects XDG_CONFIG_HOME, which would also redirect OpenCode's
+	// own configuration during execution.
 	t.Setenv("PATH", filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	if err := os.MkdirAll(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "wayshard"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	catalogPath := filepath.Join(t.TempDir(), "harnesses.toml")
 	var cat strings.Builder
 	cat.WriteString("schema_version = 1\n")
 	for _, id := range []string{"codex", "claude", "grok", "gemini", "github-copilot", "cursor", "kiro",
@@ -122,7 +121,7 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 		"auggie", "amp", "pi", "omp", "wayshard-fake-acp"} {
 		fmt.Fprintf(&cat, "[[harness]]\nid = %q\nenabled = false\n\n", id)
 	}
-	if err := os.WriteFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "wayshard", "harnesses.toml"), []byte(cat.String()), 0o644); err != nil {
+	if err := os.WriteFile(catalogPath, []byte(cat.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	a, err := Open(ctx, Config{
@@ -132,7 +131,8 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 			{Host: "opencode.ai", Port: 443},
 			{Host: "models.opencode.ai", Port: 443},
 		},
-		ProviderModel: model,
+		ProviderModel:      model,
+		HarnessCatalogPath: catalogPath,
 	})
 	if err != nil {
 		t.Fatal(err)

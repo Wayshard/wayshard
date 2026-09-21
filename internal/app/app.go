@@ -58,6 +58,9 @@ type Config struct {
 	// ProviderModel is the default model id applied to provider-backed
 	// candidates that do not advertise models themselves.
 	ProviderModel string
+	// HarnessCatalogPath overrides the user harness catalog path. Empty uses the
+	// platform config location.
+	HarnessCatalogPath string
 }
 
 type App struct {
@@ -118,7 +121,7 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 	ptym := pty.New(st)
 	providerCap := provider.Detect()
 	cfg.Log.Info("provider network capability", "available", providerCap.Available, "mode", providerCap.Mode, "reason", providerCap.Reason)
-	cat := loadHarnessCatalog(cfg.Log)
+	cat := loadHarnessCatalog(cfg.Log, cfg.HarnessCatalogPath)
 	exec := &harness.ACPExec{Store: st, Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}, ProviderLog: cfg.Log, Catalog: cat}
 	orch := &orchestrator.Engine{
 		Store:                st,
@@ -262,8 +265,8 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 // loadHarnessCatalog loads the effective catalog, logging diagnostics. A
 // malformed user catalog is reported and the shipped defaults are used so a
 // bad user file cannot make the server unusable.
-func loadHarnessCatalog(log *slog.Logger) *harness.Catalog {
-	cat, err := harness.LoadCatalog("")
+func loadHarnessCatalog(log *slog.Logger, path string) *harness.Catalog {
+	cat, err := harness.LoadCatalog(path)
 	if err != nil {
 		if log != nil {
 			log.Error("harness catalog", "err", err)

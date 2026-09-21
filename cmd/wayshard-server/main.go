@@ -37,6 +37,7 @@ func main() {
 	allowProvider := flag.Bool("allow-provider-network", false, "permit provider-backed harness routes through the secure broker")
 	providerDests := flag.String("provider-destination", "", "comma-separated authorized provider endpoints host:port")
 	providerModel := flag.String("provider-model", "", "default model id for provider-backed harness routes")
+	harnessCatalog := flag.String("harness-catalog", "", "path to the user harness catalog (default: platform config dir)")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	log.Info("wayshard server", "version", version.Version, "commit", version.Commit)
@@ -51,6 +52,7 @@ func main() {
 		AllowProviderNetwork: *allowProvider,
 		ProviderDestinations: parseProviderDestinations(*providerDests),
 		ProviderModel:        *providerModel,
+		HarnessCatalogPath:   *harnessCatalog,
 	})
 	if err != nil {
 		log.Error("open", "err", err)
