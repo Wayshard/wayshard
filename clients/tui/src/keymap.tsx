@@ -59,7 +59,5 @@ export function useWayshardModeStack(): ModeStack {
   }
 }
 
-// Retained alias so adapted OpenCode TUI source resolves without churn.
-export const useOpencodeModeStack = useWayshardModeStack
 
 export { onCleanup }
