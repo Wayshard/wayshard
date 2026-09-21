@@ -757,7 +757,7 @@ clients/
   sdk/       @wayshard/sdk        domain types + HTTP/JSON + WebSocket events + PTY
   ui/        @wayshard/ui         OpenCode 2 design system, copied+adapted (rebranded)
   gui/       @wayshard/gui        shared graphical client
-             src/vendor/session-ui  OpenCode 2 session presentation, copied+adapted
+             src/session-ui  OpenCode 2 session presentation, copied+adapted
              src/app, src/wayshard  Wayshard shell, views, state, event subscription
   web/       Vite host mounting @wayshard/gui (served by the Wayshard Server)
   desktop/   Tauri 2 shell hosting ../../web/dist (Linux/macOS/Windows + Android)

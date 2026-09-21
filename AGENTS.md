@@ -208,7 +208,7 @@ When implementation evidence proves a canonical decision is wrong, update the re
 
 ## Adapted client source rules
 
-- The live graphical client and TUI are adapted from the imported OpenCode 2 client source under `third_party/opencode-v1.18.31` (provenance only). Adapted copies live under Wayshard-owned directories (`clients/ui`, `clients/gui/src/vendor/session-ui`, `clients/tui`).
+- The live graphical client and TUI are adapted from the imported OpenCode 2 client source under `third_party/opencode-v1.18.31` (provenance only). Adapted copies live under Wayshard-owned directories (`clients/ui`, `clients/gui/src/session-ui`, `clients/tui`).
 - Do not establish an upstream remote, submodule, sync workflow, or OpenCode API/runtime compatibility layer. Do not import `@opencode-ai/*` into live client source; `clients/gui/src/lineage.test.ts` fails the build if you do.
 - Keep `clients/lineage.manifest.json` and `docs/client-source-lineage.md` accurate. If you add or replace adapted source, update the manifest and the lineage test.
 - Wayshard architecture and domain always win over inherited UI structure. Adapt or replace an inherited component rather than bending the product architecture.

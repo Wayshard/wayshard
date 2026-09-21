@@ -23,7 +23,7 @@
     },
     {
       "upstream": "packages/session-ui/src",
-      "destination": "gui/src/vendor/session-ui",
+      "destination": "gui/src/session-ui",
       "mode": "copied+adapted",
       "reason": "Session/message/diff presentation. OpenCode SDK/core/client imports replaced with the Wayshard view-model shim; provider/server logic removed.",
       "minFiles": 100,

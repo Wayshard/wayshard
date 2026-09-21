@@ -10,11 +10,11 @@
   "exports": {
     ".": "./src/index.tsx",
     "./styles": "./src/styles.css",
-    "./session-ui/context": "./src/vendor/session-ui/context/index.ts",
-    "./session-ui/components/*": "./src/vendor/session-ui/components/*.tsx",
-    "./session-ui/sdk/*": "./src/vendor/session-ui/sdk/*.ts",
-    "./session-ui/util/*": "./src/vendor/session-ui/util/*.ts",
-    "./session-ui/*": "./src/vendor/session-ui/*",
+    "./session-ui/context": "./src/session-ui/context/index.ts",
+    "./session-ui/components/*": "./src/session-ui/components/*.tsx",
+    "./session-ui/sdk/*": "./src/session-ui/sdk/*.ts",
+    "./session-ui/util/*": "./src/session-ui/util/*.ts",
+    "./session-ui/*": "./src/session-ui/*",
     "./sdk": "./src/sdk/index.ts"
   },
   "scripts": {

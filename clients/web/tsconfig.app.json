@@ -13,7 +13,7 @@
     ],
     "paths": {
       "@wayshard/gui/session-ui/*": [
-        "../gui/src/vendor/session-ui/*"
+        "../gui/src/session-ui/*"
       ],
       "@wayshard/gui/*": [
         "../gui/src/*"

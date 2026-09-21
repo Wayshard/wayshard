@@ -28,14 +28,14 @@ the Tauri 2 Desktop and Android shells.
 | OpenCode source | Wayshard destination | Mode |
 | --- | --- | --- |
 | `packages/ui/src` (design system: theme, tokens, styles, primitives, v2 components) | `clients/ui/src` (`@wayshard/ui`) | copied + adapted |
-| `packages/session-ui/src` (message/part rendering, markdown, diffs, review) | `clients/gui/src/vendor/session-ui` | copied + adapted |
+| `packages/session-ui/src` (message/part rendering, markdown, diffs, review) | `clients/gui/src/session-ui` | copied + adapted |
 | `packages/app/src` (shell, layout, prompt, file tree, dialogs, terminal) | `clients/gui/src/app` + `clients/gui/src/wayshard` | adapted (structure/patterns) |
 
 Adaptations:
 
 - Package identity rebranded `@opencode-ai/ui` → `@wayshard/ui`.
 - OpenCode SDK/core/client runtime imports replaced by a Wayshard view-model
-  shim (`clients/gui/src/vendor/session-ui/sdk/model.ts`,
+  shim (`clients/gui/src/session-ui/sdk/model.ts`,
   `util/{binary,encode,path}.ts`) populated from `@wayshard/sdk`.
 - OpenCode server/session/provider contexts, provider/model management UI,
   subscription copy and desktop Electron shell removed.

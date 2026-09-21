@@ -24,7 +24,7 @@
     ],
     "paths": {
       "@wayshard/gui/session-ui/*": [
-        "./src/vendor/session-ui/*"
+        "./src/session-ui/*"
       ],
       "@wayshard/gui/*": [
         "./src/*"
@@ -38,6 +38,6 @@
     "**/*.test.*",
     "**/*.stories.*",
     "**/*.worker.ts",
-    "src/vendor/session-ui/components/file-ssr.tsx"
+    "src/session-ui/components/file-ssr.tsx"
   ]
 }

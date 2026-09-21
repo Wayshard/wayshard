@@ -1,1 +1,1 @@
-export * from "../vendor/session-ui/sdk/model"
+export * from "../session-ui/sdk/model"
