@@ -59,3 +59,26 @@ describe("client source lineage", () => {
     }
   })
 })
+
+describe("client source lineage — per-file ancestry", () => {
+  test("manifest records concrete per-file ancestry with upstream blobs", () => {
+    expect(Array.isArray(manifest.fileAncestry)).toBe(true)
+    expect(manifest.fileAncestry.length).toBeGreaterThanOrEqual(12)
+    const appFiles = manifest.fileAncestry.filter((f: any) => f.upstream.startsWith("packages/app/src/"))
+    const tuiFiles = manifest.fileAncestry.filter((f: any) => f.upstream.startsWith("packages/tui/src/"))
+    expect(appFiles.length).toBeGreaterThanOrEqual(4)
+    expect(tuiFiles.length).toBeGreaterThanOrEqual(8)
+  })
+
+  for (const entry of JSON.parse(readFileSync(join(clientsRoot, "lineage.manifest.json"), "utf8")).fileAncestry) {
+    test(`${entry.upstream} -> ${entry.destination}`, () => {
+      const dest = join(clientsRoot, entry.destination)
+      const text = readFileSync(dest, "utf8")
+      expect(text.length).toBeGreaterThan(50)
+      expect(text.toLowerCase()).toContain(entry.marker.toLowerCase().slice(0, 24))
+      if (entry.upstreamBlob) {
+        expect(entry.upstreamBlob).toMatch(/^[0-9a-f]{40}$/)
+      }
+    })
+  }
+})

@@ -19,7 +19,11 @@
     "@opentui/core": "^0.5.11",
     "@opentui/keymap": "^0.5.11",
     "@opentui/solid": "^0.5.11",
-    "@wayshard/sdk": "workspace:*"
+    "@wayshard/sdk": "workspace:*",
+    "fuzzysort": "^4.0.2",
+    "open": "^11.0.4",
+    "opentui-spinner": "^0.0.7",
+    "remeda": "^2.50.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

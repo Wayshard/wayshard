@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "upstream": {
     "project": "OpenCode 2",
     "tag": "v1.18.31",
@@ -73,5 +73,126 @@
     "OpenCode server/session/provider contexts and sync reducers",
     "OpenCode SDK/core/client runtime imports (replaced by @wayshard/sdk)",
     "OpenCode desktop Electron shell (Wayshard Desktop/Android are Tauri 2)"
+  ],
+  "fileAncestry": [
+    {
+      "upstream": "packages/app/src/context/command.tsx",
+      "upstreamBlob": "054b99e806bda9f20efa195dbeff8b091babd2a4",
+      "destination": "gui/src/app/command.tsx",
+      "mode": "adapted",
+      "marker": "imported OpenCode 2 graphical client command context"
+    },
+    {
+      "upstream": "packages/app/src/components/session/session-sortable-tab.tsx",
+      "upstreamBlob": "d78f392941ac343e7003b3e6240ded76cb2ba0a4",
+      "destination": "gui/src/app/session-tab.tsx",
+      "mode": "adapted",
+      "marker": "imported OpenCode 2 graphical client session tab"
+    },
+    {
+      "upstream": "packages/app/src/pages/layout-new.tsx",
+      "upstreamBlob": "6d76ca840178e78185160f7af7e10c91d3aefd01",
+      "destination": "gui/src/app/layout.tsx",
+      "mode": "adapted",
+      "marker": "imported OpenCode 2 graphical client layout page"
+    },
+    {
+      "upstream": "packages/app/src/components/dialog-command-palette-v2.tsx",
+      "upstreamBlob": "e996fd0be77c476de9884a8bd02c4735149a9742",
+      "destination": "gui/src/app/command-palette.tsx",
+      "mode": "adapted",
+      "marker": "imported OpenCode 2 graphical client command palette dialog"
+    },
+    {
+      "upstream": "packages/tui/src/ui/dialog.tsx",
+      "upstreamBlob": "50281630bc5b4d2f2f9b0b13f61702fe954a8ecf",
+      "destination": "tui/src/ui/dialog.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/dialog.tsx"
+    },
+    {
+      "upstream": "packages/tui/src/ui/dialog-confirm.tsx",
+      "upstreamBlob": "a09847af2f9b4af0a317b37342de6063d5c37f77",
+      "destination": "tui/src/ui/dialog-confirm.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/dialog-confirm.tsx"
+    },
+    {
+      "upstream": "packages/tui/src/ui/dialog-prompt.tsx",
+      "upstreamBlob": "899a338697d01027a937d195e07626fe7d002684",
+      "destination": "tui/src/ui/dialog-prompt.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/dialog-prompt.tsx"
+    },
+    {
+      "upstream": "packages/tui/src/ui/dialog-alert.tsx",
+      "upstreamBlob": "9fe15de6b7781fbbdee500f07ce3dad28355a33c",
+      "destination": "tui/src/ui/dialog-alert.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/dialog-alert.tsx"
+    },
+    {
+      "upstream": "packages/tui/src/ui/toast.tsx",
+      "upstreamBlob": "fdacec41de674f241055db3aa7de9b3dda0763ba",
+      "destination": "tui/src/ui/toast.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/toast.tsx"
+    },
+    {
+      "upstream": "packages/tui/src/ui/border.ts",
+      "upstreamBlob": "333071020c4b3ce74aad47ec9ba758a566761565",
+      "destination": "tui/src/ui/border.ts",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/border.ts"
+    },
+    {
+      "upstream": "packages/tui/src/ui/spinner.ts",
+      "upstreamBlob": "c185ea7b833f2087b4c925aa40feb0b72239a19e",
+      "destination": "tui/src/ui/spinner.ts",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/ui/spinner.ts"
+    },
+    {
+      "upstream": "packages/tui/src/component/spinner.tsx",
+      "upstreamBlob": "f648a605a63081d0cbcfcd200197aef285b2081b",
+      "destination": "tui/src/component/spinner.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/component/spinner.tsx"
+    },
+    {
+      "upstream": "packages/tui/src/component/logo.tsx",
+      "upstreamBlob": "db8e8dc71697dbf4fd5e8704dc1658276830b8da",
+      "destination": "tui/src/component/logo.tsx",
+      "mode": "copied+adapted",
+      "marker": "packages/tui/src/component/logo.tsx"
+    },
+    {
+      "upstream": "packages/tui/src/theme/index.ts",
+      "upstreamBlob": "e8a5f2c5a97384f95219a9e95d5d491beeb294ec",
+      "destination": "tui/src/theme/index.ts",
+      "mode": "copied+adapted",
+      "marker": "DEFAULT_THEMES"
+    },
+    {
+      "upstream": "packages/tui/src/keymap.tsx",
+      "upstreamBlob": "",
+      "destination": "tui/src/keymap.tsx",
+      "mode": "adapted",
+      "marker": "imported OpenCode TUI keymap"
+    },
+    {
+      "upstream": "packages/tui/src/context/theme.tsx",
+      "upstreamBlob": "",
+      "destination": "tui/src/context/theme.tsx",
+      "mode": "adapted",
+      "marker": "imported OpenCode TUI theme context"
+    },
+    {
+      "upstream": "packages/tui/bunfig.toml",
+      "upstreamBlob": "b16283cb5b5012fd984e2285eacd40279974f954",
+      "destination": "tui/bunfig.toml",
+      "mode": "copied",
+      "marker": "opentui/solid/preload"
+    }
   ]
 }

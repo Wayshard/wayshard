@@ -1,85 +1,114 @@
 // Wayshard shared graphical client.
 //
-// The layout, visual language, design tokens and message/session rendering are
-// adapted from the imported OpenCode 2 client foundation (@wayshard/ui and
-// @wayshard/gui/session-ui). The domain model, navigation and backend are
-// Wayshard (@wayshard/sdk). Web, Desktop (Tauri 2) and Android (Tauri 2) all
-// mount this same application.
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
+// The application shell, navigation hierarchy, command architecture, layout,
+// session/file tabs and palette are adapted from the imported OpenCode 2
+// graphical client (third_party/opencode-v1.18.31/packages/app/src). The design
+// system is @wayshard/ui; the session presentation is the adapted session-ui.
+// The domain, state and backend are Wayshard (@wayshard/sdk). Web, Desktop
+// (Tauri 2) and Android (Tauri 2) all mount this same application.
+import { For, Show, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { Button } from "@wayshard/ui/button"
-import { IconButton } from "@wayshard/ui/icon-button"
 import { Icon } from "@wayshard/ui/icon"
 import { Tag } from "@wayshard/ui/tag"
 import { Spinner } from "@wayshard/ui/spinner"
-import { TextField } from "@wayshard/ui/text-field"
 import { Dialog } from "@wayshard/ui/dialog"
-import { DialogProvider } from "@wayshard/ui/context/dialog"
+import { DialogProvider, useDialog } from "@wayshard/ui/context/dialog"
 import { FileComponentProvider } from "@wayshard/ui/context/file"
 import { DataProvider } from "@wayshard/gui/session-ui/context"
 import { SessionTurn } from "@wayshard/gui/session-ui/components/session-turn"
 import { StateProvider, useWayshard } from "../wayshard/state"
 import { buildData, stageDisplay } from "../wayshard/adapter"
-import { Views } from "./views"
+import { CommandProvider, useCommand } from "./command"
+import { AppLayout } from "./layout"
 import { CommandPalette } from "./command-palette"
+import { SessionTab } from "./session-tab"
+import { ChangesView, FilesView, TerminalView, AdvancedSurface, type AdvancedSurfaceKey } from "./views"
 
-export type ViewKey =
-  | "session"
-  | "changes"
-  | "files"
-  | "terminal"
-  | "usage"
-  | "routing"
-  | "context"
-  | "artifacts"
-  | "knowledge"
-  | "harnesses"
-  | "recovery"
-  | "approvals"
-  | "notifications"
-  | "settings"
+export type PrimaryTab = "session" | "changes" | "files" | "terminal"
 
-export const NAV: { key: ViewKey; label: string; icon: string }[] = [
-  { key: "session", label: "Session", icon: "prompt" },
-  { key: "changes", label: "Changes", icon: "diff" },
-  { key: "files", label: "Files", icon: "bullet-list" },
-  { key: "terminal", label: "Terminal", icon: "terminal" },
-  { key: "usage", label: "Usage", icon: "brain" },
-  { key: "routing", label: "Routing", icon: "fork" },
-  { key: "context", label: "Context", icon: "archive" },
-  { key: "artifacts", label: "Artifacts", icon: "checklist" },
-  { key: "knowledge", label: "Knowledge", icon: "console" },
-  { key: "harnesses", label: "Harnesses", icon: "prompt" },
-  { key: "recovery", label: "Recovery", icon: "arrow-up" },
-  { key: "approvals", label: "Approvals", icon: "check-small" },
-  { key: "notifications", label: "Notifications", icon: "bubble-5" },
-  { key: "settings", label: "Settings", icon: "settings" },
+export const PRIMARY_TABS: { key: PrimaryTab; label: string; icon: string; keybind: string }[] = [
+  { key: "session", label: "Session", icon: "prompt", keybind: "mod+1" },
+  { key: "changes", label: "Changes", icon: "diff", keybind: "mod+2" },
+  { key: "files", label: "Files", icon: "bullet-list", keybind: "mod+3" },
+  { key: "terminal", label: "Terminal", icon: "terminal", keybind: "mod+4" },
 ]
 
-const [activeView, setActiveView] = createSignal<ViewKey>("session")
+export const ADVANCED_SURFACES: { key: AdvancedSurfaceKey; label: string }[] = [
+  { key: "usage", label: "Usage" },
+  { key: "routing", label: "Routing" },
+  { key: "context", label: "Context" },
+  { key: "artifacts", label: "Artifacts" },
+  { key: "knowledge", label: "Project knowledge" },
+  { key: "harnesses", label: "Harnesses" },
+  { key: "recovery", label: "Recovery & diagnostics" },
+  { key: "approvals", label: "Approvals" },
+  { key: "notifications", label: "Notifications" },
+  { key: "settings", label: "Settings" },
+]
 
-export { activeView, setActiveView }
+const [activeTab, setActiveTab] = createSignal<PrimaryTab>("session")
+
+export { activeTab, setActiveTab }
 
 function FileFallback(props: { path?: string; content?: string }) {
-  return (
-    <pre data-component="file-view" class="wh-file-view">
-      {props.content ?? ""}
-    </pre>
-  )
+  return <pre class="wh-file-view">{props.content ?? ""}</pre>
 }
 
 function Shell() {
   const ws = useWayshard()
-  const [paletteOpen, setPaletteOpen] = createSignal(false)
+  const command = useCommand()
+  const dialog = useDialog()
+  const [moreOpen, setMoreOpen] = createSignal(false)
+
+  function openPalette() {
+    dialog.show(() => <CommandPalette />)
+  }
+
+  function openAdvanced(key: AdvancedSurfaceKey) {
+    setMoreOpen(false)
+    dialog.show(() => (
+      <Dialog title={ADVANCED_SURFACES.find((s) => s.key === key)?.label ?? key} size="x-large">
+        <div class="wh-dialog-surface">
+          <AdvancedSurface view={key} />
+        </div>
+      </Dialog>
+    ))
+  }
 
   onMount(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault()
-        setPaletteOpen(true)
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    onCleanup(() => window.removeEventListener("keydown", onKey))
+    const dispose = command.register({
+      options: () => [
+        { id: "command.palette", title: "Command palette", category: "Navigation", keybind: "mod+k", onSelect: openPalette },
+        { id: "surface.more", title: "More surfaces…", category: "Navigation", keybind: "mod+shift+m", onSelect: () => setMoreOpen(true) },
+        ...PRIMARY_TABS.map((t) => ({
+          id: `tab.${t.key}`,
+          title: `Go to ${t.label}`,
+          category: "Navigation",
+          keybind: t.keybind,
+          onSelect: () => setActiveTab(t.key),
+        })),
+        ...ADVANCED_SURFACES.map((s) => ({
+          id: `surface.${s.key}`,
+          title: s.label,
+          category: "Surfaces",
+          onSelect: () => openAdvanced(s.key),
+        })),
+        {
+          id: "project.open",
+          title: "Open project…",
+          category: "Project",
+          onSelect: async () => {
+            const path = window.prompt("Project path")
+            if (path) await ws.openProject(path)
+          },
+        },
+        { id: "session.new", title: "New session", category: "Session", onSelect: () => void ws.newConversation() },
+        { id: "run.cancel", title: "Cancel run", category: "Run", onSelect: () => void ws.cancelRun() },
+        { id: "run.retry", title: "Retry run", category: "Run", onSelect: () => void ws.retryRun() },
+        { id: "run.integrate", title: "Integrate run", category: "Run", onSelect: () => void ws.integrateRun() },
+      ],
+    })
+    onCleanup(dispose)
   })
 
   const data = createMemo(() =>
@@ -94,43 +123,78 @@ function Shell() {
   )
 
   return (
-    <DialogProvider>
-      <FileComponentProvider component={FileFallback}>
-        <div data-component="wayshard-app" class="wh-app">
-          <Show when={!ws.state.connected}>
-            <ConnectionBar />
-          </Show>
-          <div class="wh-shell">
-            <Sidebar />
-            <main class="wh-main">
-              <Topbar onCommand={() => setPaletteOpen(true)} />
-              <div class="wh-view">
-                <Show when={activeView() === "session"} fallback={<Views view={activeView()} />}>
-                  <DataProvider data={data()} directory={ws.activeProject()?.path ?? ""} sessionID={ws.state.activeConversationID ?? undefined}>
-                    <SessionView />
-                  </DataProvider>
-                </Show>
-              </div>
-            </main>
+    <AppLayout
+      titlebar={
+        <header class="wh-titlebar">
+          <div class="wh-titlebar-left">
+            <span class="wh-wordmark">Wayshard</span>
+            <span class="wh-truncate">{ws.activeProject()?.name ?? "No project"}</span>
           </div>
-          <CommandPalette open={paletteOpen()} onClose={() => setPaletteOpen(false)} />
+          <nav class="wh-tabs" role="tablist">
+            <For each={PRIMARY_TABS}>
+              {(tab) => (
+                <button class="wh-tab-button" role="tab" aria-selected={activeTab() === tab.key} data-active={activeTab() === tab.key} onClick={() => setActiveTab(tab.key)}>
+                  <Icon name={tab.icon as never} size="small" />
+                  {tab.label}
+                </button>
+              )}
+            </For>
+            <button class="wh-tab-button" data-active={moreOpen()} onClick={() => setMoreOpen(true)}>
+              <Icon name="bullet-list" size="small" />
+              More
+            </button>
+          </nav>
+          <div class="wh-titlebar-right">
+            <Show when={ws.state.run}>
+              <Tag>{ws.state.run!.status}</Tag>
+            </Show>
+            <Button size="small" variant="ghost" icon="console" onClick={openPalette}>
+              ⌘K
+            </Button>
+          </div>
+        </header>
+      }
+    >
+      <Show when={!ws.state.connected}>
+        <div class="wh-connection" data-state="disconnected">
+          <span>{ws.state.connectionError ? `Disconnected: ${ws.state.connectionError}` : "Connecting to Wayshard server…"}</span>
+          <Button size="small" variant="secondary" onClick={() => void ws.refreshAll()}>
+            Reconnect
+          </Button>
         </div>
-      </FileComponentProvider>
-    </DialogProvider>
+      </Show>
+      <div class="wh-body">
+        <Sidebar />
+        <div class="wh-content">
+          <Show when={activeTab() === "session"} fallback={<PrimaryView tab={activeTab()} />}>
+            <DataProvider data={data()} directory={ws.activeProject()?.path ?? ""} sessionID={ws.state.activeConversationID ?? undefined}>
+              <SessionView />
+            </DataProvider>
+          </Show>
+        </div>
+      </div>
+      <Show when={moreOpen()}>
+        <Dialog title="More surfaces" size="large">
+          <div class="wh-more-grid">
+            <For each={ADVANCED_SURFACES}>
+              {(s) => (
+                <button class="wh-more-item" onClick={() => openAdvanced(s.key)}>
+                  {s.label}
+                </button>
+              )}
+            </For>
+          </div>
+        </Dialog>
+      </Show>
+    </AppLayout>
   )
 }
 
-function ConnectionBar() {
-  const ws = useWayshard()
+function PrimaryView(props: { tab: PrimaryTab }) {
   return (
-    <div class="wh-connection" data-state="disconnected">
-      <span>
-        {ws.state.connectionError ? `Disconnected: ${ws.state.connectionError}` : "Connecting to Wayshard server…"}
-      </span>
-      <Button size="small" variant="secondary" onClick={() => void ws.refreshAll()}>
-        Reconnect
-      </Button>
-    </div>
+    <Show when={props.tab === "changes"} fallback={<Show when={props.tab === "files"} fallback={<TerminalView />}><FilesView /></Show>}>
+      <ChangesView />
+    </Show>
   )
 }
 
@@ -138,40 +202,25 @@ function Sidebar() {
   const ws = useWayshard()
   return (
     <aside class="wh-sidebar">
-      <div class="wh-sidebar-header">
-        <span class="wh-wordmark">Wayshard</span>
-        <Tag>{ws.state.meta?.version ?? "dev"}</Tag>
-      </div>
       <div class="wh-sidebar-section">
         <div class="wh-sidebar-label">Projects</div>
         <Show when={ws.state.projects.length} fallback={<div class="wh-empty">No projects</div>}>
           <For each={ws.state.projects}>
             {(p) => (
-              <button
-                class="wh-nav-item"
-                data-active={p.id === ws.state.activeProjectID}
-                onClick={() => void ws.selectProject(p.id)}
-              >
+              <button class="wh-nav-item" data-active={p.id === ws.state.activeProjectID} onClick={() => void ws.selectProject(p.id)}>
                 <Icon name="bullet-list" size="small" />
                 <span class="wh-truncate">{p.name}</span>
               </button>
             )}
           </For>
         </Show>
-        <Button size="small" variant="ghost" icon="arrow-right" onClick={() => void promptOpenProject(ws)}>
-          Open project
-        </Button>
       </div>
       <div class="wh-sidebar-section">
         <div class="wh-sidebar-label">Sessions</div>
         <Show when={ws.state.conversations.length} fallback={<div class="wh-empty">No sessions</div>}>
           <For each={ws.state.conversations}>
             {(c) => (
-              <button
-                class="wh-nav-item"
-                data-active={c.id === ws.state.activeConversationID}
-                onClick={() => void ws.selectConversation(c.id)}
-              >
+              <button class="wh-nav-item" data-active={c.id === ws.state.activeConversationID} onClick={() => void ws.selectConversation(c.id)}>
                 <Icon name="bubble-5" size="small" />
                 <span class="wh-truncate">{c.title || "Session"}</span>
               </button>
@@ -182,54 +231,8 @@ function Sidebar() {
           New session
         </Button>
       </div>
-      <nav class="wh-sidebar-nav">
-        <For each={NAV}>
-          {(item) => (
-            <button class="wh-nav-item" data-active={activeView() === item.key} onClick={() => setActiveView(item.key)}>
-              <Icon name={item.icon as never} size="small" />
-              <span>{item.label}</span>
-            </button>
-          )}
-        </For>
-      </nav>
-      <div class="wh-sidebar-footer">
-        <Tag>{ws.state.approvals.length} approvals</Tag>
-        <Tag>{ws.state.notifications.length} notices</Tag>
-      </div>
     </aside>
   )
-}
-
-function Topbar(props: { onCommand: () => void }) {
-  const ws = useWayshard()
-  return (
-    <header class="wh-topbar">
-      <div class="wh-topbar-left">
-        <span class="wh-truncate">{ws.activeProject()?.name ?? "Wayshard"}</span>
-        <Show when={ws.activeConversation()}>
-          <span class="wh-muted">/ {ws.activeConversation()!.title || "Session"}</span>
-        </Show>
-      </div>
-      <div class="wh-topbar-right">
-        <Show when={ws.state.run}>
-          <Tag>{ws.state.run!.status}</Tag>
-        </Show>
-        <Show when={ws.state.run && (ws.state.run!.status === "running" || ws.state.run!.status === "planning")}>
-          <Button size="small" variant="ghost" onClick={() => void ws.cancelRun()}>
-            Cancel
-          </Button>
-        </Show>
-        <Button size="small" variant="ghost" icon="console" onClick={props.onCommand}>
-          Command
-        </Button>
-      </div>
-    </header>
-  )
-}
-
-async function promptOpenProject(ws: ReturnType<typeof useWayshard>) {
-  const path = window.prompt("Project path")
-  if (path) await ws.openProject(path)
 }
 
 function SessionView() {
@@ -251,9 +254,7 @@ function SessionView() {
     <div class="wh-session">
       <div class="wh-session-stream">
         <Show when={userMessages().length} fallback={<EmptyState title="No messages yet" body="Describe a task to start a run." />}>
-          <For each={userMessages()}>
-            {(m) => <SessionTurn sessionID={ws.state.activeConversationID!} messageID={m.id} />}
-          </For>
+          <For each={userMessages()}>{(m) => <SessionTurn sessionID={ws.state.activeConversationID!} messageID={m.id} />}</For>
         </Show>
         <Show when={ws.state.run}>
           <RunTimeline />
@@ -304,9 +305,6 @@ function RunTimeline() {
       <div class="wh-timeline-header">
         <span>Run {ws.state.run?.id.slice(0, 8)}</span>
         <Tag>{ws.state.run?.status}</Tag>
-        <Show when={ws.state.run?.degradedRouting}>
-          <Tag>degraded routing</Tag>
-        </Show>
       </div>
       <For each={ws.state.stages}>
         {(stage) => (
@@ -355,7 +353,13 @@ export function ErrorState(props: { title: string; detail?: string }) {
 export function WayshardApp() {
   return (
     <StateProvider>
-      <Shell />
+      <CommandProvider>
+        <DialogProvider>
+          <FileComponentProvider component={FileFallback}>
+            <Shell />
+          </FileComponentProvider>
+        </DialogProvider>
+      </CommandProvider>
     </StateProvider>
   )
 }

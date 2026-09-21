@@ -81,3 +81,34 @@
   .wh-sidebar { position: absolute; z-index: 20; height: 100%; background: #141414; box-shadow: 0 0 24px rgba(0,0,0,0.6); }
   .wh-shell { position: relative; }
 }
+
+/* Adapted OpenCode app-shell layout (layout-new.tsx structure) */
+.wh-layout { display: flex; flex-direction: column; height: 100vh; width: 100vw; overflow: hidden; }
+.wh-layout-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.wh-layout-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wh-titlebar { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.wh-titlebar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wh-titlebar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.wh-tabs { display: flex; align-items: center; gap: 2px; }
+.wh-tab-button { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.wh-tab-button:hover { background: rgba(255,255,255,0.06); }
+.wh-tab-button[data-active="true"] { background: rgba(255,255,255,0.1); }
+.wh-body { display: flex; flex: 1; min-height: 0; }
+.wh-content { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.wh-more-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.wh-more-item { text-align: left; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.wh-more-item:hover { background: rgba(255,255,255,0.06); }
+.wh-dialog-surface { max-height: 70vh; overflow-y: auto; }
+.wh-palette { display: flex; flex-direction: column; gap: 8px; min-width: 480px; }
+.wh-palette-list { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.wh-palette-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.wh-palette-item[data-active="true"] { background: rgba(255,255,255,0.1); }
+.wh-palette-title { flex: 1; }
+.wh-keybind { font-family: var(--font-mono, monospace); font-size: 11px; opacity: 0.7; }
+.wh-tab { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; }
+.wh-tab[data-active="true"] { background: rgba(255,255,255,0.1); }
+.wh-tab-visual { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wh-tab-icon { width: 16px; height: 16px; }
+.wh-tab-label { font-size: 13px; }
+.wh-tab-temporary { font-style: italic; }
+.wh-tab-close { height: 20px; width: 20px; }

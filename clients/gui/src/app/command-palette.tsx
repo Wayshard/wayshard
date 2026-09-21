@@ -1,81 +1,89 @@
-// Wayshard command palette, adapted from the imported OpenCode command
-// architecture: keyboard-first navigation over Wayshard actions.
-import { For, Show, createMemo, createSignal } from "solid-js"
+// Wayshard command palette.
+//
+// Adapted from the imported OpenCode 2 graphical client command palette dialog
+// (third_party/opencode-v1.18.31/packages/app/src/components/dialog-command-palette-v2.tsx):
+// the search input, grouped option list, keybind hint and highlight/select
+// behaviour are retained. The command set is Wayshard.
+import { For, Show, createMemo, createSignal, onMount } from "solid-js"
 import { Dialog } from "@wayshard/ui/dialog"
+import { useDialog } from "@wayshard/ui/context/dialog"
 import { TextField } from "@wayshard/ui/text-field"
-import { useWayshard } from "../wayshard/state"
-import { NAV, setActiveView, type ViewKey } from "./App"
+import { ScrollView } from "@wayshard/ui/scroll-view"
+import { commandPaletteOptions, displayKeybind, useCommand } from "./command"
 
-interface Command {
-  id: string
-  title: string
-  run?: () => void | Promise<void>
-}
-
-export function CommandPalette(props: { open: boolean; onClose: () => void }) {
-  const ws = useWayshard()
+export function CommandPalette() {
+  const command = useCommand()
+  const dialog = useDialog()
   const [query, setQuery] = createSignal("")
+  const [active, setActive] = createSignal(0)
 
-  const commands = createMemo<Command[]>(() => {
-    const list: Command[] = NAV.map((n) => ({
-      id: `view:${n.key}`,
-      title: `Go to ${n.label}`,
-      run: () => { setActiveView(n.key as ViewKey) },
-    }))
-    list.push(
-      {
-        id: "project:open",
-        title: "Open project…",
-        run: async () => {
-          const path = window.prompt("Project path")
-          if (path) await ws.openProject(path)
-        },
-      },
-      { id: "session:new", title: "New session", run: () => ws.newConversation() },
-      { id: "run:cancel", title: "Cancel run", run: () => ws.cancelRun() },
-      { id: "run:retry", title: "Retry run", run: () => ws.retryRun() },
-      { id: "run:integrate", title: "Integrate run", run: () => ws.integrateRun() },
-      { id: "focus:composer", title: "Focus composer", run: () => { setActiveView("session") } },
-    )
-    return list
+  const options = createMemo(() => {
+    const all = commandPaletteOptions(command.options())
+    const q = query().trim().toLowerCase()
+    const filtered = q
+      ? all.filter((o) => o.title.toLowerCase().includes(q) || (o.category ?? "").toLowerCase().includes(q))
+      : all
+    return filtered.slice(0, 100)
   })
 
-  const filtered = createMemo(() => {
-    const q = query().toLowerCase()
-    if (!q) return commands()
-    return commands().filter((c) => c.title.toLowerCase().includes(q))
-  })
+  onMount(() => setActive(0))
 
-  async function exec(cmd: Command) {
-    await cmd.run?.()
-    props.onClose()
+  function select(index: number) {
+    const option = options()[index]
+    if (!option || option.disabled) return
+    option.onSelect?.("palette")
+    dialog.close()
   }
 
   return (
-    <Show when={props.open}>
-      <Dialog title="Command palette" size="large">
+    <Dialog title="Command palette" size="large">
+      <div class="wh-palette">
         <TextField
           autofocus
           placeholder="Type a command…"
           value={query()}
-          onInput={(e: InputEvent) => setQuery((e.currentTarget as HTMLInputElement).value)}
+          onInput={(e: InputEvent) => {
+            setQuery((e.currentTarget as HTMLInputElement).value)
+            setActive(0)
+          }}
           onKeyDown={(e: KeyboardEvent) => {
-            if (e.key === "Escape") props.onClose()
-            if (e.key === "Enter" && filtered().length) void exec(filtered()[0])
+            if (e.key === "ArrowDown") {
+              e.preventDefault()
+              setActive((i) => Math.min(i + 1, options().length - 1))
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault()
+              setActive((i) => Math.max(i - 1, 0))
+            }
+            if (e.key === "Enter") {
+              e.preventDefault()
+              select(active())
+            }
           }}
         />
-        <ul class="wh-command-list">
-          <For each={filtered()}>
-            {(c) => (
-              <li>
-                <button class="wh-nav-item" onClick={() => void exec(c)}>
-                  {c.title}
+        <ScrollView class="wh-palette-list">
+          <Show when={options().length} fallback={<div class="wh-muted">No matching commands</div>}>
+            <For each={options()}>
+              {(option, index) => (
+                <button
+                  class="wh-palette-item"
+                  data-active={index() === active()}
+                  onClick={() => select(index())}
+                  onMouseEnter={() => setActive(index())}
+                >
+                  <span class="wh-palette-title">{option.title}</span>
+                  <Show when={option.category}>
+                    <span class="wh-muted">{option.category}</span>
+                  </Show>
+                  <Show when={option.keybind}>
+                    <span class="wh-keybind">{displayKeybind(option.keybind!)}</span>
+                  </Show>
                 </button>
-              </li>
-            )}
-          </For>
-        </ul>
-      </Dialog>
-    </Show>
+              )}
+            </For>
+          </Show>
+        </ScrollView>
+      </div>
+    </Dialog>
   )
 }

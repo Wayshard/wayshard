@@ -7,21 +7,24 @@ import { Icon } from "@wayshard/ui/icon"
 import { Tag } from "@wayshard/ui/tag"
 import { Spinner } from "@wayshard/ui/spinner"
 import { TextField } from "@wayshard/ui/text-field"
-import { EmptyState, ErrorState, type ViewKey } from "./App"
+import { EmptyState, ErrorState } from "./App"
 import { useWayshard } from "../wayshard/state"
 
-export function Views(props: { view: ViewKey }) {
+export type AdvancedSurfaceKey =
+  | "usage"
+  | "routing"
+  | "context"
+  | "artifacts"
+  | "knowledge"
+  | "harnesses"
+  | "recovery"
+  | "approvals"
+  | "notifications"
+  | "settings"
+
+export function AdvancedSurface(props: { view: AdvancedSurfaceKey }) {
   return (
     <Switch>
-      <Match when={props.view === "changes"}>
-        <ChangesView />
-      </Match>
-      <Match when={props.view === "files"}>
-        <FilesView />
-      </Match>
-      <Match when={props.view === "terminal"}>
-        <TerminalView />
-      </Match>
       <Match when={props.view === "usage"}>
         <UsageView />
       </Match>
@@ -92,7 +95,7 @@ type RunDelta = {
   }>
 }
 
-function ChangesView() {
+export function ChangesView() {
   const ws = useWayshard()
   const [mode, setMode] = createSignal<"run" | "workspace">("run")
   const [selected, setSelected] = createSignal<string | null>(null)
@@ -208,7 +211,7 @@ function FilePeek(props: { path: string }) {
 
 /* ----------------------------------- Files --------------------------------- */
 
-function FilesView() {
+export function FilesView() {
   const ws = useWayshard()
   const [path, setPath] = createSignal("")
   const [selected, setSelected] = createSignal<string | null>(null)
@@ -296,7 +299,7 @@ function FilesView() {
 
 /* --------------------------------- Terminal -------------------------------- */
 
-function TerminalView() {
+export function TerminalView() {
   const ws = useWayshard()
   const [terminalID, setTerminalID] = createSignal<string | null>(null)
   const [output, setOutput] = createSignal("")
@@ -358,7 +361,7 @@ function useRunResource<T>(fn: (client: ReturnType<typeof useWayshard>["client"]
   )
 }
 
-function UsageView() {
+export function UsageView() {
   const ws = useWayshard()
   const [usage] = useRunResource((client, runID) => client.usage(runID))
   return (
@@ -386,7 +389,7 @@ function UsageView() {
   )
 }
 
-function RoutingView() {
+export function RoutingView() {
   const ws = useWayshard()
   const [routes] = useRunResource((client, runID) => client.routes(runID))
   const [harnesses] = createResource(() => ws.client().harnesses())
@@ -427,7 +430,7 @@ function RoutingView() {
   )
 }
 
-function ContextView() {
+export function ContextView() {
   const [context] = useRunResource((client, runID) => client.context(runID))
   return (
     <Panel title="Context" hint="The context bundle delivered to the planning stage.">
@@ -438,7 +441,7 @@ function ContextView() {
   )
 }
 
-function ArtifactsView() {
+export function ArtifactsView() {
   const ws = useWayshard()
   const [selected, setSelected] = createSignal<string | null>(null)
   const artifacts = () => ws.state.artifacts
@@ -465,7 +468,7 @@ function ArtifactsView() {
   )
 }
 
-function KnowledgeView() {
+export function KnowledgeView() {
   const ws = useWayshard()
   const [knowledge] = createResource(
     () => ws.state.activeProjectID,
@@ -482,7 +485,7 @@ function KnowledgeView() {
   )
 }
 
-function HarnessesView() {
+export function HarnessesView() {
   const ws = useWayshard()
   const [installations] = createResource(() => ws.client().harnesses())
   const [definitions] = createResource(() => ws.client().get<{ definitions: Array<Record<string, unknown>>; diagnostics: unknown[] }>("/v1/harness-definitions"))
@@ -523,7 +526,7 @@ function HarnessesView() {
   )
 }
 
-function RecoveryView() {
+export function RecoveryView() {
   const ws = useWayshard()
   const [storage] = createResource(() => ws.client().storage())
   const [sandbox] = createResource(() => ws.client().sandbox())
@@ -541,7 +544,7 @@ function RecoveryView() {
   )
 }
 
-function ApprovalsView() {
+export function ApprovalsView() {
   const ws = useWayshard()
   return (
     <Panel title="Approvals" hint="Durable server-owned approvals. Approving is policy, not a sandbox bypass.">
@@ -574,7 +577,7 @@ function ApprovalsView() {
   )
 }
 
-function NotificationsView() {
+export function NotificationsView() {
   const ws = useWayshard()
   return (
     <Panel title="Notifications" hint="Run, approval and recovery attention.">
@@ -604,7 +607,7 @@ function NotificationsView() {
   )
 }
 
-function SettingsView() {
+export function SettingsView() {
   const ws = useWayshard()
   const [baseUrl, setBaseUrl] = createSignal(ws.state.connection.baseUrl)
   const [token, setToken] = createSignal(ws.state.connection.token)

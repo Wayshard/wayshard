@@ -73,3 +73,56 @@ while still claiming conformance.
 - OpenCode SDK/core/client runtime packages.
 - The OpenCode Electron desktop shell (Wayshard Desktop/Android are Tauri 2).
 - OpenCode product branding, subscription copy and namespaces.
+
+## Application-shell ancestry (per-file)
+
+Beyond the component library, the Wayshard graphical **application shell** itself is
+adapted from concrete OpenCode app files:
+
+| OpenCode app file | Wayshard live file | Mode |
+| --- | --- | --- |
+| `packages/app/src/context/command.tsx` | `clients/gui/src/app/command.tsx` | adapted |
+| `packages/app/src/pages/layout-new.tsx` | `clients/gui/src/app/layout.tsx` | adapted |
+| `packages/app/src/components/session/session-sortable-tab.tsx` | `clients/gui/src/app/session-tab.tsx` | adapted |
+| `packages/app/src/components/dialog-command-palette-v2.tsx` | `clients/gui/src/app/command-palette.tsx` | adapted |
+
+The command keybinding parser/matcher/formatter, palette option resolution and
+registration lifecycle; the titlebar + main + toast layout; the file/session tab
+presentation; and the palette search/grouped-list/keybind behaviour are retained.
+The command set, navigation hierarchy and domain are Wayshard.
+
+## TUI component ancestry (per-file)
+
+The Wayshard TUI adapts concrete OpenCode TUI component files:
+
+| OpenCode TUI file | Wayshard live file | Mode |
+| --- | --- | --- |
+| `packages/tui/src/ui/dialog.tsx` | `clients/tui/src/ui/dialog.tsx` | copied+adapted |
+| `packages/tui/src/ui/dialog-confirm.tsx` | `clients/tui/src/ui/dialog-confirm.tsx` | copied+adapted |
+| `packages/tui/src/ui/dialog-prompt.tsx` | `clients/tui/src/ui/dialog-prompt.tsx` | copied+adapted |
+| `packages/tui/src/ui/dialog-alert.tsx` | `clients/tui/src/ui/dialog-alert.tsx` | copied+adapted |
+| `packages/tui/src/ui/toast.tsx` | `clients/tui/src/ui/toast.tsx` | copied+adapted |
+| `packages/tui/src/ui/border.ts` | `clients/tui/src/ui/border.ts` | copied+adapted |
+| `packages/tui/src/ui/spinner.ts` | `clients/tui/src/ui/spinner.ts` | copied+adapted |
+| `packages/tui/src/component/spinner.tsx` | `clients/tui/src/component/spinner.tsx` | copied+adapted |
+| `packages/tui/src/component/logo.tsx` | `clients/tui/src/component/logo.tsx` | copied+adapted |
+| `packages/tui/src/theme/index.ts` | `clients/tui/src/theme/index.ts` | copied+adapted |
+| `packages/tui/src/keymap.tsx` | `clients/tui/src/keymap.tsx` | adapted |
+| `packages/tui/src/context/theme.tsx` | `clients/tui/src/context/theme.tsx` | adapted |
+| `packages/tui/bunfig.toml` | `clients/tui/bunfig.toml` | copied |
+
+## Manifest mechanics
+
+`clients/lineage.manifest.json` (version 2) records:
+
+- `subtrees`: broad upstream→destination mappings with minimum file/LOC sizes and
+  required marker files.
+- `fileAncestry`: concrete per-file mappings with the upstream path, the upstream
+  git blob hash at the imported commit, the live destination, and a provenance
+  marker that the live file must contain.
+
+`clients/gui/src/lineage.test.ts` enforces both: adapted subtrees must remain at
+substantial size, every `fileAncestry` destination must exist, be non-trivial and
+contain its provenance marker, and no live client source may contain an
+`@opencode-ai/` import specifier. This makes it impossible to delete the adapted
+application/TUI foundation and replace it with a small fresh app while passing.
