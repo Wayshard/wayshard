@@ -13,7 +13,7 @@ import { Show } from "solid-js"
 import { PromptInputV2, type PromptInputV2PersistedState, type PromptInputV2Suggestion } from "@wayshard/gui/session-ui/v2/components/prompt-input"
 import { createPromptInputV2Controller } from "@wayshard/gui/session-ui/v2/components/prompt-input/interaction"
 import { useWayshard } from "../wayshard/state"
-import { createComposerState } from "./components/session-composer-state"
+import { createComposerPromptState } from "./components/session-composer-state"
 
 export interface ComposerSubmit {
   text: string
@@ -27,7 +27,7 @@ export function Composer(props: { onSubmit: (input: ComposerSubmit) => void; onC
     prompt: [{ type: "text", content: "", start: 0, end: 0 }],
     context: { items: [] },
   })
-  const composerState = createComposerState()
+  const composerState = createComposerPromptState()
 
   const controller = createPromptInputV2Controller({
     store: () => [store, setStore],
@@ -61,7 +61,7 @@ export function Composer(props: { onSubmit: (input: ComposerSubmit) => void; onC
   function submit() {
     const value = text()
     if (!value) return
-    props.onSubmit({ text: value, profile: composerState.prompt.profile(), artifactOnly: composerState.prompt.artifactOnly() })
+    props.onSubmit({ text: value, profile: composerState.profile(), artifactOnly: composerState.artifactOnly() })
     reset()
   }
 
@@ -72,12 +72,12 @@ export function Composer(props: { onSubmit: (input: ComposerSubmit) => void; onC
       </div>
       <div class="wh-composer-actions">
         <label class="wh-checkbox">
-          <input type="checkbox" checked={composerState.prompt.artifactOnly()} onChange={(e) => composerState.prompt.setArtifactOnly(e.currentTarget.checked)} />
+          <input type="checkbox" checked={composerState.artifactOnly()} onChange={(e) => composerState.setArtifactOnly(e.currentTarget.checked)} />
           Artifact only
         </label>
         <label class="wh-field">
           <span class="wh-muted">Profile</span>
-          <select class="wh-select" value={composerState.prompt.profile()} onChange={(e) => composerState.prompt.setProfile(e.currentTarget.value)}>
+          <select class="wh-select" value={composerState.profile()} onChange={(e) => composerState.setProfile(e.currentTarget.value)}>
             <option value="auto">Auto</option>
             <option value="quality">Quality</option>
             <option value="speed">Speed</option>
