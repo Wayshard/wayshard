@@ -420,10 +420,13 @@ export class WayshardClient {
     return this.get<PairingChallenge>(`/v1/pairing/challenge?nonce=${encodeURIComponent(nonce)}`);
   }
   terminals(projectId: string) {
-    return this.get(`/v1/projects/${projectId}/terminals`);
+    return this.get<Array<{ id: string; projectId: string; alive: boolean }>>(`/v1/projects/${projectId}/terminals`);
   }
   startTerminal(projectId: string) {
     return this.post<{ id: string }>(`/v1/projects/${projectId}/terminals`);
+  }
+  closeTerminal(projectId: string, terminalId: string) {
+    return this.del<{ closed: boolean }>(`/v1/projects/${projectId}/terminals/${terminalId}`);
   }
 
   events(lastSeq = 0, projectId?: string, runId?: string): WebSocket {

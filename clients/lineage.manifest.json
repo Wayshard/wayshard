@@ -224,7 +224,7 @@
       "mode": "adapted",
       "marker": "ghostty-web",
       "usage": [
-        "gui/src/app/views.tsx"
+        "gui/src/app/pages/session/terminal-panel-v2.tsx"
       ]
     },
     {

@@ -105,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sandbox", s.requireAuth(s.sandboxInfo))
 	mux.HandleFunc("GET /v1/projects/{id}/terminals", s.requireAuth(s.listTerminals))
 	mux.HandleFunc("POST /v1/projects/{id}/terminals", s.requireAuth(s.startTerminal))
+	mux.HandleFunc("DELETE /v1/projects/{id}/terminals/{tid}", s.requireAuth(s.closeTerminal))
 	mux.HandleFunc("GET /v1/ws/pty", s.ptyWS)
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	mux.Handle("/", webembed.Handler())

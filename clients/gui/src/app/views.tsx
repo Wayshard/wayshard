@@ -8,7 +8,6 @@ import { Tag } from "@wayshard/ui/tag"
 import { Spinner } from "@wayshard/ui/spinner"
 import { TextField } from "@wayshard/ui/text-field"
 import { EmptyState, ErrorState } from "./components/state-views"
-import { Terminal } from "./terminal"
 import { useWayshard } from "../wayshard/state"
 
 export type AdvancedSurfaceKey =
@@ -140,18 +139,7 @@ export function Structured(props: { value: unknown; depth?: number }) {
   )
 }
 
-/* --------------------------------- Terminal -------------------------------- */
-
-export function TerminalView() {
-  const ws = useWayshard()
-  return (
-    <Show when={ws.state.activeProjectID} fallback={<EmptyState title="No project selected" />}>
-      <Terminal projectId={ws.state.activeProjectID!} />
-    </Show>
-  )
-}
-
-/* --------------------------- Run-scoped surfaces --------------------------- */
+/* ------------------------------- Run-scoped -------------------------------- */
 
 function useRunResource<T>(fn: (client: ReturnType<typeof useWayshard>["client"] extends () => infer C ? C : never, runID: string) => Promise<T>) {
   const ws = useWayshard()

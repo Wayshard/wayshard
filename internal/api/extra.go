@@ -211,8 +211,9 @@ func (s *Server) listTerminals(w http.ResponseWriter, r *http.Request, _ *auth.P
 	}
 	list := s.PTY.List(r.PathValue("id"))
 	type row struct {
-		ID, ProjectID string
-		Alive         bool
+		ID        string `json:"id"`
+		ProjectID string `json:"projectId"`
+		Alive     bool   `json:"alive"`
 	}
 	var out []row
 	for _, t := range list {
@@ -237,6 +238,23 @@ func (s *Server) startTerminal(w http.ResponseWriter, r *http.Request, p *auth.P
 		return
 	}
 	writeJSON(w, 201, map[string]any{"id": sess.ID, "projectId": sess.ProjectID, "alive": true})
+}
+
+// closeTerminal terminates a server-owned PTY. This is an explicit
+// server-controlled lifecycle operation; a client detach never kills a PTY.
+func (s *Server) closeTerminal(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
+	if s.PTY == nil {
+		writeJSON(w, 200, map[string]any{"closed": false, "reason": "pty unavailable"})
+		return
+	}
+	projectID := r.PathValue("id")
+	tid := r.PathValue("tid")
+	sess, ok := s.PTY.Attach(tid)
+	if !ok || sess.ProjectID != projectID {
+		writeJSON(w, 404, map[string]any{"error": "terminal not found"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"closed": s.PTY.Kill(tid)})
 }
 
 func (s *Server) ptyWS(w http.ResponseWriter, r *http.Request) {

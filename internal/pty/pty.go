@@ -98,6 +98,31 @@ func (m *Manager) List(projectID string) []*Session {
 	return out
 }
 
+// Kill terminates a server-owned PTY and its process. Closing is an explicit
+// server-controlled operation; a client detach never kills a PTY. Returns false
+// if the terminal is not live (already exited or unknown).
+func (m *Manager) Kill(id string) bool {
+	m.mu.Lock()
+	s, ok := m.live[id]
+	if ok {
+		delete(m.live, id)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return false
+	}
+	if s.Cmd != nil && s.Cmd.Process != nil {
+		_ = s.Cmd.Process.Kill()
+	}
+	if s.File != nil {
+		_ = s.File.Close()
+	}
+	if m.Store != nil {
+		_ = m.Store.SetPTYAlive(context.Background(), id, false)
+	}
+	return true
+}
+
 func (m *Manager) MarkLostAfterRestart(ctx context.Context) {
 	if m.Store == nil {
 		return
