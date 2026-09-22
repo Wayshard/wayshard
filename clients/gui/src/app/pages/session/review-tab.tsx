@@ -2,29 +2,26 @@
 //
 // Adapted from the imported OpenCode application review tab
 // (third_party/opencode-v1.18.31/packages/app/src/pages/session/review-tab.tsx):
-// the session-scoped review composition now lives here (Run vs Workspace
-// selection, changed-file list, and the diff/preview viewport), rendered through
-// the adapted session-ui diff component. Wayshard semantics are preserved: Run
-// changes = task-start snapshot → run final; Workspace changes = current source
-// workspace state; pre-existing user changes are labelled, never attributed to
-// the agent.
-import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js"
+// the adapted session-ui SessionReview component is the production review
+// surface. The upstream scroll persistence is retained (user-interaction
+// cancellation, requestAnimationFrame restore, per-session scroll/open state),
+// and the Run vs Workspace provenance selection is a Wayshard addition. Wayshard
+// semantics: Run changes = task-start snapshot -> run final; pre-existing user
+// changes are labelled, never attributed to the agent.
+//
+// Deliberate semantic divergence: Wayshard's workspace API exposes the current
+// working-tree state but not a HEAD baseline, so Workspace mode shows current
+// content through the inherited File component rather than synthesizing a diff.
+// Review comments are not a Wayshard domain feature and are omitted.
+import { For, Show, createEffect, createResource, createSignal, onCleanup, type JSX } from "solid-js"
 import { Button } from "@wayshard/ui/button"
 import { Tag } from "@wayshard/ui/tag"
-import { File as DiffFile } from "@wayshard/gui/session-ui/components/file"
+import { File as FilePreview } from "@wayshard/gui/session-ui/components/file"
+import { SessionReview, type SessionReviewDiffStyle } from "@wayshard/gui/session-ui/components/session-review"
 import { useWayshard } from "../../../wayshard/state"
 import { EmptyState, ErrorState } from "../../components/state-views"
-
-type RunDelta = {
-  files?: Array<{
-    path: string
-    kind: string
-    agentModified: boolean
-    preExisting: boolean
-    before?: { missing?: boolean; size?: number }
-    after?: { missing?: boolean; size?: number }
-  }>
-}
+import { hydrateRunDiffs, runDeltaToDiffs, workspaceEntries, type ReviewDiff, type WorkspaceEntry } from "./review-adapter"
+import { createReviewView } from "./review-view"
 
 function Loading(props: { label?: string }): JSX.Element {
   return <div class="wh-loading">{props.label ?? "Loading…"}</div>
@@ -33,33 +30,102 @@ function Loading(props: { label?: string }): JSX.Element {
 export function SessionReviewTab(): JSX.Element {
   const ws = useWayshard()
   const [mode, setMode] = createSignal<"run" | "workspace">("run")
-  const [selected, setSelected] = createSignal<string | null>(null)
-  const projectID = () => ws.state.activeProjectID
-  const runID = () => ws.state.activeRunID
+  const [diffStyle, setDiffStyle] = createSignal<SessionReviewDiffStyle>("unified")
+  const view = createReviewView(() => ws.state.activeConversationID ?? "global")
 
-  const [workspaceChanges] = createResource(
-    () => (mode() === "workspace" ? projectID() : null),
-    (id) => ws.client().workspaceChanges(id!),
-  )
-  const [runChanges] = createResource(
-    () => (mode() === "run" && runID() ? runID() : null),
-    (id) => ws.client().runChanges(id!),
+  // Scroll restore state, adapted from upstream review-tab.
+  let scroll: HTMLDivElement | undefined
+  let restoreFrame: number | undefined
+  let userInteracted = false
+  let restored: { x: number; y: number } | undefined
+
+  createEffect(() => view.sync())
+
+  const [runDiffs] = createResource(
+    () => (mode() === "run" ? ws.state.activeRunID : null),
+    async (runID) => {
+      const data = (await ws.client().runChanges(runID)) as { delta?: { files?: Array<Record<string, unknown>> } }
+      return hydrateRunDiffs(ws.client(), runID, runDeltaToDiffs(data?.delta))
+    },
   )
 
-  const runFiles = createMemo<RunDelta["files"]>(() => {
-    const data = runChanges() as { delta?: RunDelta } | undefined
-    return data?.delta?.files ?? []
+  const [workspaceFiles] = createResource(
+    () => (mode() === "workspace" ? ws.state.activeProjectID : null),
+    async (projectID) => {
+      const data = (await ws.client().workspaceChanges(projectID)) as { files?: Record<string, { kind?: string }> }
+      return workspaceEntries(data?.files)
+    },
+  )
+
+  const [selectedWorkspace, setSelectedWorkspace] = createSignal<string | undefined>()
+
+  const handleInteraction = () => {
+    userInteracted = true
+    if (restoreFrame !== undefined) {
+      cancelAnimationFrame(restoreFrame)
+      restoreFrame = undefined
+    }
+  }
+
+  const doRestore = () => {
+    restoreFrame = undefined
+    const el = scroll
+    if (!el || userInteracted) return
+    if (el.clientHeight === 0 || el.clientWidth === 0) return
+    const s = view.scroll()
+    if (!s || (s.x === 0 && s.y === 0)) return
+    const maxY = Math.max(0, el.scrollHeight - el.clientHeight)
+    const maxX = Math.max(0, el.scrollWidth - el.clientWidth)
+    const targetY = Math.min(s.y, maxY)
+    const targetX = Math.min(s.x, maxX)
+    if (el.scrollTop === targetY && el.scrollLeft === targetX) return
+    if (el.scrollTop !== targetY) el.scrollTop = targetY
+    if (el.scrollLeft !== targetX) el.scrollLeft = targetX
+    restored = { x: el.scrollLeft, y: el.scrollTop }
+  }
+
+  const queueRestore = () => {
+    if (userInteracted || restoreFrame !== undefined) return
+    restoreFrame = requestAnimationFrame(doRestore)
+  }
+
+  const handleScroll = (event: Event & { currentTarget: HTMLDivElement }) => {
+    const el = event.currentTarget
+    const prev = restored
+    if (prev && el.scrollTop === prev.y && el.scrollLeft === prev.x) {
+      restored = undefined
+      return
+    }
+    restored = undefined
+    handleInteraction()
+    if (el.clientHeight === 0 || el.clientWidth === 0) return
+    view.setScroll({ x: el.scrollLeft, y: el.scrollTop })
+  }
+
+  // A new session/run resets interaction tracking so its persisted scroll is
+  // restored rather than suppressed by the previous session's scrolling.
+  createEffect(() => {
+    ws.state.activeConversationID
+    ws.state.activeRunID
+    userInteracted = false
   })
 
-  const workspaceFiles = createMemo<Array<{ path: string; meta?: unknown }>>(() => {
-    const data = workspaceChanges() as { files?: Record<string, unknown> } | undefined
-    const files = data?.files ?? {}
-    return Object.keys(files).map((path) => ({ path, meta: files[path] }))
+  createEffect(() => {
+    runDiffs()
+    diffStyle()
+    queueRestore()
   })
+
+  onCleanup(() => {
+    if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame)
+  })
+
+  const diffs = () => (runDiffs() ?? []) as ReviewDiff[]
+  const preExistingCount = () => diffs().filter((d) => d.preExisting && !d.agentModified).length
 
   return (
-    <div data-slot="session-review" class="wh-panel flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div class="wh-panel-header">
+    <div data-slot="session-review-tab" class="flex min-h-0 flex-1 flex-col">
+      <div class="wh-panel-header shrink-0">
         <h2>Changes</h2>
         <div class="wh-segmented">
           <Button size="small" variant={mode() === "run" ? "primary" : "secondary"} onClick={() => setMode("run")}>
@@ -70,116 +136,104 @@ export function SessionReviewTab(): JSX.Element {
           </Button>
         </div>
       </div>
-      <p class="wh-muted">
-        {mode() === "run"
-          ? "Changes produced by this run (task-start snapshot → run workspace). User changes are never attributed to the agent."
-          : "Current source workspace state. Use a Git client for staging and commits."}
-      </p>
       <Show when={mode() === "run"}>
-        <Show when={runID()} fallback={<EmptyState title="No run selected" body="Send a task to create a run." />}>
-          <Show when={!runChanges.loading} fallback={<Loading />}>
-            <Show when={runFiles()!.length} fallback={<EmptyState title="No run changes" body="The run produced no source changes." />}>
-              <ul class="wh-file-list">
-                <For each={runFiles()}>
-                  {(f) => (
-                    <li>
-                      <button class="wh-file-row" data-kind={f.kind} onClick={() => setSelected(f.path)}>
-                        <Tag>{f.kind}</Tag>
-                        <span class="wh-truncate">{f.path}</span>
-                        <Show when={f.preExisting}>
-                          <Tag>user baseline</Tag>
-                        </Show>
-                      </button>
-                    </li>
-                  )}
-                </For>
-              </ul>
+        <Show when={ws.state.activeRunID} fallback={<EmptyState title="No run selected" body="Send a task to create a run." />}>
+          <Show when={!runDiffs.loading} fallback={<Loading label="Loading run changes…" />}>
+            <Show when={runDiffs.error} fallback={
+              <SessionReview
+                class="min-h-0 flex-1"
+                diffs={diffs()}
+                diffStyle={diffStyle()}
+                onDiffStyleChange={setDiffStyle}
+                open={view.open()}
+                onOpenChange={view.setOpen}
+                empty={<EmptyState title="No run changes" body="The run produced no source changes." />}
+                title={
+                  <span class="flex items-center gap-2">
+                    Run changes
+                    <Show when={preExistingCount()}>
+                      <Tag>user baseline {preExistingCount()}</Tag>
+                    </Show>
+                  </span>
+                }
+                scrollRef={(el) => {
+                  scroll = el
+                  queueRestore()
+                }}
+                onScroll={handleScroll}
+                onDiffRendered={queueRestore}
+                readFile={async (path) => {
+                  const runID = ws.state.activeRunID
+                  if (!runID) return undefined
+                  const file = await ws.client().runFile(runID, path, "run")
+                  return { path, content: file.content, hash: file.hash, binary: file.binary }
+                }}
+              />
+            }>
+              <ErrorState title="Unable to load run changes" detail={String(runDiffs.error)} />
             </Show>
           </Show>
         </Show>
       </Show>
       <Show when={mode() === "workspace"}>
-        <Show when={projectID()} fallback={<EmptyState title="No project selected" />}>
-          <Show when={!workspaceChanges.loading} fallback={<Loading />}>
-            <Show when={workspaceFiles()!.length} fallback={<EmptyState title="Workspace clean" />}>
-              <ul class="wh-file-list">
-                <For each={workspaceFiles()}>
-                  {(f) => (
-                    <li>
-                      <button class="wh-file-row" onClick={() => setSelected(f.path)}>
-                        <span class="wh-truncate">{f.path}</span>
-                      </button>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </Show>
+        <Show when={ws.state.activeProjectID} fallback={<EmptyState title="No project selected" />}>
+          <Show when={!workspaceFiles.loading} fallback={<Loading label="Loading workspace changes…" />}>
+            <WorkspaceChanges
+              entries={workspaceFiles() ?? []}
+              selected={selectedWorkspace()}
+              onSelect={setSelectedWorkspace}
+              projectID={ws.state.activeProjectID!}
+            />
           </Show>
         </Show>
-      </Show>
-      <Show when={selected() && projectID()}>
-        <FilePeek path={selected()!} mode={mode()} runID={runID()} />
       </Show>
     </div>
   )
 }
 
-function FilePeek(props: { path: string; mode: "run" | "workspace"; runID: string | null }): JSX.Element {
+function WorkspaceChanges(props: {
+  entries: WorkspaceEntry[]
+  selected: string | undefined
+  onSelect: (path: string) => void
+  projectID: string
+}): JSX.Element {
   const ws = useWayshard()
-  const [before] = createResource(
-    () => (props.mode === "run" && props.runID ? { runID: props.runID, path: props.path } : null),
-    (args) => ws.client().runFile(args.runID, args.path, "snapshot"),
-  )
-  const [after] = createResource(
-    () => (props.mode === "run" && props.runID ? { runID: props.runID, path: props.path } : null),
-    (args) => ws.client().runFile(args.runID, args.path, "run"),
-  )
-  const [workspace] = createResource(
-    () => (props.mode === "workspace" && ws.state.activeProjectID ? { id: ws.state.activeProjectID, path: props.path } : null),
+  const [file] = createResource(
+    () => (props.selected ? { id: props.projectID, path: props.selected } : null),
     (args) => ws.client().readFile(args.id, args.path),
   )
-
   return (
-    <div class="wh-peek">
-      <div class="wh-peek-header">
-        <span class="wh-truncate">{props.path}</span>
-        <Show when={props.mode === "run"}>
-          <Tag>run start → run final</Tag>
-        </Show>
-        <Show when={props.mode === "workspace"}>
-          <Tag>current workspace</Tag>
+    <div data-slot="session-review-workspace" class="flex min-h-0 flex-1">
+      <div class="wh-files-tree shrink-0 overflow-y-auto">
+        <Show when={props.entries.length} fallback={<EmptyState title="Workspace clean" />}>
+          <ul class="wh-file-list">
+            <For each={props.entries}>
+              {(entry) => (
+                <li>
+                  <button class="wh-file-row" data-kind={entry.kind} onClick={() => props.onSelect(entry.path)}>
+                    <Tag>{entry.kind}</Tag>
+                    <span class="wh-truncate">{entry.path}</span>
+                  </button>
+                </li>
+              )}
+            </For>
+          </ul>
         </Show>
       </div>
-      <Show when={props.mode === "run"}>
-        <Show when={!before.loading && !after.loading} fallback={<Loading label="Loading diff…" />}>
-          <Show when={before() || after()} fallback={<EmptyState title="No diff available" />}>
-            <Show
-              when={!(before()?.binary || after()?.binary)}
-              fallback={<EmptyState title="Binary change" body="This file cannot be shown as text." />}
-            >
-              <div class="wh-diff">
-                <DiffFile
-                  mode="diff"
-                  before={{ name: props.path, contents: before()?.content ?? "" }}
-                  after={{ name: props.path, contents: after()?.content ?? "" }}
-                />
-              </div>
+      <div class="wh-files-view min-w-0 flex-1 overflow-auto">
+        <Show when={props.selected} fallback={<EmptyState title="Select a file" body="Choose a workspace file to view." />}>
+          <Show when={!file.loading} fallback={<Loading />}>
+            <Show when={file()} fallback={<ErrorState title="Unable to read file" />}>
+              <Show
+                when={!file()!.binary}
+                fallback={<EmptyState title="Binary file" body="This file cannot be shown as text." />}
+              >
+                <FilePreview mode="text" file={{ name: props.selected!, contents: file()!.content }} />
+              </Show>
             </Show>
           </Show>
         </Show>
-      </Show>
-      <Show when={props.mode === "workspace"}>
-        <Show when={!workspace.loading} fallback={<Loading />}>
-          <Show when={workspace()} fallback={<ErrorState title="Unable to read file" />}>
-            <Show
-              when={!workspace()!.binary}
-              fallback={<EmptyState title="Binary file" body="This file cannot be shown as text." />}
-            >
-              <pre class="wh-file-view">{workspace()!.content}</pre>
-            </Show>
-          </Show>
-        </Show>
-      </Show>
+      </div>
     </div>
   )
 }
