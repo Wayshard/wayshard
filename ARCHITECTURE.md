@@ -608,9 +608,11 @@ Implementation should use appropriate supported OS primitives and runtime capabi
 
 Linux may combine filesystem/process/network/resource primitives such as Landlock/namespaces/no-new-privs/seccomp/cgroups as available.
 
-macOS may use the practical platform sandbox mechanisms available to the process, with runtime probing and no silent fallback.
+macOS uses `sandbox-exec`/Seatbelt with a compiled profile (filesystem read/write confinement and network denial), passed inline via `-p`; `sandbox-exec` absence fails closed. Native black-box tests on macOS arm64 and Intel verify the filesystem matrix, `NetworkNone`, process-group cancellation, synthetic HOME/TMPDIR and fail-before-exec.
 
-Windows may use AppContainer/restricted token/process mitigations/Job Objects and newer sandbox APIs when available and proven by conformance tests.
+Windows uses Job Objects for process/resource management only. Because filesystem confinement, network denial and race-free process-tree containment are not enforced, `Report()` reports the required sandbox unavailable and required harness/tool/probe policies fail closed with `ErrRequiredIsolation` before any untrusted code runs (AppContainer is not implemented). Windows remains a full server/client platform; only local protected execution fails closed.
+
+A `Required` policy carries typed feature requirements (`RequiredFeatures`); a backend must declare every required feature (`validateRequiredFeatures`) or the policy is refused. A backend may never claim a feature it does not enforce.
 
 The architecture intentionally avoids requiring Docker.
 

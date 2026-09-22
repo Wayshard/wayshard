@@ -79,11 +79,11 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Provider routing requires all four independent conditions: user/policy permission, actual platform capability, harness transport compatibility, and a configured destination policy. Raw host networking is never chosen as provider access. Transport compatibility is declared only from observed evidence (a real harness reaching an authorized destination through the broker). | `internal/routing/router.go`, `internal/harness/exec.go`, `internal/app/app.go`, `cmd/wayshard-server` flags | `TestProviderRouteMatrix`, `TestProviderHarnessRouteFailsClosed`, `TestACPExecProviderFailsClosed`, `TestProviderExecLaunchesThroughSecureBroker`, `TestRealHarnessProviderCall` (native) | done (Linux; real-harness transport verified natively) |
 | Real ACP harness interoperability: script/symlink harnesses receive a narrow launch closure (package tree + PATH-resolved interpreter), the ACP driver tolerates extension notifications and supports `session/set_config_option`/`session/set_model` model selection, and real harnesses are given the universal structured final-response contract so stage artifacts validate server-side. OpenCode v2.0.5 and codex-acp 1.12.0 initialize over real ACP. The ACP discovery probe uses an isolated loopback-only network namespace when the platform supports it, so harnesses whose ACP server needs local IPC (OpenCode) are discovered route-viable; a configured provider model (`--provider-model`) is applied to provider candidates that do not advertise models. OpenCode completed a real source-changing task end-to-end through normal discovery and routing with secure provider networking. | `internal/harness/{closure,discover,exec}.go`, `internal/acp/driver.go`, `internal/sandbox/{policy,probe,linux,helper_linux,netlink_linux}.go`, `internal/app/app.go` | `TestHarnessClosureForScriptHarness`, `TestHarnessClosureForNativeBinary`, `TestCatalogVersionArgs`, `TestCatalogDefinitionBehavior`, `TestDiscoverAdvertisedAuthIsUnknownAndRoutable`, `TestLoopbackProbeIsolation`, `TestRealHarnessProviderCall` (native), `TestRealHarnessSourceChangingE2E` (native) | done (native Linux; CI uses fixture-backed tests only) |
 | Tool/validation network defaults to `NetworkNone`; project/tool commands cannot reach TCP/UDP/Unix/docker.sock | `validation.Runner` | `TestValidationNetworkNoneEnforced` | done (Linux black-box) |
-| macOS sandbox: `sandbox-exec` seatbelt profile compiled from SandboxPolicy; process group; fail if missing when Required | `internal/sandbox/seatbelt.go`, `darwin.go` | `TestSeatbeltProfileCompilation` (all OS) | code present; native runtime enforcement UNVERIFIED (no macOS execution here) |
-| Windows sandbox: Job Objects + new process group; AppContainer not claimed; fail closed if unavailable | `internal/sandbox/windows.go` | cross-compile + policy tests | code present; native runtime enforcement UNVERIFIED |
+| macOS sandbox: `sandbox-exec` seatbelt profile (read/write confinement + network denial) compiled from SandboxPolicy, profile passed inline via `-p` (no on-disk profile), process group, fail closed if `sandbox-exec` missing when Required | `internal/sandbox/seatbelt.go`, `darwin.go` | `TestSeatbeltProfileCompilation` (all OS), `TestNativeFilesystemConfinement`, `TestNativeNetworkNone`, `TestNativeProcessTreeKill`, `TestNativeEnvironmentIsSynthetic`, `TestNativeFailClosedBeforeExec`, `TestNativeCompileAndConstrain` | done (native black-box on macOS 15 arm64 and macos-15-intel) |
+| Windows sandbox: Job Objects provide process/resource management only. Filesystem confinement, network denial and race-free process-tree containment are NOT enforced, so `Report()` reports the required sandbox unavailable and required harness/tool/probe policies fail closed with `ErrRequiredIsolation` before any untrusted code runs. AppContainer not implemented. | `internal/sandbox/windows.go` | `TestWindowsBackendFailsClosedForRequiredPolicy`, `TestWindowsReportDoesNotClaimFilesystemOrNetwork`, `TestNativeFailClosedBeforeExec`, `TestWindowsJobObjectManagesNonRequiredProcessTree`, `TestRequiredPolicyCompileInvariant` | done (native on windows-latest; honest fail-closed) |
 | Required isolation never silently unrestricted | `LinuxBackend.Compile`/`Constrain` fail closed when Landlock unavailable; unsupported backends error | `TestRequiredIsolationNeverSilent`, `TestReducedSecurityStillDoesNotSilentlyUnrestrict`, `TestUnsupportedConstrainFailsClosed`, `TestProbeNeverClaimsUnrestricted` | done |
 | Harness and tool launch apply the compiled filesystem/env policy to the process and descendants | `sandbox` helper re-exec + `harness.ACPExec` + `validation.Runner` | confinement tests (host read/write denied, workspace allowed, child/grandchild confined) | done (Linux) |
-| Harness discovery/version/ACP-initialize probes run under a dedicated ProbePolicy: NetworkNone, synthetic HOME/TEMP, env allowlist, read-only system + executable roots, no project/SourceWorkspace/Wayshard-runtime/SSH-agent/display access, bounded output and descendant cleanup; fail closed when isolation is unavailable. Script/symlink harnesses get a narrow read-only launch closure (their package tree plus a PATH-resolved interpreter) and a scoped procfs when the platform can mount one. The login-shell PATH probe is a least-privilege exception: it reads only the shell executable directory and the specific per-shell startup files actually required (never the home directory or a blanket `/etc`), and its output is validated (absolute only, no cwd/relative/control-character entries, bounded, deduplicated). | `sandbox.ProbePolicy`, `sandbox.LoginShellPolicy`, `sandbox.SanitizeLoginPATH`, `sandbox.RunConstrainedOutput`, `harness.closure`, `harness.probeOne`, `harness.loginShellPATH` | `TestProbePolicyConfinesMaliciousVersionProbe`, `TestProbePolicyConfinesACPInitialize`, `TestProbeTimeoutKillsDescendants`, `TestProbeOutputBounded`, `TestLoginShellPolicyDeniesHomeSecrets`, `TestSanitizeLoginPATH`, `TestLoginShellStartupFilesSelection`, `TestHarnessClosureForScriptHarness` | done (Linux verified; macOS/Windows native probe enforcement unverified) |
+| Harness discovery/version/ACP-initialize probes run under a dedicated ProbePolicy: NetworkNone, synthetic HOME/TEMP, env allowlist, read-only system + executable roots, no project/SourceWorkspace/Wayshard-runtime/SSH-agent/display access, bounded output and descendant cleanup; fail closed when isolation is unavailable. Script/symlink harnesses get a narrow read-only launch closure (their package tree plus a PATH-resolved interpreter) and a scoped procfs when the platform can mount one. The login-shell PATH probe is a least-privilege exception: it reads only the shell executable directory and the specific per-shell startup files actually required (never the home directory or a blanket `/etc`), and its output is validated (absolute only, no cwd/relative/control-character entries, bounded, deduplicated). | `sandbox.ProbePolicy`, `sandbox.LoginShellPolicy`, `sandbox.SanitizeLoginPATH`, `sandbox.RunConstrainedOutput`, `harness.closure`, `harness.probeOne`, `harness.loginShellPATH` | `TestProbePolicyConfinesMaliciousVersionProbe`, `TestProbePolicyConfinesACPInitialize`, `TestProbeTimeoutKillsDescendants`, `TestProbeOutputBounded`, `TestLoginShellPolicyDeniesHomeSecrets`, `TestSanitizeLoginPATH`, `TestLoginShellStartupFilesSelection`, `TestHarnessClosureForScriptHarness` | done (Linux verified; macOS probes confined by Seatbelt; Windows probes fail closed because required isolation is unavailable) |
 | Discovery probes are server-owned and reconcilable: each probe process tree receives a durable `probe_owners` record (token hash persisted before launch), completes only when no owned descendant remains, and startup reconciliation terminates any daemonized (setsid) probe descendant by token before discovery runs again. Discovery/probing runs only after startup recovery. | `internal/recovery/recovery.go` (`reconcileProbeOwners`), `internal/storage/probe_owners.go`, `migrations/005_probe_owners.sql`, `harness.StoreProbeOwnerSink`, `app.Open` ordering | `TestProcessBoundaryProbeDescendantReconciled`, `TestStartupOrderingRecoveryBeforeDiscovery`, `TestUpgradeFromPriorVersions` | done (Linux process boundary; other platforms report ownership unsupported and fail closed for a live run) |
 | ACP client callbacks: fs read/write scoped to run workspace; permission requests surface durable approvals; terminal/tool execution runs through the Tool Sandbox (NetworkNone, allowlisted env, workspace-scoped, server-owned process tree) | `harness.ACPExec` hooks, `harness.toolManager` | `TestToolRunsInSandbox`, `TestToolWritePermission`, `TestToolCancelKillsDescendants`; `TestApprovalLifecycle`; callback scoping via `withinRoot` | done (Linux process-boundary; approval APPROVE and DENY E2E verified) |
 | Object GC, workspace retention, disk pressure gate | `internal/storage/gc.go`, `scheduler.tick` | `gc_test.go`; low-disk gate blocks write-heavy runs with `BlockedStorage` | done |
@@ -163,7 +163,7 @@ The forensic audit of `v0.1.0-rc.6` (`325fa20`) found eight P0 defects. This pas
 Still partial or unverified after this pass:
 
 - Real installed ACP harness interoperability (no supported harness was installed; only the deterministic fake was exercised).
-- macOS/Windows runtime sandbox enforcement and orphan-process reconciliation (code present; Linux-only and not executed natively on other platforms; a live run with an unreconcilable owner fails closed there).
+- macOS runtime sandbox enforcement is natively verified (Seatbelt filesystem/network/process-tree on macOS arm64 and Intel); Windows honestly fails closed for required isolation (Job Objects are process/resource management only). See "Native runtime security" below.
 - ACP terminal/tool callbacks are wired through the Tool Sandbox (Linux process-boundary verified); a true kill-mid-recovery process test remains outstanding.
 - Context assembly is injected into orchestration stages (P1); stage bundles and their durable manifest are verified.
 - Web/Desktop/Android runtime parity and client completeness (see the Clients table).
@@ -184,7 +184,7 @@ Still partial or unverified after this pass:
 
 - Real installed ACP harness interoperability against the secure provider transport (deterministic fixture only; no harness is installed by Wayshard).
 - macOS/Windows provider networking: unavailable and fail closed.
-- macOS/Windows runtime sandbox enforcement and orphan-process reconciliation (code present; Linux-only and not executed natively on other platforms; a live run with an unreconcilable owner fails closed there).
+- macOS runtime sandbox enforcement is natively verified (Seatbelt filesystem/network/process-tree on macOS arm64 and Intel); Windows honestly fails closed for required isolation (Job Objects are process/resource management only). See "Native runtime security" below.
 
 ## P1 Pass 1C-2 — real harness end-to-end
 
@@ -461,3 +461,53 @@ This pass closed those findings without redesigning the accepted parts.
   state (`selectConversation` + `send`) so the created run is registered and the
   session surface shows its stages/changes/timeline immediately.
 
+
+## Native runtime security (macOS + Windows)
+
+Verification-first native pass closing the remaining native-runtime security
+evidence gap. The hard rule is unchanged: approvals are UX/policy, OS
+containment is security, and required isolation never silently becomes
+unrestricted execution.
+
+- **Feature-level capability model.** `SandboxPolicy` now has typed features and
+  `RequiredFeatures`/`validateRequiredFeatures`: a `Required` policy fails closed
+  with `ErrRequiredIsolation` unless the backend declares every feature the
+  policy depends on (process tree, filesystem read/write, network mode,
+  synthetic env). A backend can no longer compile a required policy while
+  silently omitting containment. `TestRequiredPolicyCompileInvariant` enforces
+  this on every platform.
+- **macOS (verified).** Seatbelt confinement is real and natively verified on
+  macOS 15 arm64 and `macos-15-intel`: workspace read/write allowed, a read-only
+  root is readable but not writable, a host secret is neither readable nor
+  writable, `NetworkNone` denies a loopback TCP connection to a host listener,
+  cancellation kills the whole process group, HOME/TMPDIR are synthetic, and an
+  uncompilable required policy fails before any target code runs. The profile is
+  passed inline via `sandbox-exec -p`, so no on-disk profile exists to tamper
+  with or leak. `sandbox-exec` absence fails closed. A relative command under
+  `cmd.Dir` is resolved against `cmd.Dir`, not the server's CWD (fixed).
+- **Windows (honest fail-closed).** Job Objects provide process/resource
+  management only; filesystem confinement, network denial and race-free
+  process-tree containment are not enforced. `Report()` therefore reports the
+  required sandbox unavailable with the missing features, and required
+  harness/tool/probe policies fail closed with `ErrRequiredIsolation` before any
+  untrusted code executes (`TestNativeFailClosedBeforeExec` proves the marker is
+  never written). Isolation-unavailable is a policy block (run settles BLOCKED),
+  not a retryable infrastructure failure. Job Object tree termination is still
+  exercised for non-required management via
+  `TestWindowsJobObjectManagesNonRequiredProcessTree`. Windows remains a full
+  server/client platform; only local protected execution fails closed.
+- **Probe ownership fail-closed.** When an active discovery-probe owner cannot be
+  verified on the platform, startup reconciliation disables probe execution for
+  the server lifetime (`recovery.ProbeOwnershipReconciled`) instead of racing an
+  unreconciled descendant.
+- **CI.** A `native-security` job runs the native black-box suite on macOS arm64,
+  `macos-15-intel` and windows-latest, plus the process/ownership/recovery/harness
+  packages. The ordinary `Go` job continues to run `go test ./...` on
+  ubuntu/macos/windows.
+
+Known honest limitation: on macOS a deliberately daemonizing (`setsid`)
+descendant can leave the process group, so cancellation may not terminate it. It
+remains confined by Seatbelt (no host secret read, no network), and because
+macOS cannot verify process ownership a stale owner blocks the affected run and
+disables discovery probes (fail closed) rather than continuing. This is a
+confined-orphan residual, not a containment escape.
