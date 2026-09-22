@@ -20,6 +20,7 @@ import { FileFallback, pairingOpen } from "./session-shell"
 import { PairingGate } from "./pairing"
 import { syncRouter, useRouteMatch } from "./router"
 import { Home } from "./pages/home"
+import { AppLayout } from "./pages/layout"
 import { SessionRoute } from "./pages/session-route"
 import { NewSessionRoute } from "./pages/new-session"
 
@@ -34,7 +35,9 @@ function Routes() {
         <NewSessionRoute />
       </Show>
       <Show when={match().name === "home"}>
-        <Home />
+        <AppLayout>
+          <Home />
+        </AppLayout>
       </Show>
     </>
   )
