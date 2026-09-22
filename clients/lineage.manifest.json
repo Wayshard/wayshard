@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "upstream": {
     "project": "OpenCode 2",
     "tag": "v1.18.31",
@@ -60,13 +60,14 @@
     }
   ],
   "wayshardAuthored": [
-    "clients/gui/src/app",
-    "clients/gui/src/wayshard",
-    "clients/gui/src/sdk",
-    "clients/tui/src/model.ts",
-    "clients/web/src",
     "clients/desktop/src",
-    "clients/sdk/src"
+    "clients/gui/src/app",
+    "clients/gui/src/app/pages/session/review-adapter.ts",
+    "clients/gui/src/sdk",
+    "clients/gui/src/wayshard",
+    "clients/sdk/src",
+    "clients/tui/src/model.ts",
+    "clients/web/src"
   ],
   "removedFromUpstream": [
     "provider/model connection and management UI (Wayshard providers are harness-owned)",
@@ -187,7 +188,10 @@
       "mode": "copied+adapted",
       "marker": "PromptInputV2",
       "usage": [
-        "gui/src/app/composer.tsx"
+        {
+          "file": "gui/src/app/composer.tsx",
+          "specifier": "@wayshard/gui/session-ui/v2/components/prompt-input"
+        }
       ]
     },
     {
@@ -197,7 +201,14 @@
       "mode": "copied+adapted",
       "marker": "export function File",
       "usage": [
-        "gui/src/app/views.tsx"
+        {
+          "file": "gui/src/app/pages/session/review-tab.tsx",
+          "specifier": "@wayshard/gui/session-ui/components/file"
+        },
+        {
+          "file": "gui/src/app/pages/session/file-tabs.tsx",
+          "specifier": "@wayshard/gui/session-ui/components/file"
+        }
       ]
     },
     {
@@ -207,7 +218,10 @@
       "mode": "adapted",
       "marker": "buildFileTreeV2Model",
       "usage": [
-        "gui/src/app/file-tree.tsx"
+        {
+          "file": "gui/src/app/file-tree.tsx",
+          "specifier": "./file-tree-model"
+        }
       ]
     },
     {
@@ -224,7 +238,10 @@
       "mode": "adapted",
       "marker": "ghostty-web",
       "usage": [
-        "gui/src/app/pages/session/terminal-panel-v2.tsx"
+        {
+          "file": "gui/src/app/pages/session/terminal-panel-v2.tsx",
+          "specifier": "../../terminal"
+        }
       ]
     },
     {
@@ -234,7 +251,10 @@
       "mode": "copied+adapted",
       "marker": "packages/tui/src/ui/dialog-select.tsx",
       "usage": [
-        "tui/src/app.tsx"
+        {
+          "file": "tui/src/app.tsx",
+          "specifier": "./ui/dialog-select"
+        }
       ]
     },
     {
@@ -376,6 +396,246 @@
       "destination": "gui/src/app/context/layout.tsx",
       "mode": "adapted",
       "marker": "// Adapted from the imported OpenCode application layout context"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/composer/session-composer-region-controller.ts",
+      "upstreamBlob": "4073f1c191749a50284621e1802b2fc6321ac76f",
+      "destination": "gui/src/app/components/composer-region-controller.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode session composer region controller",
+      "usage": [
+        {
+          "file": "gui/src/app/components/composer-region.tsx",
+          "specifier": "./composer-region-controller"
+        }
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/helpers.ts",
+      "upstreamBlob": "c43f6bc6a3654945582e6713e9a4949c73cd4187",
+      "destination": "gui/src/app/pages/session/terminal-helpers.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode session helpers",
+      "usage": [
+        {
+          "file": "gui/src/app/pages/session/terminal-panel-v2.tsx",
+          "specifier": "./terminal-helpers"
+        }
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/file-tabs.tsx",
+      "upstreamBlob": "b67b810a4b2ffd932db7a36f0d6f9db542022eba",
+      "destination": "gui/src/app/pages/session/file-tab-model.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode file-tabs tab/scroll model",
+      "usage": [
+        {
+          "file": "gui/src/app/pages/session/file-tabs.tsx",
+          "specifier": "./file-tab-model"
+        }
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/review-tab.tsx",
+      "upstreamBlob": "1b65af7121ac870d6fcaac70a8cd9a18c747e2d1",
+      "destination": "gui/src/app/pages/session/review-adapter.ts",
+      "mode": "adapted",
+      "marker": "// Wayshard review data adapter.",
+      "usage": [
+        {
+          "file": "gui/src/app/pages/session/review-tab.tsx",
+          "specifier": "./review-adapter"
+        }
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/review-tab.tsx",
+      "upstreamBlob": "1b65af7121ac870d6fcaac70a8cd9a18c747e2d1",
+      "destination": "gui/src/app/pages/session/review-view.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode review-tab scroll persistence",
+      "usage": [
+        {
+          "file": "gui/src/app/pages/session/review-tab.tsx",
+          "specifier": "./review-view"
+        }
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/timeline/message-timeline.tsx",
+      "upstreamBlob": "e0838825570e0e137f2dc6a188e7c6abe6fe46fa",
+      "destination": "gui/src/app/pages/session/timeline/scroll.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode timeline scroll",
+      "usage": [
+        {
+          "file": "gui/src/app/pages/session/timeline/message-timeline.tsx",
+          "specifier": "./scroll"
+        }
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/timeline/message-timeline.tsx",
+      "upstreamBlob": "e0838825570e0e137f2dc6a188e7c6abe6fe46fa",
+      "destination": "gui/src/app/pages/session/timeline/view.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode timeline per-session cache",
+      "usage": [
+        {
+          "file": "gui/src/app/pages/session/timeline/message-timeline.tsx",
+          "specifier": "./view"
+        }
+      ]
+    }
+  ],
+  "structuralAncestry": [
+    {
+      "upstream": "packages/app/src/pages/session/review-tab.tsx",
+      "destination": "gui/src/app/pages/session/review-tab.tsx",
+      "mode": "adapted",
+      "minCodeLines": 120,
+      "requiredDefs": [
+        "SessionReviewTab"
+      ],
+      "sharedAnchors": [
+        "SessionReview",
+        "restoreFrame",
+        "userInteracted",
+        "onDiffRendered",
+        "scrollRef",
+        "diffStyle",
+        "queueRestore"
+      ],
+      "liveAnchors": [
+        "data-slot=\"session-review-tab\"",
+        "hydrateRunDiffs"
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/terminal-panel-v2.tsx",
+      "destination": "gui/src/app/pages/session/terminal-panel-v2.tsx",
+      "mode": "adapted",
+      "minCodeLines": 120,
+      "requiredDefs": [
+        "SessionTerminalPanel"
+      ],
+      "sharedAnchors": [
+        "focusTerminalById",
+        "terminal-wrapper-",
+        "autoCreated",
+        "aria-label"
+      ],
+      "liveAnchors": [
+        "data-slot=\"terminal-tab\"",
+        "closeTerminal",
+        "createTerminal"
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/composer/session-composer-region.tsx",
+      "destination": "gui/src/app/components/composer-region.tsx",
+      "mode": "adapted",
+      "minCodeLines": 50,
+      "requiredDefs": [
+        "ComposerRegion"
+      ],
+      "sharedAnchors": [
+        "session-prompt-dock",
+        "dockProgress",
+        "dockHeight",
+        "setDockRef",
+        "setDockBodyRef",
+        "centered",
+        "promptInput"
+      ],
+      "liveAnchors": [
+        "data-slot=\"approval-dock\"",
+        "focusPrompt"
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/composer/session-composer-region-controller.ts",
+      "destination": "gui/src/app/components/composer-region-controller.ts",
+      "mode": "adapted",
+      "minCodeLines": 35,
+      "requiredDefs": [
+        "createSessionComposerRegionController"
+      ],
+      "sharedAnchors": [
+        "createResizeObserver",
+        "useSpring",
+        "dockProgress",
+        "dockHeight",
+        "setDockBodyRef",
+        "setPromptRef",
+        "centered"
+      ],
+      "liveAnchors": [
+        "focusPrompt",
+        "setDockRef"
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/composer/session-composer-state.ts",
+      "destination": "gui/src/app/components/session-composer-state.ts",
+      "mode": "adapted",
+      "minCodeLines": 60,
+      "requiredDefs": [
+        "createSessionComposerController",
+        "composerDockState"
+      ],
+      "sharedAnchors": [
+        "closing",
+        "opening",
+        "responding",
+        "blocked",
+        "dock"
+      ],
+      "liveAnchors": [
+        "resolveApproval",
+        "composerDockState"
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/file-tabs.tsx",
+      "destination": "gui/src/app/pages/session/file-tabs.tsx",
+      "mode": "adapted",
+      "minCodeLines": 140,
+      "requiredDefs": [
+        "SessionFileTabs"
+      ],
+      "sharedAnchors": [
+        "handleScroll",
+        "setScroll",
+        "viewport",
+        "data-slot",
+        "requestAnimationFrame"
+      ],
+      "liveAnchors": [
+        "data-slot=\"file-open-tabs\"",
+        "data-slot=\"file-editor\""
+      ]
+    },
+    {
+      "upstream": "packages/app/src/pages/session/timeline/message-timeline.tsx",
+      "destination": "gui/src/app/pages/session/timeline/message-timeline.tsx",
+      "mode": "adapted",
+      "minCodeLines": 100,
+      "requiredDefs": [
+        "SessionTimeline"
+      ],
+      "sharedAnchors": [
+        "data-timeline-key",
+        "data-timeline-row",
+        "requestAnimationFrame",
+        "scrollTo"
+      ],
+      "liveAnchors": [
+        "reconcileRows",
+        "windowRows",
+        "Jump to latest"
+      ]
     }
   ]
 }
