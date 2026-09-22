@@ -83,20 +83,6 @@
       "marker": "imported OpenCode 2 graphical client command context"
     },
     {
-      "upstream": "packages/app/src/components/session/session-sortable-tab.tsx",
-      "upstreamBlob": "d78f392941ac343e7003b3e6240ded76cb2ba0a4",
-      "destination": "gui/src/app/session-tab.tsx",
-      "mode": "adapted",
-      "marker": "imported OpenCode 2 graphical client session tab"
-    },
-    {
-      "upstream": "packages/app/src/pages/layout-new.tsx",
-      "upstreamBlob": "6d76ca840178e78185160f7af7e10c91d3aefd01",
-      "destination": "gui/src/app/layout.tsx",
-      "mode": "adapted",
-      "marker": "imported OpenCode 2 graphical client layout page"
-    },
-    {
       "upstream": "packages/app/src/components/dialog-command-palette-v2.tsx",
       "upstreamBlob": "e996fd0be77c476de9884a8bd02c4735149a9742",
       "destination": "gui/src/app/command-palette.tsx",
@@ -250,6 +236,111 @@
       "usage": [
         "tui/src/app.tsx"
       ]
+    },
+    {
+      "upstream": "packages/app/src/app.tsx",
+      "upstreamBlob": "0c950871a3354032962d6bbd96015d919afc9fd7",
+      "destination": "gui/src/app/app.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application root"
+    },
+    {
+      "upstream": "packages/app/src/pages/home.tsx",
+      "upstreamBlob": "4fadb8a68f24360d0111ced24259dc3716634a5e",
+      "destination": "gui/src/app/pages/home.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application home route"
+    },
+    {
+      "upstream": "packages/app/src/pages/home/home-projects-view.tsx",
+      "upstreamBlob": "eebb0d574882e73036547623b272caea6b1b9441",
+      "destination": "gui/src/app/pages/home/home-projects.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application projects view"
+    },
+    {
+      "upstream": "packages/app/src/pages/home/home-sessions-view.tsx",
+      "upstreamBlob": "72f2f37616aef893712744282c97d4d8f227f3df",
+      "destination": "gui/src/app/pages/home/home-sessions.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application sessions view"
+    },
+    {
+      "upstream": "packages/app/src/pages/layout.tsx",
+      "upstreamBlob": "98548ab2333b46f961609302e993efcc268f4a9f",
+      "destination": "gui/src/app/pages/layout.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application layout"
+    },
+    {
+      "upstream": "packages/app/src/pages/layout/sidebar-shell.tsx",
+      "upstreamBlob": "ca36af2a421ca090f7830d3c505c90b2f213e1e4",
+      "destination": "gui/src/app/pages/layout/sidebar-shell.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application sidebar shell"
+    },
+    {
+      "upstream": "packages/app/src/pages/layout/sidebar-project.tsx",
+      "upstreamBlob": "9d29a1b495f6b26682a7fe839f6d7608d56a9b4b",
+      "destination": "gui/src/app/pages/layout/sidebar-project.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application project sidebar"
+    },
+    {
+      "upstream": "packages/app/src/pages/layout/sidebar-items.tsx",
+      "upstreamBlob": "776b81ae5a838f5b006bfe62864dc8659da7dc0d",
+      "destination": "gui/src/app/pages/layout/sidebar-items.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application sidebar items"
+    },
+    {
+      "upstream": "packages/app/src/pages/session.tsx",
+      "upstreamBlob": "2e647e0f4789c55c18483973ea8f11d23932b9fc",
+      "destination": "gui/src/app/session-page.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application session page"
+    },
+    {
+      "upstream": "packages/app/src/components/titlebar.tsx",
+      "upstreamBlob": "15d963a1384448e181b45a3a9a07811e85f870ce",
+      "destination": "gui/src/app/components/titlebar.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application titlebar family"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/composer/session-composer-region.tsx",
+      "upstreamBlob": "600ff41e3def943fdc7957b6809b309d6c13f3d1",
+      "destination": "gui/src/app/components/composer-region.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode session composer region"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/review-tab.tsx",
+      "upstreamBlob": "1b65af7121ac870d6fcaac70a8cd9a18c747e2d1",
+      "destination": "gui/src/app/pages/session/review-tab.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application review tab"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/file-tabs.tsx",
+      "upstreamBlob": "b67b810a4b2ffd932db7a36f0d6f9db542022eba",
+      "destination": "gui/src/app/pages/session/file-tabs.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application session file tabs"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/terminal-panel-v2.tsx",
+      "upstreamBlob": "6a92e24ea6142beaeb1260f16b6f6a2df4b13830",
+      "destination": "gui/src/app/pages/session/terminal-panel-v2.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application terminal panel"
+    },
+    {
+      "upstream": "packages/app/src/pages/new-session/new-session-view.tsx",
+      "upstreamBlob": "5960e6433526868634d94b3e44ea0ac5a46fd06f",
+      "destination": "gui/src/app/pages/new-session.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode new-session flow"
     }
   ]
 }

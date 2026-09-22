@@ -3,8 +3,9 @@
 // source-lineage conformance. Reads clients/lineage.manifest.json and asserts
 // the live adapted subtrees still exist at substantial size.
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync, statSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { createHash } from "node:crypto"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 
 const clientsRoot = resolve(import.meta.dir, "..", "..")
 const manifest = JSON.parse(readFileSync(join(clientsRoot, "lineage.manifest.json"), "utf8"))
@@ -112,5 +113,79 @@ describe("client source lineage — blob integrity", () => {
       expect(entry.upstreamBlob).toMatch(/^[0-9a-f]{40}$/)
     }
     expect(checked).toBeGreaterThanOrEqual(15)
+  })
+
+  test("recorded upstream blobs actually match the vendored upstream source", () => {
+    const repoRoot = resolve(clientsRoot, "..")
+    let verified = 0
+    for (const entry of manifest3.fileAncestry) {
+      if (!entry.upstreamBlob || !entry.upstream.startsWith("packages/")) continue
+      const vendored = join(repoRoot, "third_party", "opencode-v1.18.31", entry.upstream)
+      if (!existsSync(vendored)) continue
+      const data = readFileSync(vendored)
+      const header = Buffer.from(`blob ${data.length}\0`)
+      const hash = createHash("sha1").update(Buffer.concat([header, data])).digest("hex")
+      expect(hash, `${entry.upstream} blob mismatch`).toBe(entry.upstreamBlob)
+      verified++
+    }
+    expect(verified).toBeGreaterThanOrEqual(15)
+  })
+})
+
+describe("client source lineage — production import reachability", () => {
+  const manifest4 = JSON.parse(readFileSync(join(clientsRoot, "lineage.manifest.json"), "utf8"))
+  const root = resolve(clientsRoot, "gui", "src", "app", "app.tsx")
+
+  function reachable(): Set<string> {
+    const seen = new Set<string>()
+    const queue = [root]
+    while (queue.length) {
+      const file = queue.pop()!
+      if (seen.has(file)) continue
+      seen.add(file)
+      let text = ""
+      try {
+        text = readFileSync(file, "utf8")
+      } catch {
+        continue
+      }
+      const base = dirname(file)
+      for (const m of text.matchAll(/from\s+"([^"]+)"/g)) {
+        const spec = m[1]
+        if (!spec.startsWith(".")) continue
+        const target = resolve(base, spec)
+        for (const cand of [target, `${target}.tsx`, `${target}.ts`, join(target, "index.tsx"), join(target, "index.ts")]) {
+          if (candidateExists(cand)) {
+            queue.push(cand)
+            break
+          }
+        }
+      }
+    }
+    return seen
+  }
+
+  function candidateExists(p: string): boolean {
+    try {
+      return statSync(p).isFile()
+    } catch {
+      return false
+    }
+  }
+
+  test("signature application descendants are reachable from the production app root", () => {
+    const seen = reachable()
+    const signatures = manifest4.fileAncestry
+      .filter((f: any) => f.destination.startsWith("gui/src/app/"))
+      .filter((f: any) =>
+        /(app|home|layout|sidebar-shell|sidebar-project|sidebar-items|session-page|titlebar|composer-region|review-tab|file-tabs|terminal-panel|new-session)/.test(
+          f.destination,
+        ),
+      )
+    expect(signatures.length).toBeGreaterThanOrEqual(10)
+    for (const entry of signatures) {
+      const dest = resolve(clientsRoot, entry.destination)
+      expect(seen.has(dest), `${entry.destination} is not production-reachable`).toBe(true)
+    }
   })
 })

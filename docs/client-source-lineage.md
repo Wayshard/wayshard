@@ -157,3 +157,33 @@ the adapted `DialogSelect`.
 The lineage test additionally verifies production usage: each entry with a
 `usage` list must be referenced by the listed live file, so the adapted
 components cannot be present-but-unused.
+
+## Application-level descendants (Pass 1E port)
+
+The production graphical application composition now descends from the actual
+OpenCode application source, with Wayshard adapted into it:
+
+| OpenCode source | Wayshard live file |
+| --- | --- |
+| `packages/app/src/app.tsx` | `clients/gui/src/app/app.tsx` |
+| `packages/app/src/pages/home.tsx` | `clients/gui/src/app/pages/home.tsx` |
+| `packages/app/src/pages/home/home-projects-view.tsx` | `clients/gui/src/app/pages/home/home-projects.tsx` |
+| `packages/app/src/pages/home/home-sessions-view.tsx` | `clients/gui/src/app/pages/home/home-sessions.tsx` |
+| `packages/app/src/pages/layout.tsx` | `clients/gui/src/app/pages/layout.tsx` |
+| `packages/app/src/pages/layout/sidebar-shell.tsx` | `clients/gui/src/app/pages/layout/sidebar-shell.tsx` |
+| `packages/app/src/pages/layout/sidebar-project.tsx` | `clients/gui/src/app/pages/layout/sidebar-project.tsx` |
+| `packages/app/src/pages/layout/sidebar-items.tsx` | `clients/gui/src/app/pages/layout/sidebar-items.tsx` |
+| `packages/app/src/pages/session.tsx` | `clients/gui/src/app/session-page.tsx` |
+| `packages/app/src/components/titlebar.tsx` | `clients/gui/src/app/components/titlebar.tsx` |
+| `packages/app/src/pages/session/composer/session-composer-region.tsx` | `clients/gui/src/app/components/composer-region.tsx` |
+| `packages/app/src/pages/session/review-tab.tsx` | `clients/gui/src/app/pages/session/review-tab.tsx` |
+| `packages/app/src/pages/session/file-tabs.tsx` | `clients/gui/src/app/pages/session/file-tabs.tsx` |
+| `packages/app/src/pages/session/terminal-panel-v2.tsx` | `clients/gui/src/app/pages/session/terminal-panel-v2.tsx` |
+| `packages/app/src/pages/new-session/new-session-view.tsx` | `clients/gui/src/app/pages/new-session.tsx` |
+
+`clients/lineage.manifest.json` records each with its upstream git blob;
+`clients/gui/src/lineage.test.ts` verifies the blob against the vendored source
+and asserts production-import reachability from `app.tsx`. Routing uses the
+adapted Wayshard router (`clients/gui/src/app/router.tsx`) because the inherited
+`@solidjs/router` did not advance its reactive location inside the adapted
+provider tree.

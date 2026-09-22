@@ -339,3 +339,39 @@ app rendered white text on a near-white fallback canvas.
   `clients/gui/src/theme-integration.test.ts`. Screenshots are written outside
   the repository. The client is legible and themed by default with no test-only
   overrides.
+
+### Pass 1E application-level port
+
+Rendered validation plus an application-level audit reopened Pass 1E: the
+graphical client had strong component/source lineage but its application
+composition was a Wayshard-authored shell. The production graphical application
+has since been replaced with descendants of the actual OpenCode application
+source, adapting Wayshard into the OpenCode application rather than the reverse.
+
+- **Application root / routing**: `gui/src/app/app.tsx` adapts upstream
+  `packages/app/src/app.tsx` (provider tree + routes). Routing uses the adapted
+  Wayshard router (`gui/src/app/router.tsx`); the inherited `@solidjs/router`
+  did not advance its reactive location in the adapted provider tree.
+- **Home**: `gui/src/app/pages/home.tsx` + `pages/home/*` adapt upstream
+  `pages/home.tsx`, `home-projects-view.tsx`, `home-sessions-view.tsx`.
+- **Layout / sidebar**: `gui/src/app/pages/layout.tsx` +
+  `pages/layout/sidebar-{shell,project,items}.tsx` adapt upstream
+  `pages/layout.tsx` and the layout sidebar family.
+- **Session**: `gui/src/app/session-page.tsx` adapts upstream
+  `pages/session.tsx`; `components/titlebar.tsx` adapts upstream
+  `components/titlebar.tsx` / `titlebar-tab-nav.tsx`;
+  `components/composer-region.tsx` adapts
+  `pages/session/composer/session-composer-region.tsx`;
+  `pages/session/{review-tab,file-tabs,terminal-panel-v2}.tsx` adapt the
+  corresponding upstream session panels.
+- **Retired**: the custom Wayshard shell (`app/session-shell.tsx`,
+  `app/layout.tsx`, `app/session-tab.tsx`) is removed from the production path.
+- **Lineage**: `clients/lineage.manifest.json` now records the application-level
+  descendants with their upstream git blobs; `clients/gui/src/lineage.test.ts`
+  verifies each recorded blob against the vendored upstream source and asserts
+  the signature descendants are reachable from the production application root.
+  This reachability check found and removed two dead adapted files
+  (`session-tab.tsx`, the old `layout.tsx`) and their stale claims.
+- **Domain/backend**: Wayshard `@wayshard/sdk`, server authority, PTY ownership,
+  pairing verification and event stream are unchanged; the adapted app is a
+  control surface.
