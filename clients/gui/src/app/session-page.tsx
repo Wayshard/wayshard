@@ -21,6 +21,7 @@ import { useCommand } from "./command"
 import { CommandPalette } from "./command-palette"
 import { ChangesView, FilesView, TerminalView, AdvancedSurface, type AdvancedSurfaceKey } from "./views"
 import { Composer } from "./composer"
+import { ComposerRegion } from "./components/composer-region"
 import { Titlebar } from "./components/titlebar"
 import { EmptyState, ErrorState } from "./components/state-views"
 import { ADVANCED_SURFACES, PRIMARY_TABS, activeTab, setActiveTab, setPairingOpen, type PrimaryTab } from "./navigation"
@@ -156,9 +157,13 @@ function SessionView() {
           <RunTimeline />
         </Show>
       </div>
-      <Composer
-        onSubmit={(input) => void ws.send(input.text, { artifactOnly: input.artifactOnly, profile: input.profile })}
-        onCancel={() => void ws.cancelRun()}
+      <ComposerRegion
+        promptInput={
+          <Composer
+            onSubmit={(input) => void ws.send(input.text, { artifactOnly: input.artifactOnly, profile: input.profile })}
+            onCancel={() => void ws.cancelRun()}
+          />
+        }
       />
     </div>
   )
