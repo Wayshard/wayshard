@@ -1,10 +1,10 @@
-// Wayshard session route (temporary bridge during the application-level port).
+// Wayshard session route.
 //
-// Routes a Wayshard Conversation selected from Home into the session shell.
-// The session composition is replaced by an adapted descendant of OpenCode's
-// pages/session.tsx in a later stage of this port; until then this bridge keeps
-// the session experience functional while the application root/home/layout are
-// migrated.
+// Routes a Wayshard Conversation selected from Home into the session shell and
+// keeps the URL and the selected project/session in sync. The session
+// composition itself is the adapted OpenCode-derived session page
+// (../session-page.tsx); this module is the thin route adapter that binds the
+// router params to Wayshard domain state.
 import { createEffect } from "solid-js"
 import { useParams } from "../router"
 import { useGlobal } from "../context/global"

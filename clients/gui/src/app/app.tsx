@@ -8,7 +8,7 @@
 // Wayshard context backed by @wayshard/sdk. Routing uses the adapted Wayshard
 // router (see ./router.tsx). Web, Desktop (Tauri 2) and Android (Tauri 2) all
 // mount this same application.
-import { Show, onCleanup, onMount } from "solid-js"
+import { Show } from "solid-js"
 import { ThemeProvider } from "@wayshard/ui/theme/context"
 import { DialogProvider } from "@wayshard/ui/context/dialog"
 import { FileComponentProvider } from "@wayshard/ui/context/file"
@@ -18,7 +18,7 @@ import { LayoutProvider } from "./context/layout"
 import { CommandProvider } from "./command"
 import { FileFallback } from "./session-page"
 import { PairingGate } from "./pairing"
-import { syncRouter, useRouteMatch } from "./router"
+import { useRouteMatch } from "./router"
 import { Home } from "./pages/home"
 import { AppLayout } from "./pages/layout"
 import { SessionRoute } from "./pages/session-route"
@@ -58,15 +58,6 @@ function PairingOverlay() {
   )
 }
 
-function RouterLifecycle() {
-  onMount(() => {
-    const onPop = () => syncRouter()
-    window.addEventListener("popstate", onPop)
-    onCleanup(() => window.removeEventListener("popstate", onPop))
-  })
-  return null
-}
-
 export function WayshardApp() {
   return (
     <ThemeProvider defaultTheme="oc-2" defaultColorScheme="dark">
@@ -76,7 +67,6 @@ export function WayshardApp() {
             <CommandProvider>
               <DialogProvider>
                 <FileComponentProvider component={FileFallback}>
-                  <RouterLifecycle />
                   <Routes />
                   <PairingOverlay />
                 </FileComponentProvider>
