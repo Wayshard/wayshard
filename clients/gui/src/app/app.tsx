@@ -8,7 +8,8 @@
 // Wayshard context backed by @wayshard/sdk. Routing uses the adapted Wayshard
 // router (see ./router.tsx). Web, Desktop (Tauri 2) and Android (Tauri 2) all
 // mount this same application.
-import { Show } from "solid-js"
+import { Show, createMemo } from "solid-js"
+import { Dynamic } from "solid-js/web"
 import { ThemeProvider } from "@wayshard/ui/theme/context"
 import { DialogProvider } from "@wayshard/ui/context/dialog"
 import { FileComponentProvider } from "@wayshard/ui/context/file"
@@ -27,24 +28,19 @@ import { pairingOpen } from "./navigation"
 
 function Routes() {
   const match = useRouteMatch()
+  // Route selection is resolved as a plain memo and swapped via Dynamic. The
+  // adapted provider tree did not propagate the router signal through top-level
+  // Show/Switch children, so the selected view is computed directly here.
+  const view = createMemo(() => {
+    const name = match().name
+    if (name === "session") return SessionRoute
+    if (name === "new-session") return NewSessionRoute
+    return Home
+  })
   return (
-    <>
-      <Show when={match().name === "session"}>
-        <AppLayout>
-          <SessionRoute />
-        </AppLayout>
-      </Show>
-      <Show when={match().name === "new-session"}>
-        <AppLayout>
-          <NewSessionRoute />
-        </AppLayout>
-      </Show>
-      <Show when={match().name === "home"}>
-        <AppLayout>
-          <Home />
-        </AppLayout>
-      </Show>
-    </>
+    <AppLayout>
+      <Dynamic component={view()} />
+    </AppLayout>
   )
 }
 

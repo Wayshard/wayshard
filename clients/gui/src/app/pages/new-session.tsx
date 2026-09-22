@@ -10,11 +10,13 @@ import { For, Show, createMemo, createSignal } from "solid-js"
 import { useNavigate } from "../router"
 import { useGlobal } from "../context/global"
 import { useLayout } from "../context/layout"
+import { useWayshard } from "../../wayshard/state"
 import { Composer } from "../composer"
 
 export function NewSessionRoute(): import("solid-js").JSX.Element {
   const global = useGlobal()
   const layout = useLayout()
+  const ws = useWayshard()
   const navigate = useNavigate()
   const [busy, setBusy] = createSignal(false)
 
@@ -30,7 +32,10 @@ export function NewSessionRoute(): import("solid-js").JSX.Element {
     setBusy(true)
     try {
       const conversation = await global.sessions.new(projectID)
-      await global.client().sendMessage(conversation.id, body, { artifactOnly: input.artifactOnly, profile: input.profile })
+      // Send through the Wayshard state so the created run is registered and the
+      // session surface can show its stages, changes and timeline immediately.
+      await ws.selectConversation(conversation.id)
+      await ws.send(body, { artifactOnly: input.artifactOnly, profile: input.profile })
       navigate(`/${projectID}/session/${conversation.id}`)
     } finally {
       setBusy(false)

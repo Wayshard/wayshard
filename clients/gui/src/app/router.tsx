@@ -18,7 +18,7 @@
 // The core is a factory over a small RouterAdapter so push/replace/popstate
 // semantics are deterministically testable without a DOM; the module singleton
 // binds it to the real window (or an in-memory adapter when no window exists).
-import { createSignal } from "solid-js"
+import { createMemo, createSignal } from "solid-js"
 
 export interface Location {
   readonly pathname: string
@@ -186,7 +186,7 @@ export function useParams<T extends Record<string, string | undefined> = Record<
 }
 
 export function useRouteMatch(): () => RouteMatch {
-  return () => matchRoute(router.location().pathname)
+  return createMemo(() => matchRoute(router.location().pathname))
 }
 
 // RouterProvider is retained for API parity with the adapted app root; route
