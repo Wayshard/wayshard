@@ -19,11 +19,14 @@ import { useWayshard } from "../wayshard/state"
 import { buildData, stageDisplay } from "../wayshard/adapter"
 import { useCommand } from "./command"
 import { CommandPalette } from "./command-palette"
-import { ChangesView, FilesView, TerminalView, AdvancedSurface, type AdvancedSurfaceKey } from "./views"
+import { AdvancedSurface, type AdvancedSurfaceKey } from "./views"
 import { Composer } from "./composer"
 import { ComposerRegion } from "./components/composer-region"
 import { Titlebar } from "./components/titlebar"
 import { EmptyState, ErrorState } from "./components/state-views"
+import { SessionReviewTab } from "./pages/session/review-tab"
+import { SessionFileTabs } from "./pages/session/file-tabs"
+import { SessionTerminalPanel } from "./pages/session/terminal-panel-v2"
 import { ADVANCED_SURFACES, PRIMARY_TABS, activeTab, setActiveTab, setPairingOpen, type PrimaryTab } from "./navigation"
 
 export function FileFallback(props: { path?: string; content?: string }) {
@@ -137,8 +140,8 @@ export function SessionPage(): JSX.Element {
 
 function PrimaryView(props: { tab: PrimaryTab }) {
   return (
-    <Show when={props.tab === "changes"} fallback={<Show when={props.tab === "files"} fallback={<TerminalView />}><FilesView /></Show>}>
-      <ChangesView />
+    <Show when={props.tab === "changes"} fallback={<Show when={props.tab === "files"} fallback={<SessionTerminalPanel />}><SessionFileTabs /></Show>}>
+      <SessionReviewTab />
     </Show>
   )
 }
