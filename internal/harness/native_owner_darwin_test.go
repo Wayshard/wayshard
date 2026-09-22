@@ -190,15 +190,16 @@ func TestDarwinDetachedProbeReconciledOnRestart(t *testing.T) {
 	cmd, out := startOwnerHelper(t, "setsid", lease.Token())
 	detached := waitOwnerPIDs(t, out, 2)
 	// Simulate a probe root that exited (or was killed) while its detached
-	// descendant survived: leave the lease unreconciled.
+	// descendant survived: leave the lease unreconciled. Do not Wait yet: the
+	// detached descendants hold the inherited stdout pipe until they die.
 	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
 
 	active, _ := st.ListActiveProbeOwners(ctx)
 	if len(active) == 0 {
 		t.Fatal("expected an active probe owner before recovery")
 	}
 	recovery.Reconcile(ctx, st, slog.Default())
+	_ = cmd.Wait()
 	active2, _ := st.ListActiveProbeOwners(ctx)
 	if len(active2) != 0 {
 		t.Fatalf("detached probe owner not reconciled: %+v", active2)
