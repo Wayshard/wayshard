@@ -99,7 +99,9 @@ jobs:
             goos: linux
             goarch: arm64
             asset: linux-arm64
-          - os: macos-13
+          # Intel runner required for the darwin-amd64 TUI bundle.
+          # The retired macOS 13 image was replaced by macos-15-intel (standard x86_64 label).
+          - os: macos-15-intel
             target: bun-darwin-x64
             goos: darwin
             goarch: amd64

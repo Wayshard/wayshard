@@ -121,4 +121,48 @@ for needle in ("wayshard-tui", "wayshard-${VERSION}", ".tar.gz", ".zip"):
 print("release asset dependency + bundle graph ok")
 PY
 
+# --- CLI+TUI runner labels (regression: retired macos-13) ---------------------
+python3 - "$REL" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+
+if "macos-13" in text:
+    raise SystemExit("release.yml must not pin any job to the retired macos-13 runner")
+
+m = re.search(r"^  tui:\s*$", text, re.M)
+if not m:
+    raise SystemExit("release.yml is missing the tui job")
+rest = text[m.end():]
+end = re.search(r"^  [A-Za-z0-9_-]+:\s*$", rest, re.M)
+block = rest[: end.start()] if end else rest
+
+entries = []
+for em in re.finditer(r"^          - os: (\S+)\n((?:            \S+: \S+\n)+)", block, re.M):
+    fields = dict(re.findall(r"^            (\w+): (\S+)$", em.group(2), re.M))
+    fields["os"] = em.group(1)
+    entries.append(fields)
+by_asset = {e.get("asset"): e for e in entries}
+
+expected_assets = {"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64"}
+missing = expected_assets - set(by_asset)
+if missing:
+    raise SystemExit(f"CLI+TUI matrix is missing assets: {sorted(missing)}")
+
+darwin_amd64 = by_asset["darwin-amd64"]
+want = {"os": "macos-15-intel", "target": "bun-darwin-x64", "goos": "darwin", "goarch": "amd64"}
+for key, value in want.items():
+    if darwin_amd64.get(key) != value:
+        raise SystemExit(
+            f"darwin-amd64 TUI matrix entry must set {key}={value!r}, got {darwin_amd64.get(key)!r}"
+        )
+
+darwin_arm64 = by_asset["darwin-arm64"]
+if darwin_arm64.get("target") != "bun-darwin-arm64" or darwin_arm64.get("goarch") != "arm64":
+    raise SystemExit(f"darwin-arm64 TUI matrix entry changed unexpectedly: {darwin_arm64!r}")
+
+print("darwin-amd64 uses a supported Intel runner; CLI+TUI matrix complete")
+PY
+
 echo "release policy test ok"
