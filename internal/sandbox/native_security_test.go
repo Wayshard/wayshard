@@ -38,7 +38,7 @@ func TestSandboxHelperProcess(t *testing.T) {
 		_ = os.WriteFile(arg, []byte("ran"), 0o600)
 		os.Exit(0)
 	case "env":
-		fmt.Printf("HOME=%s\nTMPDIR=%s\nTEMP=%s\nTMP=%s\n", os.Getenv("HOME"), os.Getenv("TMPDIR"), os.Getenv("TEMP"), os.Getenv("TMP"))
+		fmt.Printf("HOME=%s\nUSERPROFILE=%s\nTMPDIR=%s\nTEMP=%s\nTMP=%s\n", os.Getenv("HOME"), os.Getenv("USERPROFILE"), os.Getenv("TMPDIR"), os.Getenv("TEMP"), os.Getenv("TMP"))
 		if v := os.Getenv("TYPESAFE_API_KEY"); v != "" {
 			fmt.Printf("LEAK_TYPESAFE=%s\n", v)
 		}
@@ -386,6 +386,73 @@ func TestWindowsJobObjectManagesNonRequiredProcessTree(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("job object did not terminate descendants: %v", pids)
+}
+
+// TestNativeReadOnlyViewPolicy proves a read-only stage view is readable but not
+// writable, with only the synthetic temp writable.
+func TestNativeReadOnlyViewPolicy(t *testing.T) {
+	c := AsConstrainer(DefaultBackend())
+	if !c.Report().Available {
+		t.Skipf("required isolation unavailable: %s", c.Report().Detail)
+	}
+	root := t.TempDir()
+	view := filepath.Join(root, "view")
+	home := filepath.Join(root, "home")
+	for _, d := range []string{view, home} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = os.WriteFile(filepath.Join(view, "readable.txt"), []byte("ok"), 0o644)
+	p := ReadOnlyViewPolicy(view, home)
+	p.ReadOnlyRoots = append(p.ReadOnlyRoots, filepath.Dir(helperExe(t)))
+	p.ReadWriteRoots = append(p.ReadWriteRoots, home)
+
+	run := func(mode, arg string) (string, error) {
+		env := helperEnvFor(mode, arg, ToolEnv(home, home, nil))
+		out, err := RunConstrainedOutput(context.Background(), p, 20*time.Second, 64<<10, helperExe(t), []string{"-test.run=TestSandboxHelperProcess"}, env)
+		return string(out), err
+	}
+	if out, err := run("read", filepath.Join(view, "readable.txt")); err != nil || !strings.Contains(out, "READ_OK") {
+		t.Fatalf("read-only view must be readable: err=%v out=%s", err, out)
+	}
+	if out, _ := run("write", filepath.Join(view, "nope.txt")); strings.Contains(out, "WRITE_OK") {
+		t.Fatalf("read-only view must not be writable: %s", out)
+	}
+	if out, err := run("write", filepath.Join(home, "tmp.txt")); err != nil || !strings.Contains(out, "WRITE_OK") {
+		t.Fatalf("synthetic temp must be writable: err=%v out=%s", err, out)
+	}
+}
+
+// TestWindowsSyntheticEnvNonRequired proves the Windows env filtering and
+// synthetic HOME/USERPROFILE/TEMP/TMP on the management-only (non-required)
+// path, since required Windows policies fail closed.
+func TestWindowsSyntheticEnvNonRequired(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows synthetic environment")
+	}
+	ws := t.TempDir()
+	home := t.TempDir()
+	p := ToolPolicy(ws, home, NetNone)
+	p.Required = false
+	p.Network = ""
+	p.ReadOnlyRoots = append(p.ReadOnlyRoots, filepath.Dir(helperExe(t)))
+	env := helperEnvFor("env", "", ToolEnv(home, home, nil))
+	env = append(env, "TYPESAFE_API_KEY=should-not-leak", "WAYSHARD_VAULT_KEY=should-not-leak")
+	out, err := RunConstrainedOutput(context.Background(), p, 20*time.Second, 64<<10, helperExe(t), []string{"-test.run=TestSandboxHelperProcess"}, env)
+	if err != nil {
+		t.Fatalf("env helper: %v (out=%s)", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "HOME="+home) || !strings.Contains(text, "USERPROFILE="+home) {
+		t.Fatalf("synthetic HOME/USERPROFILE missing: %s", text)
+	}
+	if !strings.Contains(text, "TEMP="+home) || !strings.Contains(text, "TMP="+home) {
+		t.Fatalf("synthetic TEMP/TMP missing: %s", text)
+	}
+	if strings.Contains(text, "LEAK_TYPESAFE") || strings.Contains(text, "LEAK_VAULT") {
+		t.Fatalf("sensitive ambient env leaked into the process: %s", text)
+	}
 }
 
 func waitForPIDs(t *testing.T, out *strings.Builder, want int) []int {

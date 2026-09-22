@@ -101,6 +101,19 @@ func TestWindowsReportDoesNotClaimFilesystemOrNetwork(t *testing.T) {
 	}
 }
 
+// TestProviderNetworkFailsClosedOnNonLinux proves the darwin and windows
+// backends refuse a provider-network policy (secure provider-only networking is
+// Linux-only) on every build.
+func TestProviderNetworkFailsClosedOnNonLinux(t *testing.T) {
+	pol := HarnessPolicy(t.TempDir(), t.TempDir())
+	pol.Network = NetProvider
+	for _, b := range []Backend{DarwinBackend{}, WindowsBackend{}} {
+		if _, err := AsConstrainer(b).Compile(pol); !errors.Is(err, ErrRequiredIsolation) {
+			t.Fatalf("backend %s must fail closed for provider network, got %v", b.Name(), err)
+		}
+	}
+}
+
 // TestNativeReportMatchesCompiledFeatures proves a backend's capability report
 // never claims more than its own Compile declares for a required policy.
 func TestNativeReportMatchesCompiledFeatures(t *testing.T) {
