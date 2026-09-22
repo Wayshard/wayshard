@@ -37,7 +37,7 @@ Wayshard has four full clients:
 - **Desktop** — Tauri-based graphical client for Linux, macOS, and Windows.
 - **Android** — full mobile client for controlling server-side projects and runs.
 
-The graphical and terminal clients may begin from selected MIT-licensed OpenCode 2 client source imported into Wayshard. Wayshard is an independent project: it is not maintained as an OpenCode fork, has no upstream-sync relationship, and does not target OpenCode API compatibility. Required third-party MIT attribution is preserved separately.
+Wayshard's graphical clients and CLI/TUI are built from selected MIT-licensed OpenCode 2 client application source imported once into Wayshard. The graphical client's application composition (Home, project/session layout and sidebar, session page, titlebar, composer, review/files/terminal panels and the narrow/mobile model) is adapted from that source, with the Wayshard domain and server adapted into it. Wayshard is an independent project: it is not maintained as an OpenCode fork, has no upstream-sync relationship, and does not target OpenCode API compatibility. Required third-party MIT attribution is preserved separately.
 
 ## Install the CLI / TUI
 

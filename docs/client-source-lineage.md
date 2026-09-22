@@ -180,6 +180,11 @@ OpenCode application source, with Wayshard adapted into it:
 | `packages/app/src/pages/session/file-tabs.tsx` | `clients/gui/src/app/pages/session/file-tabs.tsx` |
 | `packages/app/src/pages/session/terminal-panel-v2.tsx` | `clients/gui/src/app/pages/session/terminal-panel-v2.tsx` |
 | `packages/app/src/pages/new-session/new-session-view.tsx` | `clients/gui/src/app/pages/new-session.tsx` |
+| `packages/app/src/context/layout.tsx` | `clients/gui/src/app/context/layout.tsx` |
+| `packages/app/src/pages/session/timeline/model.ts` | `clients/gui/src/app/pages/session/timeline/model.ts` |
+| `packages/app/src/pages/session/timeline/message-timeline.tsx` | `clients/gui/src/app/pages/session/timeline/message-timeline.tsx` |
+| `packages/app/src/pages/session/composer/session-composer-state.ts` | `clients/gui/src/app/components/session-composer-state.ts` |
+| `packages/app/src/pages/layout.tsx` (narrow) | `clients/gui/src/app/pages/layout/sidebar-mobile.tsx` |
 
 `clients/lineage.manifest.json` records each with its upstream git blob;
 `clients/gui/src/lineage.test.ts` verifies the blob against the vendored source

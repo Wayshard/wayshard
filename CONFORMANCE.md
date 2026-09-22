@@ -375,3 +375,26 @@ source, adapting Wayshard into the OpenCode application rather than the reverse.
 - **Domain/backend**: Wayshard `@wayshard/sdk`, server authority, PTY ownership,
   pairing verification and event stream are unchanged; the adapted app is a
   control surface.
+
+- **Narrow/mobile model.** Derived from the vendored application, not a custom
+  drawer: `context/layout.tsx` exposes `mobileSidebar`
+  (`opened/show/hide/toggle`), the app-level `components/titlebar.tsx` carries
+  the `xl:hidden` `data-component="mobile-nav-toggle"`, and
+  `pages/layout/sidebar-mobile.tsx` renders the
+  `data-component="sidebar-nav-mobile"` overlay (fixed `top-10`, max-w 400px,
+  slide transition) with a scrim; the persistent sidebar is hidden below `xl`
+  and the overlay hides on project/session selection.
+- **Behavior-bearing internals.** Composer region (`components/composer-region.tsx`)
+  and state (`components/session-composer-state.ts`), Review/Changes
+  (`pages/session/review-tab.tsx`), Files (`pages/session/file-tabs.tsx`:
+  Changes/All tab bar, file tree, compare-and-set editor) and Terminal
+  (`pages/session/terminal-panel-v2.tsx`) are adapted descendants rather than
+  delegating to generic domain views; Wayshard adapters and server authority
+  (Run vs Workspace changes, expectedHash save, server-owned PTY) are preserved.
+- **Flake.** `TestCancellationInterruptsActiveHarness` was made deterministic
+  (load-tolerant context/wait budgets, an own-deadline cancellation wait, and an
+  orphan check scoped to the test's built harness path).
+- **Verification.** Client typechecks, 162 GUI tests (blob authenticity +
+  production reachability), rendered smoke (24 checks incl. the narrow model),
+  provenance-offline build with `third_party` removed, and Go/release/build gates
+  all pass on the port's final SHA.

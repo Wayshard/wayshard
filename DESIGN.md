@@ -487,10 +487,16 @@ github.com/Wayshard
 
 ## 21. Client source lineage (Pass 1E)
 
-The live graphical client and TUI are adapted from the imported OpenCode 2 client
-source, not recreated: the design system, theme, session/message rendering, diff
-and review surfaces, prompt composer and terminal presentation descend from
-`packages/ui` and `packages/session-ui`; the TUI descends from the OpenCode
-OpenTUI terminal client. The product is fully rebranded as Wayshard and the
-domain is Wayshard (projects → sessions → runs → stages → artifacts). See
+The live graphical client and TUI are adapted from the imported OpenCode 2
+application source, not recreated. The graphical **application composition** —
+application root, Home, project/session layout and sidebar, session page,
+titlebar/work-surface navigation, composer region, review, file browser and
+terminal panels, run timeline, new-session flow and the narrow/mobile model —
+descends from the vendored OpenCode application files and keeps their interaction
+character, with Wayshard domain and server authority adapted into it. The design
+system, theme, session/message rendering, diff and review surfaces, prompt
+composer and terminal presentation descend from `packages/ui` and
+`packages/session-ui`; the TUI descends from the OpenCode OpenTUI terminal
+client. The product is fully rebranded as Wayshard and the domain is Wayshard
+(projects → sessions → runs → stages → artifacts). See
 `docs/client-source-lineage.md`.

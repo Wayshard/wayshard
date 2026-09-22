@@ -515,12 +515,19 @@ Third-party coding harnesses and ACP bridges are never bundled or installed by W
 ## 24. Client implementation foundation (Pass 1E)
 
 The Web, Desktop and Android clients are one shared graphical application adapted
-from the imported OpenCode 2 client source (`@wayshard/ui` design system plus the
-adapted session presentation layer), mounted by Web and hosted by Tauri 2 for
-Desktop and Android. The CLI/TUI is a full terminal client adapted from the
-imported OpenCode terminal foundation (OpenTUI/Solid), not a readline prompt.
-All clients use `@wayshard/sdk` and the Wayshard server's HTTP/JSON and WebSocket
-APIs; there is no OpenCode runtime, SDK, API or provider dependency and no
-OpenCode product branding. Source lineage is documented and verified by
-`clients/lineage.manifest.json`, `docs/client-source-lineage.md` and
-`clients/gui/src/lineage.test.ts`.
+from the imported OpenCode 2 application source, mounted by Web and hosted by
+Tauri 2 for Desktop and Android. The production graphical application composition
+— application root, Home, project/session layout and sidebar, session page,
+titlebar/work-surface navigation, composer region, review, file browser and
+terminal panels, run timeline, new-session flow and the narrow/mobile model —
+descends from the actual vendored OpenCode application files; Wayshard domain,
+data path and server authority are adapted into that composition. Routing uses
+the adapted Wayshard router (`clients/gui/src/app/router.tsx`). The CLI/TUI is a
+full terminal client adapted from the imported OpenCode terminal foundation
+(OpenTUI/Solid), not a readline prompt. All clients use `@wayshard/sdk` and the
+Wayshard server's HTTP/JSON and WebSocket APIs; there is no OpenCode runtime, SDK,
+API or provider dependency and no OpenCode product branding. Source lineage is
+documented and verified by `clients/lineage.manifest.json`,
+`docs/client-source-lineage.md` and `clients/gui/src/lineage.test.ts`, which
+verify the recorded upstream git blobs against the vendored source and assert
+application-level production-import reachability.

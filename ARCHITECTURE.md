@@ -758,16 +758,24 @@ clients/
   ui/        @wayshard/ui         OpenCode 2 design system, copied+adapted (rebranded)
   gui/       @wayshard/gui        shared graphical client
              src/session-ui  OpenCode 2 session presentation, copied+adapted
-             src/app, src/wayshard  Wayshard shell, views, state, event subscription
+             src/app         OpenCode 2 application composition, adapted:
+                             app.tsx (root+routes), pages/home, pages/layout
+                             (+ sidebar shell/project/items/mobile), session-page,
+                             components/titlebar, components/composer-region,
+                             pages/session/{review-tab,file-tabs,terminal-panel-v2,
+                             timeline}, pages/new-session; router.tsx (adapted
+                             Wayshard router)
+             src/wayshard    Wayshard domain state, adapter, event subscription
   web/       Vite host mounting @wayshard/gui (served by the Wayshard Server)
   desktop/   Tauri 2 shell hosting ../../web/dist (Linux/macOS/Windows + Android)
   tui/       OpenTUI/Solid terminal client (imported theme system)
 ```
 
-The graphical client is one application; Web, Desktop and Android differ only by
-platform adapters (window chrome, clipboard, notifications, external open,
-mobile-safe layout). The TUI is a separate terminal-appropriate client built
-from the imported OpenCode terminal foundation. All clients speak only Wayshard
-domain HTTP/JSON and WebSocket APIs; none speaks ACP or OpenCode. Live updates
-use the durable event stream (`/v1/ws`) with reconnect and polling only as a
-narrow fallback.
+The graphical client is one application whose application composition descends
+from the imported OpenCode application source (the previous custom Wayshard shell
+is retired); Web, Desktop and Android differ only by platform adapters (window
+chrome, clipboard, notifications, external open, mobile-safe layout). The TUI is
+a separate terminal-appropriate client built from the imported OpenCode terminal
+foundation. All clients speak only Wayshard domain HTTP/JSON and WebSocket APIs;
+none speaks ACP or OpenCode. Live updates use the durable event stream (`/v1/ws`)
+with reconnect and polling only as a narrow fallback.
