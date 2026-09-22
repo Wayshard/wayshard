@@ -30,7 +30,7 @@ import {
   stageLabel,
   type TimelineRow,
 } from "./model"
-import { clampScrollTop, isAtBottom, nextWindow, windowRows, type ScrollMetrics } from "./scroll"
+import { clampScrollTop, isAtBottom, windowRows, type ScrollMetrics } from "./scroll"
 import { createTimelineView } from "./view"
 
 const WINDOW_STEP = 60
