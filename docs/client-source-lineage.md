@@ -123,29 +123,41 @@ The Wayshard TUI adapts concrete OpenCode TUI component files:
 
 ## Manifest mechanics
 
-`clients/lineage.manifest.json` (version 2) records:
+`clients/lineage.manifest.json` (version 3) records:
 
 - `subtrees`: broad upstream→destination mappings with minimum file/LOC sizes and
   required marker files.
 - `fileAncestry`: concrete per-file mappings with the upstream path, the upstream
   git blob hash at the imported commit, the live destination, and a provenance
-  marker that the live file must contain.
+  marker that the live file must contain. Entries may record `usage` as
+  `{ file, specifier }`, asserting that the live consumer actually imports the
+  module.
+- `structuralAncestry`: for the major behavior-bearing descendants, explicit
+  structural evidence — required live definitions, inherited concept anchors that
+  must appear in the comment-stripped live AND upstream source, live-only
+  markers, a minimum comment-stripped code size, and a low structural-similarity
+  floor.
 
-`clients/gui/src/lineage.test.ts` enforces both: adapted subtrees must remain at
-substantial size, every `fileAncestry` destination must exist, be non-trivial and
-contain its provenance marker, and no live client source may contain an
-`@opencode-ai/` import specifier. This makes it impossible to delete the adapted
-application/TUI foundation and replace it with a small fresh app while passing.
+`clients/gui/src/lineage.test.ts` enforces all three: adapted subtrees must
+remain at substantial size, every `fileAncestry` destination must exist and
+contain its provenance marker and real upstream blob, every declared `usage`
+specifier must be imported, and every `structuralAncestry` entry must carry real
+inherited behavior. Comments are stripped before anchor/similarity checks (string
+literals such as `data-slot` markers are kept), so a provenance comment or a tiny
+wrapper cannot satisfy ancestry; an explicit test proves a provenance-only
+wrapper fails. No live client source may contain an `@opencode-ai/` import
+specifier. This makes it impossible to delete the adapted application/TUI
+foundation and replace it with a small fresh app while passing.
 
 ## Signature surface ancestry (final Pass 1E)
 
 | OpenCode source | Wayshard live file | Mode | Production use |
 | --- | --- | --- | --- |
 | `packages/session-ui/src/v2/components/prompt-input/index.tsx` | `clients/gui/src/session-ui/v2/components/prompt-input/index.tsx` | copied+adapted | `clients/gui/src/app/composer.tsx` |
-| `packages/session-ui/src/components/file.tsx` | `clients/gui/src/session-ui/components/file.tsx` | copied+adapted | `clients/gui/src/app/views.tsx` (Changes diff) |
+| `packages/session-ui/src/components/file.tsx` | `clients/gui/src/session-ui/components/file.tsx` | copied+adapted | `clients/gui/src/app/pages/session/review-tab.tsx` (run diff), `.../file-tabs.tsx` (file viewer) |
 | `packages/app/src/components/file-tree-v2-model.ts` | `clients/gui/src/app/file-tree-model.ts` | adapted | `clients/gui/src/app/file-tree.tsx` |
 | `packages/app/src/components/file-tree-v2.tsx` | `clients/gui/src/app/file-tree.tsx` | adapted | Files view |
-| `packages/app/src/components/terminal.tsx` | `clients/gui/src/app/terminal.tsx` | adapted | Terminal view (ghostty-web renderer) |
+| `packages/app/src/components/terminal.tsx` | `clients/gui/src/app/terminal.tsx` | adapted | `clients/gui/src/app/pages/session/terminal-panel-v2.tsx` (ghostty-web renderer) |
 | `packages/tui/src/ui/dialog-select.tsx` | `clients/tui/src/ui/dialog-select.tsx` | copied+adapted | `clients/tui/src/app.tsx` (command palette) |
 
 The composer renders the imported `PromptInputV2` editor/interaction machine;
@@ -192,3 +204,26 @@ and asserts production-import reachability from `app.tsx`. Routing uses the
 adapted Wayshard router (`clients/gui/src/app/router.tsx`) because the inherited
 `@solidjs/router` did not advance its reactive location inside the adapted
 provider tree.
+
+## Behavior-bearing ancestry (final remediation)
+
+The macro composition above was accepted first; a second audit found the session
+internals and routing still fell short (relocated Wayshard views in
+upstream-named files, and document-reloading navigation). The final remediation
+deepened them into behavioral adaptations, and the manifest's
+`structuralAncestry` now records the evidence:
+
+| Upstream behavior | Wayshard live adaptation | Inherited anchors | Wayshard replacement / deliberate divergence |
+| --- | --- | --- | --- |
+| `pages/session/review-tab.tsx` | `app/pages/session/review-tab.tsx` + `review-adapter.ts` + `review-view.ts` | `SessionReview`, `restoreFrame`, `userInteracted`, `onDiffRendered`, `scrollRef`, `diffStyle`, `queueRestore` | `SessionReview` is the production surface; review comments omitted (no Wayshard domain); Workspace mode shows current content because the workspace API exposes no HEAD baseline |
+| `pages/session/terminal-panel-v2.tsx` | `app/pages/session/terminal-panel-v2.tsx` + `terminal-helpers.ts` | `focusTerminalById`, `terminal-wrapper-`, `autoCreated`, `aria-label` | server-owned PTY tabs; split-pane resize and client screen serialization omitted (Terminal is a work surface, not a docked split) |
+| `composer/session-composer-region.tsx` | `app/components/composer-region.tsx` | `session-prompt-dock`, `dockProgress`, `dockHeight`, `setDockRef`, `setDockBodyRef`, `centered`, `promptInput` | approval dock replaces permission/question docks |
+| `composer/session-composer-region-controller.ts` | `app/components/composer-region-controller.ts` | `createResizeObserver`, `useSpring`, `dockProgress`, `dockHeight`, `setDockBodyRef`, `setPromptRef`, `centered` | handoff/revert/todo/child-session omitted |
+| `composer/session-composer-state.ts` | `app/components/session-composer-state.ts` | `closing`, `opening`, `responding`, `blocked`, `dock` | approval list replaces permission/question request trees |
+| `pages/session/file-tabs.tsx` | `app/pages/session/file-tabs.tsx` + `file-tab-model.ts` | `handleScroll`, `setScroll`, `viewport`, `data-slot`, `requestAnimationFrame` | inherited `File` viewer + Wayshard compare-and-set editor |
+| `pages/session/timeline/message-timeline.tsx` | `app/pages/session/timeline/message-timeline.tsx` + `timeline/{model,scroll,view}.ts` | `data-timeline-key`, `data-timeline-row`, `requestAnimationFrame`, `scrollTo` | bounded mounted window instead of `@tanstack/solid-virtual` (not a dependency) |
+
+Comments are stripped before the anchor and similarity checks, so the provenance
+comments in these files are not themselves the evidence; the inherited concept
+names must be present in production code, and a provenance-only wrapper is
+rejected by an explicit test.

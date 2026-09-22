@@ -384,17 +384,80 @@ source, adapting Wayshard into the OpenCode application rather than the reverse.
   `data-component="sidebar-nav-mobile"` overlay (fixed `top-10`, max-w 400px,
   slide transition) with a scrim; the persistent sidebar is hidden below `xl`
   and the overlay hides on project/session selection.
-- **Behavior-bearing internals.** Composer region (`components/composer-region.tsx`)
-  and state (`components/session-composer-state.ts`), Review/Changes
-  (`pages/session/review-tab.tsx`), Files (`pages/session/file-tabs.tsx`:
-  Changes/All tab bar, file tree, compare-and-set editor) and Terminal
-  (`pages/session/terminal-panel-v2.tsx`) are adapted descendants rather than
-  delegating to generic domain views; Wayshard adapters and server authority
-  (Run vs Workspace changes, expectedHash save, server-owned PTY) are preserved.
+- **Behavior-bearing internals (superseded).** The earlier stages moved Wayshard
+  behavior into upstream-named containers: `review-tab.tsx` was largely the
+  previous Wayshard Changes view, `file-tabs.tsx` the previous Files view,
+  `terminal-panel-v2.tsx` a wrapper around the renderer, the composer region a
+  custom footer around PromptInputV2, and the timeline a compact custom loop.
+  An independent application-level audit reopened Pass 1E for a final
+  remediation; see "Pass 1E final application-level remediation" below.
 - **Flake.** `TestCancellationInterruptsActiveHarness` was made deterministic
   (load-tolerant context/wait budgets, an own-deadline cancellation wait, and an
   orphan check scoped to the test's built harness path).
-- **Verification.** Client typechecks, 162 GUI tests (blob authenticity +
-  production reachability), rendered smoke (24 checks incl. the narrow model),
-  provenance-offline build with `third_party` removed, and Go/release/build gates
-  all pass on the port's final SHA.
+- **Verification.** Client typechecks, GUI tests (blob authenticity +
+  production reachability), rendered smoke, provenance-offline build with
+  `third_party` removed, and Go/release/build gates all pass on the port's SHA.
+
+### Pass 1E final application-level remediation
+
+A second independent application-level audit confirmed the macro composition was
+genuinely OpenCode-derived but found the behavior-bearing session internals and
+routing still fell short: normal navigation reloaded the document, and the
+session panels were relocated Wayshard views rather than behavioral adaptations.
+This pass closed those findings without redesigning the accepted parts.
+
+- **R1 — in-place routing.** `gui/src/app/router.tsx` is a real reactive SPA
+  router (`pushState`/`replaceState` update a location signal, `popstate`
+  synchronizes back; only absolute external URLs use `location.assign`). The
+  selected route view is resolved as a memo and swapped via `Dynamic` because the
+  adapted provider tree did not propagate the router signal through top-level
+  `Show`/`Switch` children. `RouterAdapter`-contract tests prove reactive updates,
+  replace, popstate, query/hash preservation and no document reload.
+- **R2A — Review/Changes.** The adapted session-ui `SessionReview` is now the
+  production review surface, fed by `review-adapter.ts` (run delta + run/snapshot
+  reads, bounded concurrent hydration, binary handling, line counts) with
+  per-session scroll/open persistence and the upstream user-interaction
+  cancellation + `requestAnimationFrame` restore (`review-view.ts`). Run vs
+  Workspace provenance and the pre-existing user-baseline label are preserved.
+- **R2B — Files.** `file-tab-model.ts` adapts the upstream tab/scroll model
+  (ordered open tabs, active file, neighbor-picking close, per-file scroll);
+  `file-tabs.tsx` renders the inherited session-ui `File` viewer with a
+  Wayshard compare-and-set editor (`expectedHash`) on top. Source safety is
+  unchanged.
+- **R2C — Terminal panel.** `terminal-panel-v2.tsx` adapts the upstream lifecycle:
+  a terminal tab strip with active selection, create/close/open, focus on
+  selection, one `terminal-wrapper-<id>` per server PTY, and honest
+  loss/reconnect. `terminal.tsx` binds to an existing PTY id and never spawns a
+  shell. A narrow server capability (`DELETE /v1/projects/{id}/terminals/{tid}`,
+  `pty.Manager.Kill`) makes close truthful; split-pane resize and client screen
+  serialization are deliberately omitted (Wayshard's Terminal is a work surface,
+  not a docked split) and documented.
+- **R2D — Composer.** `session-composer-state.ts` adapts the request-dock state
+  machine (open/closing/opening, a once-applied responding lock) over the
+  Wayshard approval list; `composer-region-controller.ts` adapts the dock refs,
+  resize-observed height, animated max-height reveal, centered/full-width logic
+  and focus restoration; `composer-region.tsx` renders the approval dock.
+  PromptInputV2 remains the composer; routing profile and artifact-only remain
+  the Wayshard prompt controls.
+- **R2E — Timeline.** `timeline/model.ts` projects messages and run stages into a
+  single reconciled row model with stable keys; `message-timeline.tsx` adds
+  bottom-follow, scroll preservation, jump-to-latest, reveal-by-key, per-session
+  scroll/expansion state and a bounded mounted window for long sessions. True
+  `@tanstack/solid-virtual` windowing is unavailable as a dependency, so an
+  explicit bounded window is used instead of faking a virtualizer.
+- **R3 — structural lineage.** `clients/lineage.manifest.json` (v3) declares, per
+  major descendant, required live definitions, inherited concept anchors that
+  must appear in the comment-stripped live AND upstream source, live-only
+  markers, a minimum comment-stripped code size and a low structural-similarity
+  floor. Usage entries now require a real import specifier. `lineage.test.ts`
+  proves a provenance-only wrapper fails the gate.
+- **R4 — rendered coverage.** `scripts/ci/ui_render_smoke.mjs` now exercises
+  in-place routing (with a per-document reload detector), New Session, Timeline,
+  Changes/Review, Files (incl. compare-and-set save), Terminal (create/close,
+  PTY data, loss), Composer/Approval, plus desktop 900 and mobile 390 regression
+  — 55 rendered checks against the production build with only the backend
+  boundary mocked.
+- **New-session registration.** New-session submissions now go through Wayshard
+  state (`selectConversation` + `send`) so the created run is registered and the
+  session surface shows its stages/changes/timeline immediately.
+
