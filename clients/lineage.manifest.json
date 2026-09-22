@@ -341,6 +341,20 @@
       "destination": "gui/src/app/pages/new-session.tsx",
       "mode": "adapted",
       "marker": "// Adapted from the imported OpenCode new-session flow"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/timeline/model.ts",
+      "upstreamBlob": "33eb30093a1699b9f22aa5b93dc4318112c0b2fc",
+      "destination": "gui/src/app/pages/session/timeline/model.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application timeline model"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/timeline/message-timeline.tsx",
+      "upstreamBlob": "e0838825570e0e137f2dc6a188e7c6abe6fe46fa",
+      "destination": "gui/src/app/pages/session/timeline/message-timeline.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application message timeline"
     }
   ]
 }

@@ -7,26 +7,23 @@
 // Wayshard primary surfaces (Session/Changes/Files/Terminal) and advanced
 // surfaces. The message presentation is the adapted session-ui; the domain and
 // data path are Wayshard. Replaces the retired custom shell.
-import { For, Show, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
+import { For, Show, createMemo, onCleanup, onMount, type JSX } from "solid-js"
 import { Button } from "@wayshard/ui/button"
-import { Icon } from "@wayshard/ui/icon"
-import { Tag } from "@wayshard/ui/tag"
 import { Dialog } from "@wayshard/ui/dialog"
 import { useDialog } from "@wayshard/ui/context/dialog"
 import { DataProvider } from "@wayshard/gui/session-ui/context"
-import { SessionTurn } from "@wayshard/gui/session-ui/components/session-turn"
 import { useWayshard } from "../wayshard/state"
-import { buildData, stageDisplay } from "../wayshard/adapter"
+import { buildData } from "../wayshard/adapter"
 import { useCommand } from "./command"
 import { CommandPalette } from "./command-palette"
 import { AdvancedSurface, type AdvancedSurfaceKey } from "./views"
 import { Composer } from "./composer"
 import { ComposerRegion } from "./components/composer-region"
 import { Titlebar } from "./components/titlebar"
-import { EmptyState, ErrorState } from "./components/state-views"
 import { SessionReviewTab } from "./pages/session/review-tab"
 import { SessionFileTabs } from "./pages/session/file-tabs"
 import { SessionTerminalPanel } from "./pages/session/terminal-panel-v2"
+import { SessionTimeline } from "./pages/session/timeline/message-timeline"
 import { ADVANCED_SURFACES, PRIMARY_TABS, activeTab, setActiveTab, setPairingOpen, type PrimaryTab } from "./navigation"
 
 export function FileFallback(props: { path?: string; content?: string }) {
@@ -148,18 +145,9 @@ function PrimaryView(props: { tab: PrimaryTab }) {
 
 function SessionView() {
   const ws = useWayshard()
-  const userMessages = createMemo(() => ws.state.messages.filter((m) => m.role === "user"))
-
   return (
     <div data-slot="session-region" class="wh-session">
-      <div data-slot="message-region" class="wh-session-stream">
-        <Show when={userMessages().length} fallback={<EmptyState title="No messages yet" body="Describe a task to start a run." />}>
-          <For each={userMessages()}>{(m) => <SessionTurn sessionID={ws.state.activeConversationID!} messageID={m.id} />}</For>
-        </Show>
-        <Show when={ws.state.run}>
-          <RunTimeline />
-        </Show>
-      </div>
+      <SessionTimeline />
       <ComposerRegion
         promptInput={
           <Composer
@@ -169,35 +157,5 @@ function SessionView() {
         }
       />
     </div>
-  )
-}
-
-function RunTimeline() {
-  const ws = useWayshard()
-  const [expanded, setExpanded] = createSignal<string | null>(null)
-  return (
-    <section class="wh-timeline" aria-label="Run timeline">
-      <div class="wh-timeline-header">
-        <span>Run {ws.state.run?.id.slice(0, 8)}</span>
-        <Tag>{ws.state.run?.status}</Tag>
-      </div>
-      <For each={ws.state.stages}>
-        {(stage) => (
-          <div class="wh-stage" data-status={stage.status}>
-            <button class="wh-stage-row" onClick={() => setExpanded(expanded() === stage.id ? null : stage.id)}>
-              <Icon name="chevron-right" size="small" />
-              <span class="wh-stage-kind">{stageDisplay(stage.kind)}</span>
-              <span class="wh-muted">{stage.status}</span>
-            </button>
-            <Show when={expanded() === stage.id}>
-              <div class="wh-stage-detail">
-                <div>Stage ID: {stage.id}</div>
-                <div>Ordinal: {stage.ordinal}</div>
-              </div>
-            </Show>
-          </div>
-        )}
-      </For>
-    </section>
   )
 }
