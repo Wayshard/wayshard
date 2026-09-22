@@ -311,9 +311,10 @@ func (e *ACPExec) finishProcessOwner(ctx context.Context, owner *domain.ProcessO
 	bg := context.WithoutCancel(ctx)
 	_, remaining, supported, _ := process.ReconcileTokenHash(process.HashToken(token), owner.PGID, 3*time.Second)
 	if !supported {
-		// Ownership cannot be verified on this platform. Trust the normal close
-		// path so a completed attempt does not linger as active.
-		_ = e.Store.MarkProcessOwnerReconciled(bg, owner.ID)
+		// Ownership cannot be verified on this platform, so a setsid descendant
+		// may still be alive. Never erase the only recovery evidence by marking
+		// the owner reconciled: leave it active so startup reconciliation fails
+		// closed instead of proceeding against a possibly-live writer.
 		return
 	}
 	if remaining == 0 {

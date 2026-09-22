@@ -97,6 +97,9 @@ func TestSandboxHelperProcess(t *testing.T) {
 		}
 		fmt.Println("SPAWNED")
 		os.Exit(0)
+	case "setsid", "setsid-child":
+		runDetachedHelper(mode)
+		os.Exit(0)
 	case "sleep":
 		time.Sleep(5 * time.Minute)
 		os.Exit(0)

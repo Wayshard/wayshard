@@ -44,6 +44,11 @@ type toolSession struct {
 	signal    string
 	limit     int
 	cancel    context.CancelFunc
+	// toolToken is a per-session ownership token, distinct from the attempt
+	// token, so a single tool session's detached descendants can be reconciled
+	// without terminating the running harness (which shares the attempt token).
+	toolToken string
+	pgid      int
 }
 
 func newToolManager(req orchestrator.StageRequest, workspace, home string, backend sandbox.Backend, token string) *toolManager {
@@ -89,6 +94,11 @@ func (m *toolManager) Create(ctx context.Context, p acp.CreateTerminalParams) (a
 	if m.token != "" {
 		scoped[process.TokenEnv] = m.token
 	}
+	toolToken, terr := process.NewToken()
+	if terr == nil {
+		s.toolToken = toolToken
+		scoped[process.ToolTokenEnv] = toolToken
+	}
 	cmd.Env = sandbox.ToolEnv(m.home, m.home, scoped)
 	cmd.Stdout = writer
 	cmd.Stderr = writer
@@ -105,6 +115,9 @@ func (m *toolManager) Create(ctx context.Context, p acp.CreateTerminalParams) (a
 	s.con = con
 	if err := cmd.Start(); err != nil {
 		return acp.CreateTerminalResult{}, err
+	}
+	if cmd.Process != nil {
+		s.pgid = cmd.Process.Pid
 	}
 	if _, err := con.Attach(cmd, pol); err != nil {
 		_ = con.KillTree(cmd)
@@ -210,8 +223,8 @@ func (m *toolManager) Kill(_ context.Context, p acp.TerminalIDParams) error {
 	if err != nil {
 		return err
 	}
-	s.cancel()
-	return s.con.KillTree(s.cmd)
+	s.reap()
+	return nil
 }
 
 func (m *toolManager) Release(_ context.Context, p acp.TerminalIDParams) error {
@@ -219,10 +232,7 @@ func (m *toolManager) Release(_ context.Context, p acp.TerminalIDParams) error {
 	s := m.sessions[p.TerminalID]
 	delete(m.sessions, p.TerminalID)
 	m.mu.Unlock()
-	if s != nil {
-		s.cancel()
-		_ = s.con.KillTree(s.cmd)
-	}
+	s.reap()
 	return nil
 }
 
@@ -236,7 +246,25 @@ func (m *toolManager) CloseAll() {
 	m.sessions = map[string]*toolSession{}
 	m.mu.Unlock()
 	for _, s := range sessions {
+		s.reap()
+	}
+}
+
+// reap terminates a tool session's process tree, then authoritatively reconciles
+// any descendant that escaped the process group (setsid) using its per-session
+// token. On platforms without authoritative ownership this is just KillTree; the
+// attempt-level owner still reconciles by the attempt token at attempt close.
+func (s *toolSession) reap() {
+	if s == nil {
+		return
+	}
+	if s.cancel != nil {
 		s.cancel()
+	}
+	if s.cmd != nil && s.con != nil {
 		_ = s.con.KillTree(s.cmd)
+	}
+	if s.toolToken != "" {
+		_, _, _, _ = process.ReconcileEnvToken(process.ToolTokenEnv, process.HashToken(s.toolToken), s.pgid, 3*time.Second)
 	}
 }

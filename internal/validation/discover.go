@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/artifacts"
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
@@ -131,7 +132,15 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 	if hm, err := os.UserHomeDir(); err == nil {
 		pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Join(hm, ".local", "go"), filepath.Join(hm, "go"))
 	}
-	cmd.Env = sandbox.ToolEnv(home, home, nil)
+	// A per-command ownership token lets a descendant that escaped the process
+	// group (setsid/setpgid) be reconciled authoritatively after the command,
+	// including after a timeout/cancellation.
+	token, _ := process.NewToken()
+	scoped := map[string]string{}
+	if token != "" {
+		scoped[process.TokenEnv] = token
+	}
+	cmd.Env = sandbox.ToolEnv(home, home, scoped)
 
 	b := sandbox.DefaultBackend()
 	con := sandbox.AsConstrainer(b)
@@ -156,6 +165,11 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
+	// Reconcile any descendant that escaped the process group (setsid) by its
+	// token, so a timeout/cancellation cannot leave an owned process behind.
+	if token != "" && cmd.Process != nil {
+		_, _, _, _ = process.ReconcileEnvToken(process.TokenEnv, process.HashToken(token), cmd.Process.Pid, 3*time.Second)
+	}
 	c.DurationMS = time.Since(start).Milliseconds()
 	c.Dir = dir
 	c.Fingerprint = "tool_sandbox:" + string(net)

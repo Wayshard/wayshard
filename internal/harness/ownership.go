@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
@@ -32,9 +33,21 @@ type ProbeOwnerSink interface {
 // StoreProbeOwnerSink persists probe ownership in SQLite.
 type StoreProbeOwnerSink struct{ Store *storage.Store }
 
+// ErrProbeOwnershipUnsupported means the platform cannot authoritatively verify
+// a probe process tree, so a probe must not run: an owner that cannot be
+// reconciled would otherwise be left active forever.
+var ErrProbeOwnershipUnsupported = errors.New("probe process ownership is unavailable on this platform")
+
 func (s StoreProbeOwnerSink) BeginProbe(ctx context.Context, kind string) (ProbeLease, error) {
 	if s.Store == nil {
 		return nil, nil
+	}
+	// Refuse to run a probe when the platform cannot authoritatively verify its
+	// process tree. Required probe policies already fail closed when process-tree
+	// ownership is unavailable; this also guarantees no unreconcilable owner is
+	// created.
+	if !process.Supported() {
+		return nil, ErrProbeOwnershipUnsupported
 	}
 	token, err := process.NewToken()
 	if err != nil {
@@ -73,9 +86,10 @@ func (l *storeProbeLease) SetPGID(pgid int) {
 }
 
 // Done terminates any descendant the probe left behind and only marks the
-// record reconciled when none remains. A daemonized probe grandchild is killed
-// by token here; if it cannot be proven gone the record stays active so startup
-// reconciliation retries after a crash.
+// record reconciled when Wayshard has evidence that none remains. A daemonized
+// probe grandchild is found by token and killed; if ownership cannot be verified
+// or a descendant cannot be proven gone, the record stays active so startup
+// reconciliation retries it rather than silently continuing.
 func (l *storeProbeLease) Done() {
 	if l == nil || l.done {
 		return

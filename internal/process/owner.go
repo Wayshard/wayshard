@@ -14,6 +14,11 @@ import (
 // hash is persisted; the raw token is never stored.
 const TokenEnv = "WAYSHARD_OWNER_TOKEN"
 
+// ToolTokenEnv carries a per-tool-session ownership token in addition to the
+// attempt token, so a single tool session's detached descendants can be
+// reconciled independently without terminating the running harness.
+const ToolTokenEnv = "WAYSHARD_TOOL_TOKEN"
+
 // NewToken returns a fresh high-entropy ownership token.
 func NewToken() (string, error) {
 	b := make([]byte, 16)

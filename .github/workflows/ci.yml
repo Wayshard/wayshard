@@ -118,7 +118,28 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Native sandbox security tests (verbose)
-        run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt' -v -count=1
+        run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt|Darwin' -v -count=1
+      - name: macOS setsid cancellation is mandatory (must not skip)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test ./internal/sandbox/ -run 'TestNativeSetsidDescendantReconciled' -v -count=1 | tee setsid.log
+          grep -q -- '--- PASS: TestNativeSetsidDescendantReconciled' setsid.log
+      - name: macOS ownership lifecycle is mandatory (must not skip)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test ./internal/harness/ -run 'TestDarwin(FinishProcessOwnerReconcilesDetached|CleanProbeLeavesNoActiveOwner|DetachedProbeReconciledOnRestart|CleanProbeTwoStart|ACPExecReconcilesProcessOwner|ToolReleaseReconcilesDetached)' -v -count=1 | tee owner.log
+          grep -c -- '--- PASS: TestDarwin' owner.log | grep -q '^6$'
+      - name: macOS validation detached-child is mandatory (must not skip)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test ./internal/validation/ -run 'TestDarwinValidationReconcilesDetached' -v -count=1 | tee val.log
+          grep -q -- '--- PASS: TestDarwinValidationReconcilesDetached' val.log
       - name: Native sandbox full package
         run: go test ./internal/sandbox/ -count=1
       - name: Process ownership / recovery / harness packages

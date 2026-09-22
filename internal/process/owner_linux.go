@@ -16,17 +16,21 @@ import (
 // authoritative.
 func Supported() bool { return true }
 
-// ReconcileTokenHash terminates every process carrying a token whose digest
-// matches tokenHash, plus every process in the recorded process group when that
-// group is proven to belong to this ownership record. It waits until no owned
-// process remains or the deadline elapses.
-//
-// Ownership is established from the process environment (the token is inherited
-// by all descendants, including backgrounded or setsid descendants), and the
-// digest is compared to the persisted hash so a reused PID or process-group id
-// cannot cause an unrelated process to be killed. observed is the number of
-// owned processes seen on the first scan.
+// ReconcileTokenHash terminates every process carrying the attempt token whose
+// digest matches tokenHash.
 func ReconcileTokenHash(tokenHash string, pgid int, wait time.Duration) (observed, remaining int, supported bool, err error) {
+	return ReconcileEnvToken(TokenEnv, tokenHash, pgid, wait)
+}
+
+// ReconcileEnvToken terminates every process carrying envName=token whose digest
+// matches tokenHash, plus the recorded process group when it is proven owned. It
+// waits until no owned process remains or the deadline elapses. Ownership is
+// established from the process environment (the token is inherited by all
+// descendants, including backgrounded or setsid descendants), and the digest is
+// compared to the persisted hash so a reused PID or process-group id cannot
+// cause an unrelated process to be killed. observed is the number of owned
+// processes seen on the first scan.
+func ReconcileEnvToken(envName, tokenHash string, pgid int, wait time.Duration) (observed, remaining int, supported bool, err error) {
 	if tokenHash == "" {
 		return 0, 0, true, nil
 	}
@@ -36,7 +40,7 @@ func ReconcileTokenHash(tokenHash string, pgid int, wait time.Duration) (observe
 	deadline := time.Now().Add(wait)
 	first := true
 	for {
-		pids := scanTokenPids(tokenHash)
+		pids := scanEnvTokenPids(envName, tokenHash)
 		if first {
 			observed = len(pids)
 			first = false
@@ -44,9 +48,7 @@ func ReconcileTokenHash(tokenHash string, pgid int, wait time.Duration) (observe
 		if len(pids) == 0 {
 			return observed, 0, true, nil
 		}
-		// Kill each owned process directly, and the process group when it is
-		// proven owned by a token-bearing member.
-		groupOwned := pgid > 0 && groupHasToken(pgid, tokenHash)
+		groupOwned := pgid > 0 && groupHasEnvToken(envName, pgid, tokenHash)
 		for _, pid := range pids {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
@@ -54,17 +56,17 @@ func ReconcileTokenHash(tokenHash string, pgid int, wait time.Duration) (observe
 			_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		}
 		if time.Now().After(deadline) {
-			left := scanTokenPids(tokenHash)
+			left := scanEnvTokenPids(envName, tokenHash)
 			return observed, len(left), true, nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-// scanTokenPids returns the PIDs of processes whose initial environment carries
-// a WAYSHARD_OWNER_TOKEN value whose digest matches tokenHash.
-func scanTokenPids(tokenHash string) []int {
-	prefix := []byte(TokenEnv + "=")
+// scanEnvTokenPids returns the PIDs of processes whose initial environment
+// carries envName with a value whose digest matches tokenHash.
+func scanEnvTokenPids(envName, tokenHash string) []int {
+	prefix := []byte(envName + "=")
 	var out []int
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -92,10 +94,10 @@ func scanTokenPids(tokenHash string) []int {
 	return out
 }
 
-// groupHasToken reports whether any process in the process group carries a
+// groupHasEnvToken reports whether any process in the process group carries a
 // token matching tokenHash, proving the group belongs to this record.
-func groupHasToken(pgid int, tokenHash string) bool {
-	for _, pid := range scanTokenPids(tokenHash) {
+func groupHasEnvToken(envName string, pgid int, tokenHash string) bool {
+	for _, pid := range scanEnvTokenPids(envName, tokenHash) {
 		if processGroup(pid) == pgid {
 			return true
 		}
