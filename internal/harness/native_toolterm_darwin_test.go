@@ -30,7 +30,7 @@ func TestDarwinToolReleaseReconcilesDetached(t *testing.T) {
 	)
 	res, err := tm.Create(ctx, acp.CreateTerminalParams{
 		Command: "/bin/sh",
-		Args:    []string{"-c", "set -m; sleep 300 & echo PID=$!"},
+		Args:    []string{"-c", "set -m; sleep 300 >/dev/null 2>&1 & bg=$!; echo PID=$bg; echo SHPG=$(ps -o pgid= -p $$ | tr -d ' '); echo BGPG=$(ps -o pgid= -p $bg | tr -d ' ')"},
 	})
 	if err != nil {
 		t.Fatalf("create terminal: %v", err)
@@ -45,6 +45,11 @@ func TestDarwinToolReleaseReconcilesDetached(t *testing.T) {
 	pid := parseTrailingPID(out.Output)
 	if pid == 0 {
 		t.Fatalf("fixture did not report a backgrounded pid: %q", out.Output)
+	}
+	shpg := parseKeyInt(out.Output, "SHPG=")
+	bgpg := parseKeyInt(out.Output, "BGPG=")
+	if shpg == 0 || bgpg == 0 || shpg == bgpg {
+		t.Fatalf("fixture did not detach the background process (shpg=%d bgpg=%d): %q", shpg, bgpg, out.Output)
 	}
 	if !ownerProcessAlive(pid) {
 		t.Fatalf("expected backgrounded descendant %d to be alive before release", pid)
@@ -63,9 +68,13 @@ func TestDarwinToolReleaseReconcilesDetached(t *testing.T) {
 }
 
 func parseTrailingPID(out string) int {
+	return parseKeyInt(out, "PID=")
+}
+
+func parseKeyInt(out, prefix string) int {
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "PID=") {
-			if n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PID="))); err == nil {
+		if strings.HasPrefix(line, prefix) {
+			if n, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, prefix))); err == nil {
 				return n
 			}
 		}

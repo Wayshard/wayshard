@@ -37,6 +37,8 @@ func TestHarnessOwnerHelper(t *testing.T) {
 	case "setsid":
 		c := exec.Command(os.Args[0], "-test.run=TestHarnessOwnerHelper")
 		c.Env = append(os.Environ(), "GO_WANT_OWNER_HELPER=1", "OWNER_HELPER_MODE=setsid-child")
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := c.Start(); err != nil {
 			os.Exit(4)
@@ -47,6 +49,8 @@ func TestHarnessOwnerHelper(t *testing.T) {
 		os.Stdout.WriteString("PID=" + strconv.Itoa(os.Getpid()) + "\n")
 		g := exec.Command(os.Args[0], "-test.run=TestHarnessOwnerHelper")
 		g.Env = append(os.Environ(), "GO_WANT_OWNER_HELPER=1", "OWNER_HELPER_MODE=sleep")
+		g.Stdout = os.Stdout
+		g.Stderr = os.Stderr
 		if err := g.Start(); err != nil {
 			os.Exit(4)
 		}

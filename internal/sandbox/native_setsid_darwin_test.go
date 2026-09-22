@@ -23,6 +23,8 @@ func runDetachedHelper(mode string) {
 	case "setsid":
 		c := exec.Command(os.Args[0], "-test.run=TestSandboxHelperProcess")
 		c.Env = append(os.Environ(), helperEnv+"=1", "SANDBOX_HELPER_MODE=setsid-child")
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
 		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := c.Start(); err != nil {
 			fmt.Printf("SPAWN_ERR=%v\n", err)
@@ -34,6 +36,8 @@ func runDetachedHelper(mode string) {
 		fmt.Printf("PID=%d\n", os.Getpid())
 		g := exec.Command(os.Args[0], "-test.run=TestSandboxHelperProcess")
 		g.Env = append(os.Environ(), helperEnv+"=1", "SANDBOX_HELPER_MODE=sleep")
+		g.Stdout = os.Stdout
+		g.Stderr = os.Stderr
 		if err := g.Start(); err != nil {
 			fmt.Printf("SPAWN_ERR=%v\n", err)
 			os.Exit(4)
