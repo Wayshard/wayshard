@@ -2,7 +2,7 @@
 // proved was broken, and the adapted application composition: the app must
 // import the adapted v2 theme layer and mount the adapted ThemeProvider, the
 // "More" overflow must go through the shared dialog provider, and the narrow
-// shell must expose a drawer toggle.
+// model must expose the upstream-derived mobile navigation.
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -12,6 +12,8 @@ const styles = readFileSync(join(src, "styles.css"), "utf8")
 const app = readFileSync(join(src, "app", "app.tsx"), "utf8")
 const page = readFileSync(join(src, "app", "session-page.tsx"), "utf8")
 const layout = readFileSync(join(src, "app", "pages", "layout.tsx"), "utf8")
+const titlebar = readFileSync(join(src, "app", "components", "titlebar.tsx"), "utf8")
+const mobile = readFileSync(join(src, "app", "pages", "layout", "sidebar-mobile.tsx"), "utf8")
 
 describe("graphical theme integration (R1)", () => {
   test("styles entry imports the adapted v2 theme layer", () => {
@@ -31,18 +33,26 @@ describe("graphical theme integration (R1)", () => {
 
 describe("More overflow control (R2)", () => {
   test("More opens through the shared dialog provider", () => {
-    expect(page).toContain("function openMore()")
-    expect(page).toMatch(/openMore[\s\S]*dialog\.show\(/)
+    expect(titlebar).toContain("function openMore()")
+    expect(titlebar).toMatch(/openMore[\s\S]*dialog\.show\(/)
   })
   test("no inline dialog rendered from a moreOpen signal", () => {
-    expect(page).not.toContain("moreOpen")
+    expect(titlebar).not.toContain("moreOpen")
   })
 })
 
-describe("narrow/mobile shell (R3)", () => {
-  test("layout exposes a navigation toggle", () => {
-    expect(layout).toContain("Toggle navigation")
-    expect(layout).toContain("mobileOpen")
+describe("narrow/mobile model (upstream-derived)", () => {
+  test("titlebar exposes the mobile navigation toggle", () => {
+    expect(titlebar).toContain("Toggle navigation")
+    expect(titlebar).toContain("mobileSidebar")
+  })
+  test("sidebar-nav-mobile overlay uses layout mobileSidebar state", () => {
+    expect(mobile).toContain('data-component="sidebar-nav-mobile"')
+    expect(mobile).toContain("mobileSidebar")
+  })
+  test("layout hides the persistent sidebar below the xl breakpoint", () => {
+    expect(layout).toContain("xl:flex")
+    expect(layout).toContain("SidebarMobile")
   })
 })
 
@@ -52,8 +62,8 @@ describe("adapted application composition", () => {
     expect(app).toContain("SessionRoute")
     expect(app).toContain("Home")
   })
-  test("session page uses the adapted titlebar tab strip", () => {
-    expect(page).toContain("Titlebar")
+  test("session page uses the adapted timeline inside the content region", () => {
+    expect(page).toContain("SessionTimeline")
     expect(page).toContain("session-content")
   })
 })

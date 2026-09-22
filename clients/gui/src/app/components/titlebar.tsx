@@ -1,36 +1,81 @@
 // Wayshard application titlebar.
 //
-// Adapted from the imported OpenCode application titlebar family
+// Adapted from the imported OpenCode application titlebar
 // (third_party/opencode-v1.18.31/packages/app/src/components/titlebar.tsx and
-// components/titlebar-tab-nav.tsx): the composition is retained — a brand/
-// project region, a horizontally scrollable tab strip of work surfaces, and a
-// trailing actions region — using the same `data-slot` markers
-// (`titlebar-tab-strip`, `titlebar-tab-item`). OpenCode's session-tab model and
-// desktop window controls are replaced by the Wayshard primary work surfaces and
-// the Wayshard command palette.
-import { For, Show } from "solid-js"
+// components/titlebar-tab-nav.tsx): the composition is retained — a leading
+// region with the narrow-width (`xl:hidden`) sidebar menu toggle, a scrollable
+// work-surface tab strip with `data-slot` markers, and trailing actions. OpenCode
+// window controls and session-tab model are replaced by the Wayshard primary
+// surfaces and command palette.
+import { For, Show, type JSX } from "solid-js"
 import { Button } from "@wayshard/ui/button"
 import { Icon } from "@wayshard/ui/icon"
+import { IconButton } from "@wayshard/ui/icon-button"
 import { Tag } from "@wayshard/ui/tag"
+import { Dialog } from "@wayshard/ui/dialog"
+import { useDialog } from "@wayshard/ui/context/dialog"
 import { useWayshard } from "../../wayshard/state"
-import { PRIMARY_TABS, activeTab, setActiveTab } from "../navigation"
+import { useLayout } from "../context/layout"
+import { CommandPalette } from "../command-palette"
+import { AdvancedSurface, type AdvancedSurfaceKey } from "../views"
+import { ADVANCED_SURFACES, PRIMARY_TABS, activeTab, setActiveTab } from "../navigation"
 
-export function Titlebar(props: { onMore: () => void; onPalette: () => void }): import("solid-js").JSX.Element {
+export function Titlebar(): JSX.Element {
   const ws = useWayshard()
+  const layout = useLayout()
+  const dialog = useDialog()
+
+  function openPalette() {
+    dialog.show(() => <CommandPalette />)
+  }
+
+  function openAdvanced(key: AdvancedSurfaceKey) {
+    dialog.show(() => (
+      <Dialog title={ADVANCED_SURFACES.find((s) => s.key === key)?.label ?? key} size="x-large">
+        <div class="wh-dialog-surface">
+          <AdvancedSurface view={key} />
+        </div>
+      </Dialog>
+    ))
+  }
+
+  function openMore() {
+    dialog.show(() => (
+      <Dialog title="More surfaces" size="large">
+        <div class="wh-more-grid">
+          <For each={ADVANCED_SURFACES}>
+            {(s) => (
+              <button class="wh-more-item" onClick={() => openAdvanced(s.key)}>
+                {s.label}
+              </button>
+            )}
+          </For>
+        </div>
+      </Dialog>
+    ))
+  }
+
   return (
     <header
       data-component="titlebar"
-      class="flex shrink-0 items-center gap-3 border-b border-v2-border-border-base bg-v2-background-bg-base px-3 py-1.5"
+      class="grid h-10 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-v2-border-border-base bg-v2-background-bg-base px-2"
     >
-      <div class="flex min-w-0 shrink-0 items-center gap-2">
-        <span class="truncate text-sm font-medium text-v2-text-text-base">Wayshard</span>
+      <div class="flex min-w-0 items-center gap-1">
+        <div class="flex w-[48px] shrink-0 items-center justify-center xl:hidden">
+          <IconButton
+            icon="bullet-list"
+            variant="ghost"
+            class="rounded-md"
+            data-component="mobile-nav-toggle"
+            onClick={layout.mobileSidebar.toggle}
+            aria-label="Toggle navigation"
+            aria-expanded={layout.mobileSidebar.opened()}
+          />
+        </div>
+        <span class="hidden truncate text-sm font-medium text-v2-text-text-base sm:inline">Wayshard</span>
         <span class="truncate text-sm text-v2-text-text-muted">{ws.activeProject()?.name ?? ""}</span>
       </div>
-      <nav
-        data-slot="titlebar-tab-strip"
-        class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
-        role="tablist"
-      >
+      <nav data-slot="titlebar-tab-strip" class="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist">
         <For each={PRIMARY_TABS}>
           {(tab) => (
             <button
@@ -51,7 +96,7 @@ export function Titlebar(props: { onMore: () => void; onPalette: () => void }): 
           type="button"
           data-slot="titlebar-tab-item"
           class="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-sm text-v2-text-text-base hover:bg-v2-background-bg-layer-01"
-          onClick={props.onMore}
+          onClick={openMore}
         >
           <Icon name="bullet-list" size="small" />
           <span data-slot="tab-title">More</span>
@@ -61,7 +106,7 @@ export function Titlebar(props: { onMore: () => void; onPalette: () => void }): 
         <Show when={ws.state.run}>
           <Tag>{ws.state.run!.status}</Tag>
         </Show>
-        <Button size="small" variant="ghost" icon="console" onClick={props.onPalette}>
+        <Button size="small" variant="ghost" icon="console" onClick={openPalette}>
           ⌘K
         </Button>
       </div>

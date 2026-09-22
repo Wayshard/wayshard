@@ -1,28 +1,41 @@
-// Wayshard mobile/narrow sidebar.
+// Wayshard narrow-width sidebar navigation.
 //
 // Adapted from the imported OpenCode application narrow-width navigation
-// (third_party/opencode-v1.18.31/packages/app/src/pages/layout.tsx, which mounts
-// the sidebar as a mobile drawer): the drawer composition is retained — an
-// overlay backdrop plus an off-canvas panel hosting the sidebar content, closed
-// by backdrop click or after navigation. The Wayshard sidebar content is shared
-// with the desktop rail/panel.
-import { Show, type JSX } from "solid-js"
+// (third_party/opencode-v1.18.31/packages/app/src/pages/layout.tsx): the
+// composition is retained — below the `xl` breakpoint the persistent sidebar is
+// hidden and a `sidebar-nav-mobile` overlay slides in from the start edge, with
+// a scrim that closes it on click. State comes from the layout context
+// `mobileSidebar` (opened/hide), matching upstream.
+import { type JSX } from "solid-js"
+import { useLayout } from "../../context/layout"
 
-export function SidebarMobile(props: { open: boolean; onClose: () => void; children: JSX.Element }): JSX.Element {
+export function SidebarMobile(props: { children: JSX.Element }): JSX.Element {
+  const layout = useLayout()
   return (
-    <Show when={props.open}>
+    <div class="xl:hidden">
       <div
-        data-component="sidebar-mobile-backdrop"
-        class="fixed inset-0 z-30 bg-black/50"
-        aria-hidden="true"
-        onClick={props.onClose}
+        data-component="sidebar-mobile-scrim"
+        classList={{
+          "fixed inset-x-0 top-10 bottom-0 z-40 transition-opacity duration-200": true,
+          "opacity-100 pointer-events-auto": layout.mobileSidebar.opened(),
+          "opacity-0 pointer-events-none": !layout.mobileSidebar.opened(),
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) layout.mobileSidebar.hide()
+        }}
       />
-      <div
-        data-component="sidebar-mobile"
-        class="fixed inset-y-0 left-0 z-40 w-[min(82vw,300px)] shadow-[0_0_24px_rgba(0,0,0,0.6)]"
+      <nav
+        aria-label="Projects and sessions"
+        data-component="sidebar-nav-mobile"
+        classList={{
+          "fixed top-10 bottom-0 start-0 z-50 w-full max-w-[400px] overflow-hidden border-e border-v2-border-border-base bg-v2-background-bg-base transition-transform duration-200 ease-out": true,
+          "translate-x-0": layout.mobileSidebar.opened(),
+          "-translate-x-full": !layout.mobileSidebar.opened(),
+        }}
+        onClick={(e) => e.stopPropagation()}
       >
         {props.children}
-      </div>
-    </Show>
+      </nav>
+    </div>
   )
 }

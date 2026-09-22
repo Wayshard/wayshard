@@ -369,6 +369,13 @@
       "destination": "gui/src/app/pages/layout/sidebar-mobile.tsx",
       "mode": "adapted",
       "marker": "// Adapted from the imported OpenCode application narrow-width navigation"
+    },
+    {
+      "upstream": "packages/app/src/context/layout.tsx",
+      "upstreamBlob": "6235f35c45ae14e42e8056733b917690e5fd2d7c",
+      "destination": "gui/src/app/context/layout.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application layout context"
     }
   ]
 }

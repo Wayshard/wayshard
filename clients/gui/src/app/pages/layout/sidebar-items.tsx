@@ -39,7 +39,10 @@ export function SessionItem(props: { project: Project; session: Conversation; de
       data-session-id={props.session.id}
       class={`group/session relative w-full min-w-0 rounded-md pr-3 text-left transition-colors hover:bg-v2-background-bg-layer-01 data-[active=true]:bg-v2-background-bg-layer-02 ${props.dense ? "py-0.5" : "py-1"}`}
       data-active={active()}
-      onClick={() => navigate(`/${props.project.id}/session/${props.session.id}`)}
+      onClick={() => {
+        layout.mobileSidebar.hide()
+        navigate(`/${props.project.id}/session/${props.session.id}`)
+      }}
     >
       <div class="flex min-w-0 items-center gap-1">
         <span class="shrink-0 size-6 flex items-center justify-center text-v2-icon-icon-muted">

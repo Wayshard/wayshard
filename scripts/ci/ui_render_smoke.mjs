@@ -286,6 +286,21 @@ async function main() {
       check("mobile session: no horizontal overflow", sg.overflow === false, JSON.stringify(sg));
       await sess.shot("session-390.png");
       await sess.close();
+
+      // Upstream-derived narrow model: sidebar-nav-mobile overlay toggled from the
+      // titlebar, closed after selecting a session.
+      const nav = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 390, height: 844 }, SHOTS, "mobile-nav-390");
+      const before = await nav.evaluate(`(() => { const e = document.querySelector('[data-component="sidebar-nav-mobile"]'); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x), w: Math.round(b.width) }; })()`);
+      await nav.evaluate(`(async () => { const t = document.querySelector('[data-component="titlebar"] button[aria-label="Toggle navigation"]'); if (t) t.click(); await new Promise((r) => setTimeout(r, 400)); })()`);
+      const open = await nav.evaluate(`(() => { const e = document.querySelector('[data-component="sidebar-nav-mobile"]'); const b = e ? e.getBoundingClientRect() : null; return { x: b ? Math.round(b.x) : null, w: b ? Math.round(b.width) : 0, scrim: !!document.querySelector('[data-component="sidebar-mobile-scrim"]') }; })()`);
+      await nav.shot("mobile-nav-390.png");
+      await nav.evaluate(`document.querySelector('[data-component="sidebar-nav-mobile"] [data-session-id]')?.click()`).catch(() => {});
+      await sleep(1500);
+      const after = await nav.evaluate(`(() => { const e = document.querySelector('[data-component="sidebar-nav-mobile"]'); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.x), w: Math.round(b.width) }; })()`);
+      check("mobile nav: overlay off-canvas when closed", before && before.x < 0, JSON.stringify(before));
+      check("mobile nav: toggle opens overlay", open && open.x >= 0 && open.w > 0, JSON.stringify(open));
+      check("mobile nav: selecting a session closes overlay", after && after.x < 0, JSON.stringify(after));
+      await nav.close();
     }
 
     // ---- Pairing gate (unauthenticated) ----

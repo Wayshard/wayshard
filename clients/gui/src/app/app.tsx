@@ -35,7 +35,9 @@ function Routes() {
         </AppLayout>
       </Show>
       <Show when={match().name === "new-session"}>
-        <NewSessionRoute />
+        <AppLayout>
+          <NewSessionRoute />
+        </AppLayout>
       </Show>
       <Show when={match().name === "home"}>
         <AppLayout>

@@ -19,7 +19,6 @@ import { CommandPalette } from "./command-palette"
 import { AdvancedSurface, type AdvancedSurfaceKey } from "./views"
 import { Composer } from "./composer"
 import { ComposerRegion } from "./components/composer-region"
-import { Titlebar } from "./components/titlebar"
 import { SessionReviewTab } from "./pages/session/review-tab"
 import { SessionFileTabs } from "./pages/session/file-tabs"
 import { SessionTerminalPanel } from "./pages/session/terminal-panel-v2"
@@ -115,7 +114,6 @@ export function SessionPage(): JSX.Element {
 
   return (
     <div data-component="session" class="flex h-full min-h-0 flex-col bg-v2-background-bg-base">
-      <Titlebar onMore={openMore} onPalette={openPalette} />
       <Show when={!ws.state.connected}>
         <div class="wh-connection" data-state="disconnected">
           <span>{ws.state.connectionError ? `Disconnected: ${ws.state.connectionError}` : "Connecting to Wayshard server…"}</span>
