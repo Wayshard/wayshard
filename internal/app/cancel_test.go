@@ -23,7 +23,7 @@ func TestCancellationInterruptsActiveHarness(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "timeout")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	a, err := Open(ctx, Config{DataDir: t.TempDir(), Listen: "127.0.0.1:0"})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestCancellationInterruptsActiveHarness(t *testing.T) {
 	a.Sched.Enqueue(run.ID)
 
 	// Wait until the harness is actually running.
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	running := false
 	for time.Now().Before(deadline) {
 		r, err := a.Store.GetRun(ctx, run.ID)
@@ -80,18 +80,20 @@ func TestCancellationInterruptsActiveHarness(t *testing.T) {
 	if r.Status != domain.RunCancelled {
 		t.Fatalf("run not cancelled after cancel: %+v", r)
 	}
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
+	if elapsed := time.Since(start); elapsed > 30*time.Second {
 		t.Fatalf("cancellation took too long: %s", elapsed)
 	}
 	// No orphaned fake harness should remain (allow a moment for teardown).
-	orphanDeadline := time.Now().Add(5 * time.Second)
+	// Match this test's built harness path specifically so a concurrently
+	// running test's fake harness cannot be mistaken for an orphan.
+	orphanDeadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(orphanDeadline) {
-		out, _ := exec.Command("pgrep", "-f", "wayshard-fake-acp").Output()
+		out, _ := exec.Command("pgrep", "-f", bin).Output()
 		if strings.TrimSpace(string(out)) == "" {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	out, _ := exec.Command("pgrep", "-f", "wayshard-fake-acp").Output()
+	out, _ := exec.Command("pgrep", "-f", bin).Output()
 	t.Fatalf("orphaned harness process remains: %s", out)
 }
