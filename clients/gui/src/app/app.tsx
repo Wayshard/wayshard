@@ -16,20 +16,23 @@ import { StateProvider, useWayshard } from "../wayshard/state"
 import { GlobalProvider } from "./context/global"
 import { LayoutProvider } from "./context/layout"
 import { CommandProvider } from "./command"
-import { FileFallback, pairingOpen } from "./session-shell"
+import { FileFallback } from "./session-page"
 import { PairingGate } from "./pairing"
 import { syncRouter, useRouteMatch } from "./router"
 import { Home } from "./pages/home"
 import { AppLayout } from "./pages/layout"
 import { SessionRoute } from "./pages/session-route"
 import { NewSessionRoute } from "./pages/new-session"
+import { pairingOpen } from "./navigation"
 
 function Routes() {
   const match = useRouteMatch()
   return (
     <>
       <Show when={match().name === "session"}>
-        <SessionRoute />
+        <AppLayout>
+          <SessionRoute />
+        </AppLayout>
       </Show>
       <Show when={match().name === "new-session"}>
         <NewSessionRoute />

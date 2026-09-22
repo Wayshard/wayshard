@@ -9,7 +9,7 @@ import { Show, createSignal, onCleanup } from "solid-js"
 import type { FitAddon, Ghostty, Terminal as GhosttyTerminal } from "ghostty-web"
 import { Button } from "@wayshard/ui/button"
 import { Icon } from "@wayshard/ui/icon"
-import { EmptyState, ErrorState } from "./session-shell"
+import { EmptyState, ErrorState } from "./components/state-views"
 import { useWayshard } from "../wayshard/state"
 
 let shared: Promise<{ mod: typeof import("ghostty-web"); ghostty: Ghostty }> | undefined

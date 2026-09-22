@@ -8,7 +8,7 @@
 import { createEffect } from "solid-js"
 import { useParams } from "../router"
 import { useGlobal } from "../context/global"
-import { SessionShell } from "../session-shell"
+import { SessionPage } from "../session-page"
 
 export function SessionRoute() {
   const params = useParams<{ dir: string; id?: string }>()
@@ -21,5 +21,5 @@ export function SessionRoute() {
     if (dir && id) void global.sessions.open(dir, id)
   })
 
-  return <SessionShell />
+  return <SessionPage />
 }

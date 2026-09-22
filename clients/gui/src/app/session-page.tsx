@@ -1,0 +1,195 @@
+// Wayshard session page.
+//
+// Adapted from the imported OpenCode application session page
+// (third_party/opencode-v1.18.31/packages/app/src/pages/session.tsx): the
+// composition is retained — a titlebar with the work-surface tab strip, a
+// session content region, and a docked composer region at the bottom — with the
+// Wayshard primary surfaces (Session/Changes/Files/Terminal) and advanced
+// surfaces. The message presentation is the adapted session-ui; the domain and
+// data path are Wayshard. Replaces the retired custom shell.
+import { For, Show, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
+import { Button } from "@wayshard/ui/button"
+import { Icon } from "@wayshard/ui/icon"
+import { Tag } from "@wayshard/ui/tag"
+import { Dialog } from "@wayshard/ui/dialog"
+import { useDialog } from "@wayshard/ui/context/dialog"
+import { DataProvider } from "@wayshard/gui/session-ui/context"
+import { SessionTurn } from "@wayshard/gui/session-ui/components/session-turn"
+import { useWayshard } from "../wayshard/state"
+import { buildData, stageDisplay } from "../wayshard/adapter"
+import { useCommand } from "./command"
+import { CommandPalette } from "./command-palette"
+import { ChangesView, FilesView, TerminalView, AdvancedSurface, type AdvancedSurfaceKey } from "./views"
+import { Composer } from "./composer"
+import { Titlebar } from "./components/titlebar"
+import { EmptyState, ErrorState } from "./components/state-views"
+import { ADVANCED_SURFACES, PRIMARY_TABS, activeTab, setActiveTab, setPairingOpen, type PrimaryTab } from "./navigation"
+
+export function FileFallback(props: { path?: string; content?: string }) {
+  return <pre class="wh-file-view">{props.content ?? ""}</pre>
+}
+
+export function SessionPage(): JSX.Element {
+  const ws = useWayshard()
+  const command = useCommand()
+  const dialog = useDialog()
+
+  function openPalette() {
+    dialog.show(() => <CommandPalette />)
+  }
+
+  function openAdvanced(key: AdvancedSurfaceKey) {
+    dialog.show(() => (
+      <Dialog title={ADVANCED_SURFACES.find((s) => s.key === key)?.label ?? key} size="x-large">
+        <div class="wh-dialog-surface">
+          <AdvancedSurface view={key} />
+        </div>
+      </Dialog>
+    ))
+  }
+
+  function openMore() {
+    dialog.show(() => (
+      <Dialog title="More surfaces" size="large">
+        <div class="wh-more-grid">
+          <For each={ADVANCED_SURFACES}>
+            {(s) => (
+              <button class="wh-more-item" onClick={() => openAdvanced(s.key)}>
+                {s.label}
+              </button>
+            )}
+          </For>
+        </div>
+      </Dialog>
+    ))
+  }
+
+  onMount(() => {
+    const dispose = command.register({
+      options: () => [
+        { id: "command.palette", title: "Command palette", category: "Navigation", keybind: "mod+k", onSelect: openPalette },
+        { id: "surface.more", title: "More surfaces…", category: "Navigation", keybind: "mod+shift+m", onSelect: openMore },
+        ...PRIMARY_TABS.map((t) => ({
+          id: `tab.${t.key}`,
+          title: `Go to ${t.label}`,
+          category: "Navigation",
+          keybind: t.keybind,
+          onSelect: () => setActiveTab(t.key),
+        })),
+        ...ADVANCED_SURFACES.map((s) => ({
+          id: `surface.${s.key}`,
+          title: s.label,
+          category: "Surfaces",
+          onSelect: () => openAdvanced(s.key),
+        })),
+        {
+          id: "project.open",
+          title: "Open project…",
+          category: "Project",
+          onSelect: async () => {
+            const path = window.prompt("Project path")
+            if (path) await ws.openProject(path)
+          },
+        },
+        { id: "connect.pair", title: "Connect / pair device…", category: "Connection", onSelect: () => setPairingOpen(true) },
+        { id: "session.new", title: "New session", category: "Session", onSelect: () => void ws.newConversation() },
+        { id: "run.cancel", title: "Cancel run", category: "Run", onSelect: () => void ws.cancelRun() },
+        { id: "run.retry", title: "Retry run", category: "Run", onSelect: () => void ws.retryRun() },
+        { id: "run.integrate", title: "Integrate run", category: "Run", onSelect: () => void ws.integrateRun() },
+      ],
+    })
+    onCleanup(dispose)
+  })
+
+  const data = createMemo(() =>
+    buildData({
+      project: ws.activeProject(),
+      conversations: ws.state.conversations,
+      activeConversationID: ws.state.activeConversationID,
+      messages: ws.state.messages,
+      runs: ws.state.runsByConversation,
+      runView: ws.state.run ? { run: ws.state.run, stages: ws.state.stages } : undefined,
+    }),
+  )
+
+  return (
+    <div data-component="session" class="flex h-full min-h-0 flex-col bg-v2-background-bg-base">
+      <Titlebar onMore={openMore} onPalette={openPalette} />
+      <Show when={!ws.state.connected}>
+        <div class="wh-connection" data-state="disconnected">
+          <span>{ws.state.connectionError ? `Disconnected: ${ws.state.connectionError}` : "Connecting to Wayshard server…"}</span>
+          <Button size="small" variant="secondary" onClick={() => void ws.refreshAll()}>
+            Reconnect
+          </Button>
+        </div>
+      </Show>
+      <div data-slot="session-content" class="flex min-h-0 flex-1 flex-col">
+        <Show when={activeTab() === "session"} fallback={<PrimaryView tab={activeTab()} />}>
+          <DataProvider data={data()} directory={ws.activeProject()?.path ?? ""} sessionID={ws.state.activeConversationID ?? undefined}>
+            <SessionView />
+          </DataProvider>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
+function PrimaryView(props: { tab: PrimaryTab }) {
+  return (
+    <Show when={props.tab === "changes"} fallback={<Show when={props.tab === "files"} fallback={<TerminalView />}><FilesView /></Show>}>
+      <ChangesView />
+    </Show>
+  )
+}
+
+function SessionView() {
+  const ws = useWayshard()
+  const userMessages = createMemo(() => ws.state.messages.filter((m) => m.role === "user"))
+
+  return (
+    <div data-slot="session-region" class="wh-session">
+      <div data-slot="message-region" class="wh-session-stream">
+        <Show when={userMessages().length} fallback={<EmptyState title="No messages yet" body="Describe a task to start a run." />}>
+          <For each={userMessages()}>{(m) => <SessionTurn sessionID={ws.state.activeConversationID!} messageID={m.id} />}</For>
+        </Show>
+        <Show when={ws.state.run}>
+          <RunTimeline />
+        </Show>
+      </div>
+      <Composer
+        onSubmit={(input) => void ws.send(input.text, { artifactOnly: input.artifactOnly, profile: input.profile })}
+        onCancel={() => void ws.cancelRun()}
+      />
+    </div>
+  )
+}
+
+function RunTimeline() {
+  const ws = useWayshard()
+  const [expanded, setExpanded] = createSignal<string | null>(null)
+  return (
+    <section class="wh-timeline" aria-label="Run timeline">
+      <div class="wh-timeline-header">
+        <span>Run {ws.state.run?.id.slice(0, 8)}</span>
+        <Tag>{ws.state.run?.status}</Tag>
+      </div>
+      <For each={ws.state.stages}>
+        {(stage) => (
+          <div class="wh-stage" data-status={stage.status}>
+            <button class="wh-stage-row" onClick={() => setExpanded(expanded() === stage.id ? null : stage.id)}>
+              <Icon name="chevron-right" size="small" />
+              <span class="wh-stage-kind">{stageDisplay(stage.kind)}</span>
+              <span class="wh-muted">{stage.status}</span>
+            </button>
+            <Show when={expanded() === stage.id}>
+              <div class="wh-stage-detail">
+                <div>Stage ID: {stage.id}</div>
+                <div>Ordinal: {stage.ordinal}</div>
+              </div>
+            </Show>
+          </div>
+        )}
+      </For>
+    </section>
+  )
+}

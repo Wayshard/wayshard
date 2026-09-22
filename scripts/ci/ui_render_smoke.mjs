@@ -227,7 +227,7 @@ async function main() {
       const p = await openPage(cdp, `${base}/`, { width: 1280, height: 900 }, SHOTS, "session-1280");
       await p.evaluate(`document.querySelector('[data-session-id]')?.click()`).catch(() => {});
       await sleep(1500);
-      const nav = await p.evaluate(`({ path: location.pathname, sessionShell: !!document.querySelector(".wh-titlebar"), composer: !!document.querySelector(".wh-composer"), content: !!document.querySelector(".wh-session") })`);
+      const nav = await p.evaluate(`({ path: location.pathname, sessionShell: !!document.querySelector('[data-component="titlebar"]'), composer: !!document.querySelector(".wh-composer"), content: !!document.querySelector('[data-slot="session-region"]') })`);
       check("home->session: navigates", nav.sessionShell === true, JSON.stringify(nav));
       check("session: composer region present", nav.composer === true);
       check("session: content region present", nav.content === true);
@@ -238,7 +238,7 @@ async function main() {
     // ---- Direct session route (SPA fallback) ----
     {
       const p = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 1280, height: 900 }, SHOTS, "session-direct-1280");
-      const s = await p.evaluate(`(() => ({ shell: !!document.querySelector(".wh-titlebar"), composer: !!document.querySelector(".wh-composer"), home: !!document.querySelector('[data-component="home"]') }))()`);
+      const s = await p.evaluate(`(() => ({ shell: !!document.querySelector('[data-component="titlebar"]'), composer: !!document.querySelector(".wh-composer"), home: !!document.querySelector('[data-component="home"]') }))()`);
       check("session route: renders session shell", s.shell === true && s.home === false, JSON.stringify(s));
       await p.close();
     }
@@ -260,7 +260,7 @@ async function main() {
     {
       const p = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 1280, height: 900 }, SHOTS, "more");
       const more = await p.evaluate(`(async () => { ${HELPERS}
-        const m = [...document.querySelectorAll(".wh-tab-button")].find(b => b.textContent.trim() === "More");
+        const m = [...document.querySelectorAll('[data-slot="titlebar-tab-item"]')].find(b => b.textContent.trim() === "More");
         m && m.click(); await sleep(500);
         const items = [...document.querySelectorAll(".wh-more-item")];
         return { dialog: vis(document.querySelector('[data-component="dialog"]')), items: items.length, visible: items.filter(vis).length, labels: items.map(i => i.textContent.trim()) };
@@ -281,7 +281,7 @@ async function main() {
       await home.close();
 
       const sess = await openPage(cdp, `${base}/prj_smoke/session/cnv_1`, { width: 390, height: 844 }, SHOTS, "session-390");
-      const sg = await sess.evaluate(`(() => ({ shell: !!document.querySelector(".wh-titlebar"), composer: !!document.querySelector(".wh-composer"), overflow: document.documentElement.scrollWidth > window.innerWidth + 2 }))()`);
+      const sg = await sess.evaluate(`(() => ({ shell: !!document.querySelector('[data-component="titlebar"]'), composer: !!document.querySelector(".wh-composer"), overflow: document.documentElement.scrollWidth > window.innerWidth + 2 }))()`);
       check("mobile session: renders", sg.shell === true && sg.composer === true, JSON.stringify(sg));
       check("mobile session: no horizontal overflow", sg.overflow === false, JSON.stringify(sg));
       await sess.shot("session-390.png");
