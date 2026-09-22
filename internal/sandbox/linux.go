@@ -111,14 +111,20 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 	if err := compileCommon(p, true); err != nil {
 		return Compiled{Backend: "linux"}, err
 	}
-	c := Compiled{Backend: "linux", Features: []string{"process_group", "pdeathsig", "env_filter"}}
+	// process_tree: Setpgid at creation + Pdeathsig, so the group is established
+	// before the child runs. resource_limits: rlimits/seccomp are applied by the
+	// helper before exec.
+	c := Compiled{Backend: "linux", Features: []string{
+		"process_group", "pdeathsig", "env_filter",
+		string(FeatureProcessTree), string(FeatureResourceLimits),
+	}}
 	if _, err := landlockABI(); err != nil {
 		c.Unavailable = append(c.Unavailable, "landlock")
 		if p.Required {
 			return c, fmt.Errorf("%w: landlock unavailable: %v", ErrRequiredIsolation, err)
 		}
 	} else {
-		c.Features = append(c.Features, "landlock")
+		c.Features = append(c.Features, "landlock", string(FeatureFSRead), string(FeatureFSWrite))
 	}
 	if p.Network == NetNone {
 		// NetworkNone is enforced by seccomp-BPF at exec time (Landlock alone
@@ -129,7 +135,7 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 				return c, fmt.Errorf("%w: %v", ErrRequiredIsolation, err)
 			}
 		} else {
-			c.Features = append(c.Features, "seccomp_network_deny")
+			c.Features = append(c.Features, "seccomp_network_deny", string(FeatureNetworkNone))
 		}
 	}
 	if p.Network == NetProvider {
@@ -142,7 +148,7 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 				return c, fmt.Errorf("%w: %v", ErrRequiredIsolation, err)
 			}
 		} else {
-			c.Features = append(c.Features, "seccomp_provider_tcp")
+			c.Features = append(c.Features, "seccomp_provider_tcp", string(FeatureNetworkProvider))
 		}
 	}
 	if p.Network == NetLoopback {
@@ -154,11 +160,14 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 				return c, fmt.Errorf("%w: %v", ErrRequiredIsolation, err)
 			}
 		} else {
-			c.Features = append(c.Features, "seccomp_loopback_tcp")
+			c.Features = append(c.Features, "seccomp_loopback_tcp", string(FeatureNetworkLoopback))
 		}
 	}
 	if p.SyntheticHome != "" || p.SyntheticTemp != "" {
-		c.Features = append(c.Features, "synthetic_home")
+		c.Features = append(c.Features, "synthetic_home", string(FeatureSyntheticEnv))
+	}
+	if err := validateRequiredFeatures(c, p); err != nil {
+		return c, err
 	}
 	return c, nil
 }

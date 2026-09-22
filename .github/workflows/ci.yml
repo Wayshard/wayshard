@@ -99,6 +99,31 @@ jobs:
       - name: Checksum uniqueness and script self-tests
         run: make release-scripts-test
 
+  native-security:
+    name: Native security (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+          - name: macos-intel
+            os: macos-15-intel
+          - name: windows-amd64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Native sandbox security tests (verbose)
+        run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt' -v -count=1
+      - name: Native sandbox full package
+        run: go test ./internal/sandbox/ -count=1
+      - name: Process ownership / recovery / harness packages
+        run: go test ./internal/process/ ./internal/recovery/ ./internal/harness/ -count=1
+
   canonicals:
     name: Canonicals present
     runs-on: ubuntu-latest

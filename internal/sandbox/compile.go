@@ -25,6 +25,52 @@ func (c Compiled) has(feature string) bool {
 	return false
 }
 
+func (c Compiled) hasFeature(f Feature) bool { return c.has(string(f)) }
+
+// RequiredFeatures lists the containment properties a policy depends on. A
+// backend that cannot enforce any of them must refuse a Required policy rather
+// than silently run with weaker containment.
+func RequiredFeatures(p Policy) []Feature {
+	var out []Feature
+	if p.Required {
+		// Every required launch must be cancellable as a whole process tree.
+		out = append(out, FeatureProcessTree)
+	}
+	if len(p.ReadOnlyRoots) > 0 {
+		out = append(out, FeatureFSRead)
+	}
+	if len(p.ReadWriteRoots) > 0 {
+		out = append(out, FeatureFSWrite)
+	}
+	switch p.Network {
+	case NetNone, "":
+		out = append(out, FeatureNetworkNone)
+	case NetLoopback:
+		out = append(out, FeatureNetworkLoopback)
+	case NetProvider:
+		out = append(out, FeatureNetworkProvider)
+	}
+	if p.SyntheticHome != "" || p.SyntheticTemp != "" {
+		out = append(out, FeatureSyntheticEnv)
+	}
+	return out
+}
+
+// validateRequiredFeatures fails a Required policy when the backend does not
+// declare every feature the policy depends on. Non-required policies are used
+// only by tests and management paths and are not validated here.
+func validateRequiredFeatures(c Compiled, p Policy) error {
+	if !p.Required {
+		return nil
+	}
+	for _, f := range RequiredFeatures(p) {
+		if !c.hasFeature(f) {
+			return fmt.Errorf("%w: backend %s cannot enforce required feature %q", ErrRequiredIsolation, c.Backend, f)
+		}
+	}
+	return nil
+}
+
 func compileCommon(p Policy, allowProvider bool) error {
 	if p.Required && len(p.ReadWriteRoots) == 0 {
 		return fmt.Errorf("%w: no writable roots in policy", ErrRequiredIsolation)

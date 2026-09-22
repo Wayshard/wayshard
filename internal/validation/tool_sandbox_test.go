@@ -9,15 +9,21 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/artifacts"
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/sandbox"
 )
 
-// These tests exercise real OS confinement and use POSIX shell scripts; the
-// forensic sandbox failure was demonstrated on Linux. macOS/Windows runtime
-// enforcement remains unverified (see CONFORMANCE.md).
-func requireLinux(t *testing.T) {
+// These tests exercise real OS confinement through the production validation
+// Runner. They run on POSIX hosts whose native backend can enforce required
+// isolation (Linux Landlock/seccomp, macOS Seatbelt); a platform that cannot
+// establish required isolation fails closed in production, so the test skips
+// there rather than asserting a weaker outcome.
+func requirePosixSandbox(t *testing.T) {
 	t.Helper()
-	if runtime.GOOS != "linux" {
-		t.Skip("native sandbox enforcement is verified on Linux only")
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("validation tool sandbox is exercised on Linux and macOS")
+	}
+	if !sandbox.Probe().Available {
+		t.Skipf("required isolation unavailable: %s", sandbox.Probe().Detail)
 	}
 }
 
@@ -25,7 +31,7 @@ func requireLinux(t *testing.T) {
 // commands cannot read host files, write outside the workspace, or see ambient
 // secrets, while ordinary commands still work.
 func TestValidationRunsInToolSandbox(t *testing.T) {
-	requireLinux(t)
+	requirePosixSandbox(t)
 	host := t.TempDir()
 	hostCanary := filepath.Join(host, "host-canary.txt")
 	if err := os.WriteFile(hostCanary, []byte("host-secret"), 0o600); err != nil {
@@ -70,7 +76,7 @@ func TestValidationRunsInToolSandbox(t *testing.T) {
 
 // TestValidationOrdinaryCommandStillWorks ensures benign commands pass.
 func TestValidationOrdinaryCommandStillWorks(t *testing.T) {
-	requireLinux(t)
+	requirePosixSandbox(t)
 	ws := t.TempDir()
 	r := &Runner{DataDir: t.TempDir()}
 	art := r.Run(context.Background(), ws, []artifacts.ValidationCheck{
@@ -84,7 +90,7 @@ func TestValidationOrdinaryCommandStillWorks(t *testing.T) {
 // TestValidationBaselineClassification distinguishes pre-existing failures from
 // new regressions.
 func TestValidationBaselineClassification(t *testing.T) {
-	requireLinux(t)
+	requirePosixSandbox(t)
 	ws := t.TempDir()
 	script := "#!/bin/sh\nexit 1\n"
 	if err := os.WriteFile(filepath.Join(ws, "fail.sh"), []byte(script), 0o755); err != nil {

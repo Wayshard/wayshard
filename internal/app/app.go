@@ -209,6 +209,11 @@ func (s *storeCandidates) Refresh(ctx context.Context) error {
 	}
 	opts := harness.DefaultDiscoverOptions()
 	opts.Probe = true
+	// If startup reconciliation could not verify prior probe ownership, do not
+	// execute new probes: fail closed rather than race a possibly-live descendant.
+	if !recovery.ProbeOwnershipReconciled() {
+		opts.Probe = false
+	}
 	opts.Owners = harness.StoreProbeOwnerSink{Store: s.Store}
 	opts.Definitions = defs
 	found, err := harness.Discover(ctx, opts)

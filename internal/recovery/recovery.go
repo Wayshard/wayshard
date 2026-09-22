@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
@@ -14,6 +15,19 @@ import (
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
 )
+
+// probeOwnershipReconciled is true when startup reconciliation could account for
+// every prior discovery-probe process tree. When it is false the platform cannot
+// verify probe ownership, so discovery must not execute new probes: racing an
+// unreconciled descendant is not acceptable.
+var probeOwnershipReconciled atomic.Bool
+
+func init() { probeOwnershipReconciled.Store(true) }
+
+// ProbeOwnershipReconciled reports whether prior discovery-probe process trees
+// were safely reconciled at startup. False means probe execution must fail
+// closed for this server lifetime.
+func ProbeOwnershipReconciled() bool { return probeOwnershipReconciled.Load() }
 
 // validateCheckpointPath proves a persisted checkpoint tree belongs to the
 // expected run and stage. Ownership is established from path components after
@@ -228,9 +242,12 @@ func reconcileProbeOwners(ctx context.Context, st *storage.Store, log *slog.Logg
 	for _, o := range owners {
 		observed, remaining, supported, _ := process.ReconcileTokenHash(o.TokenHash, o.PGID, 3*time.Second)
 		if !supported {
-			// Leave the record active: a platform that cannot verify ownership
-			// must not claim the probe tree is gone.
-			log.Warn("probe ownership cannot be verified on this platform", "kind", o.Kind)
+			// Ownership cannot be verified on this platform. A probe descendant
+			// may still be alive, so fail closed: do not execute new probes this
+			// server lifetime rather than race an unreconciled process.
+			probeOwnershipReconciled.Store(false)
+			log.Error("probe ownership cannot be verified on this platform; discovery probes will fail closed", "kind", o.Kind)
+			_ = st.EmitEvent(ctx, "recovery.probe_ownership_unreconciled", "", map[string]any{"kind": o.Kind, "reason": "ownership unsupported on this platform"})
 			continue
 		}
 		if remaining == 0 {

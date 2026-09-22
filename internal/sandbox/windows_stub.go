@@ -35,5 +35,11 @@ func (WindowsBackend) Attach(*exec.Cmd, Policy) (Cleanup, error) {
 func (WindowsBackend) KillTree(*exec.Cmd) error { return nil }
 
 func (WindowsBackend) Report() IsolationReport {
-	return IsolationReport{Backend: "windows", Available: false, Mode: "unavailable", Missing: []string{"job_object"}, Detail: "windows backend not compiled on this OS"}
+	return IsolationReport{
+		Backend:   "windows",
+		Available: false,
+		Mode:      "unavailable",
+		Missing:   []string{"job_object", "appcontainer", string(FeatureFSRead), string(FeatureFSWrite), string(FeatureNetworkNone), string(FeatureProcessTree)},
+		Detail:    "windows backend not compiled on this OS",
+	}
 }

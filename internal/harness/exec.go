@@ -190,6 +190,13 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		con := sandbox.AsConstrainer(b)
 		pol := e.policyFor(req, cwd, tmp, realHome, def)
 		if _, err := con.Compile(pol); err != nil {
+			// Required isolation that the platform cannot establish is a policy
+			// block, not a transient infrastructure failure: do not retry or fall
+			// back to a route with the same missing containment. No target code
+			// runs.
+			if errors.Is(err, sandbox.ErrRequiredIsolation) {
+				return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
+			}
 			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
 		}
 		// The harness executable itself must remain executable/readable.

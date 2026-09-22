@@ -31,14 +31,24 @@ func (DarwinBackend) Compile(p Policy) (Compiled, error) {
 	if err != nil {
 		return Compiled{Backend: "darwin"}, err
 	}
-	c := Compiled{Backend: "darwin", Features: []string{"process_group", "env_filter"}, Profile: profile}
+	// process_tree: Setpgid is applied at creation, so the group exists before
+	// the child runs and KillTree terminates the whole group.
+	c := Compiled{Backend: "darwin", Features: []string{
+		"process_group", "env_filter", string(FeatureProcessTree),
+	}, Profile: profile}
+	if p.SyntheticHome != "" || p.SyntheticTemp != "" {
+		c.Features = append(c.Features, string(FeatureSyntheticEnv))
+	}
 	if sandboxExecPath() != "" {
-		c.Features = append(c.Features, "seatbelt")
+		c.Features = append(c.Features, "seatbelt", string(FeatureFSRead), string(FeatureFSWrite), string(FeatureNetworkNone))
 	} else {
-		c.Unavailable = append(c.Unavailable, "seatbelt")
+		c.Unavailable = append(c.Unavailable, "seatbelt", string(FeatureFSRead), string(FeatureFSWrite), string(FeatureNetworkNone))
 		if p.Required {
 			return c, fmt.Errorf("%w: macOS sandbox-exec unavailable", ErrRequiredIsolation)
 		}
+	}
+	if err := validateRequiredFeatures(c, p); err != nil {
+		return c, err
 	}
 	return c, nil
 }
@@ -94,20 +104,16 @@ func (DarwinBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 	if err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp("", "wayshard-seatbelt-*")
-	if err != nil {
-		return err
-	}
-	profilePath := filepath.Join(dir, "profile.sb")
-	if err := os.WriteFile(profilePath, []byte(compiled.Profile), 0o600); err != nil {
-		return err
-	}
 	rest := []string{}
 	if len(cmd.Args) > 1 {
 		rest = cmd.Args[1:]
 	}
+	// Pass the profile inline with -p so no on-disk profile exists for the
+	// constrained process to read, modify, or leave behind. The profile is
+	// established by sandbox-exec before it execs the target, so confinement is
+	// in place before any untrusted code runs.
 	cmd.Path = exe
-	cmd.Args = append([]string{"sandbox-exec", "-f", profilePath, orig}, rest...)
+	cmd.Args = append([]string{"sandbox-exec", "-p", compiled.Profile, orig}, rest...)
 	return nil
 }
 
@@ -126,7 +132,24 @@ func (DarwinBackend) KillTree(cmd *exec.Cmd) error {
 
 func (DarwinBackend) Report() IsolationReport {
 	if sandboxExecPath() == "" {
-		return IsolationReport{Backend: "darwin", Available: false, Mode: "unavailable", Missing: []string{"seatbelt"}, Detail: "sandbox-exec not found; refusing silent unrestricted execution"}
+		return IsolationReport{
+			Backend:   "darwin",
+			Available: false,
+			Mode:      "unavailable",
+			Missing:   []string{"seatbelt", string(FeatureFSRead), string(FeatureFSWrite), string(FeatureNetworkNone)},
+			Detail:    "sandbox-exec not found; required isolation unavailable and refused (no silent unrestricted execution)",
+		}
 	}
-	return IsolationReport{Backend: "darwin", Available: true, Mode: "seatbelt", Features: []string{"seatbelt", "process_group", "env_filter"}, Detail: "macOS sandbox-exec seatbelt profile + process group"}
+	return IsolationReport{
+		Backend:   "darwin",
+		Available: true,
+		Mode:      "seatbelt",
+		Features: []string{
+			"seatbelt", "process_group", "env_filter",
+			string(FeatureProcessTree), string(FeatureFSRead), string(FeatureFSWrite),
+			string(FeatureNetworkNone), string(FeatureSyntheticEnv),
+		},
+		Missing: []string{string(FeatureResourceLimits)},
+		Detail:  "macOS sandbox-exec seatbelt profile (filesystem read/write confinement, network denial) + process group; CPU/memory limits are not OS-enforced here",
+	}
 }

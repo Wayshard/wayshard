@@ -70,6 +70,31 @@ type IsolationReport struct {
 	Detail    string   `json:"detail"`
 }
 
+// Feature names a concrete containment property a backend can actually enforce.
+// A Required policy fails closed unless the backend declares every feature the
+// policy depends on; a backend must never claim a feature it does not enforce.
+type Feature string
+
+const (
+	// FeatureProcessTree means a required launch establishes a race-free process
+	// tree whose KillTree terminates the whole tree.
+	FeatureProcessTree Feature = "process_tree"
+	// FeatureResourceLimits means process/memory limits are enforced by the OS.
+	FeatureResourceLimits Feature = "resource_limits"
+	// FeatureFSRead means reads outside granted roots are denied.
+	FeatureFSRead Feature = "filesystem_read"
+	// FeatureFSWrite means writes outside granted roots are denied.
+	FeatureFSWrite Feature = "filesystem_write"
+	// FeatureNetworkNone means the process cannot use any network (TCP/UDP/IPC).
+	FeatureNetworkNone Feature = "network_none"
+	// FeatureNetworkLoopback means network is confined to an isolated loopback.
+	FeatureNetworkLoopback Feature = "network_loopback"
+	// FeatureNetworkProvider means a validated provider-only broker capability.
+	FeatureNetworkProvider Feature = "network_provider"
+	// FeatureSyntheticEnv means HOME/TEMP are replaced with scoped paths.
+	FeatureSyntheticEnv Feature = "synthetic_env"
+)
+
 type Cleanup func()
 
 type Manager struct {
