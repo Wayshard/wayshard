@@ -56,6 +56,7 @@ func placeFake(t *testing.T, dir, name string) string {
 }
 
 func TestDiscoverPATHReady(t *testing.T) {
+	testutil.RequireNativeIsolation(t)
 	dir := t.TempDir()
 	placeFake(t, dir, "wayshard-fake-acp")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -92,6 +93,7 @@ func TestDiscoverPATHReady(t *testing.T) {
 }
 
 func TestDiscoverWellKnownDir(t *testing.T) {
+	testutil.RequireNativeIsolation(t)
 	home := t.TempDir()
 	placeFake(t, filepath.Join(home, ".local", "bin"), "wayshard-fake-acp")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -113,6 +115,7 @@ func TestDiscoverWellKnownDir(t *testing.T) {
 }
 
 func TestDiscoverExplicitPath(t *testing.T) {
+	testutil.RequireNativeIsolation(t)
 	dir := t.TempDir()
 	exe := placeFake(t, dir, "wayshard-fake-acp")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -176,6 +179,7 @@ func TestDiscoverNeverRunsNpx(t *testing.T) {
 }
 
 func TestDiscoverAuthAndMalformed(t *testing.T) {
+	testutil.RequireNativeIsolation(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 

@@ -87,7 +87,12 @@ func (DarwinBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 		orig = cmd.Args[0]
 	}
 	if !filepath.IsAbs(orig) {
-		if lp, err := exec.LookPath(orig); err == nil {
+		// Resolve relative to the child's working directory when set; otherwise
+		// fall back to PATH. Resolving against the server's own CWD would point
+		// sandbox-exec at the wrong file when the caller sets cmd.Dir.
+		if cmd.Dir != "" {
+			orig = filepath.Join(cmd.Dir, orig)
+		} else if lp, err := exec.LookPath(orig); err == nil {
 			orig = lp
 		}
 	}

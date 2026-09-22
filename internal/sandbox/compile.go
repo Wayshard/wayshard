@@ -33,14 +33,11 @@ func (c Compiled) hasFeature(f Feature) bool { return c.has(string(f)) }
 func RequiredFeatures(p Policy) []Feature {
 	var out []Feature
 	if p.Required {
-		// Every required launch must be cancellable as a whole process tree.
-		out = append(out, FeatureProcessTree)
-	}
-	if len(p.ReadOnlyRoots) > 0 {
-		out = append(out, FeatureFSRead)
-	}
-	if len(p.ReadWriteRoots) > 0 {
-		out = append(out, FeatureFSWrite)
+		// Every required launch must confine reads and writes to granted roots
+		// and be cancellable as a whole process tree. A backend that cannot do
+		// all three must refuse the policy rather than run with weaker
+		// containment than the policy promises.
+		out = append(out, FeatureProcessTree, FeatureFSRead, FeatureFSWrite)
 	}
 	switch p.Network {
 	case NetNone, "":
