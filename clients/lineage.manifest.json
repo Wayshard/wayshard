@@ -355,6 +355,13 @@
       "destination": "gui/src/app/pages/session/timeline/message-timeline.tsx",
       "mode": "adapted",
       "marker": "// Adapted from the imported OpenCode application message timeline"
+    },
+    {
+      "upstream": "packages/app/src/pages/session/composer/session-composer-state.ts",
+      "upstreamBlob": "f54e0c9e4f5d15fa515aa6471153c965b2bb5618",
+      "destination": "gui/src/app/components/session-composer-state.ts",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode session composer state"
     }
   ]
 }
