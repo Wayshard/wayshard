@@ -17,6 +17,7 @@ import { useLayout } from "../context/layout"
 import { SettingsView } from "../views"
 import { SidebarContent } from "./layout/sidebar-shell"
 import { ProjectPanel } from "./layout/sidebar-project"
+import { SidebarMobile } from "./layout/sidebar-mobile"
 
 function useNarrow() {
   const mq = typeof window === "object" && window.matchMedia ? window.matchMedia("(max-width: 820px)") : undefined
@@ -102,12 +103,9 @@ export function AppLayout(props: { children: JSX.Element }): JSX.Element {
             <Icon name="bullet-list" size="small" />
           </button>
         </div>
-        <Show when={mobileOpen()}>
-          <div class="fixed inset-0 z-30 bg-black/50" aria-hidden="true" onClick={() => setMobileOpen(false)} />
-          <div class="fixed inset-y-0 left-0 z-40 w-[min(82vw,300px)] shadow-[0_0_24px_rgba(0,0,0,0.6)]">
-            {sidebar()}
-          </div>
-        </Show>
+        <SidebarMobile open={mobileOpen()} onClose={() => setMobileOpen(false)}>
+          {sidebar()}
+        </SidebarMobile>
       </Show>
       <div classList={{ "hidden h-full min-h-0 md:flex": true, "w-[280px] shrink-0": true }}>
         {sidebar()}

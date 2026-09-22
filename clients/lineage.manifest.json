@@ -362,6 +362,13 @@
       "destination": "gui/src/app/components/session-composer-state.ts",
       "mode": "adapted",
       "marker": "// Adapted from the imported OpenCode session composer state"
+    },
+    {
+      "upstream": "packages/app/src/pages/layout.tsx",
+      "upstreamBlob": "98548ab2333b46f961609302e993efcc268f4a9f",
+      "destination": "gui/src/app/pages/layout/sidebar-mobile.tsx",
+      "mode": "adapted",
+      "marker": "// Adapted from the imported OpenCode application narrow-width navigation"
     }
   ]
 }
