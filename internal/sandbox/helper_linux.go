@@ -14,6 +14,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// gracefulShutdownGrace is how long the supervisor waits after forwarding
+// SIGTERM to the target group before force-killing it on cancellation.
+const gracefulShutdownGrace = 2 * time.Second
+
 func runHelper(args []string) bool {
 	if len(args) >= 2 && args[1] == SupervisorArg {
 		return runSupervisor(args)
@@ -131,11 +135,20 @@ func runSupervisor(args []string) bool {
 	case code := <-exited:
 		os.Exit(code)
 	case <-sigc:
-		_ = syscall.Kill(-childPid, syscall.SIGKILL)
-		_ = syscall.Kill(childPid, syscall.SIGKILL)
+		// Graceful shutdown: forward SIGTERM to the target group and give it a
+		// bounded grace period to exit cleanly before force-killing. Either way
+		// the supervisor then exits, which tears the namespace down.
+		_ = syscall.Kill(-childPid, syscall.SIGTERM)
+		_ = syscall.Kill(childPid, syscall.SIGTERM)
 		select {
 		case <-exited:
-		case <-time.After(2 * time.Second):
+		case <-time.After(gracefulShutdownGrace):
+			_ = syscall.Kill(-childPid, syscall.SIGKILL)
+			_ = syscall.Kill(childPid, syscall.SIGKILL)
+			select {
+			case <-exited:
+			case <-time.After(2 * time.Second):
+			}
 		}
 		os.Exit(143)
 	}

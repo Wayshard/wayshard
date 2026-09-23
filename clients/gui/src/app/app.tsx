@@ -8,7 +8,7 @@
 // Wayshard context backed by @wayshard/sdk. Routing uses the adapted Wayshard
 // router (see ./router.tsx). Web, Desktop (Tauri 2) and Android (Tauri 2) all
 // mount this same application.
-import { Show, createMemo } from "solid-js"
+import { createMemo } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { ThemeProvider } from "@wayshard/ui/theme/context"
 import { DialogProvider } from "@wayshard/ui/context/dialog"
@@ -46,11 +46,17 @@ function Routes() {
 
 function PairingOverlay() {
   const ws = useWayshard()
-  const needsPairing = () => pairingOpen() || (!ws.state.connected && !ws.state.connection.token)
+  // The pairing gate is always mounted and revealed with a reactive inline
+  // style: attribute/style reactivity works reliably in this adapted provider
+  // tree, while conditional children in this position do not update. The gate
+  // shows when the operator opens it or when the server rejected an
+  // authenticated request (missing/expired session cookie or stale device
+  // credential).
+  const active = () => pairingOpen() || ws.state.authRequired
   return (
-    <Show when={needsPairing()}>
+    <div data-component="pairing-overlay" style={{ display: active() ? "contents" : "none" }}>
       <PairingGate />
-    </Show>
+    </div>
   )
 }
 

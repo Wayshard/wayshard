@@ -227,7 +227,15 @@ export class WayshardClient {
   constructor(
     public baseUrl: string,
     public token?: string,
+    private opts: { credentials?: RequestCredentials } = {},
   ) {}
+
+  // same-origin by default: the Web client authenticates with the server's
+  // HttpOnly session cookie and never needs a bearer token. Native clients pass
+  // an explicit token loaded from platform-secure storage.
+  private credentials(): RequestCredentials {
+    return this.opts.credentials ?? "same-origin"
+  }
 
   private headers(): Record<string, string> {
     const h: Record<string, string> = { "content-type": "application/json" };
@@ -236,7 +244,7 @@ export class WayshardClient {
   }
 
   async get<T>(path: string): Promise<T> {
-    const r = await fetch(this.baseUrl + path, { headers: this.headers() });
+    const r = await fetch(this.baseUrl + path, { headers: this.headers(), credentials: this.credentials() });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     return r.json() as Promise<T>;
   }
@@ -247,6 +255,7 @@ export class WayshardClient {
     const r = await fetch(this.baseUrl + path, {
       method,
       headers,
+      credentials: this.credentials(),
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -427,6 +436,22 @@ export class WayshardClient {
   }
   closeTerminal(projectId: string, terminalId: string) {
     return this.del<{ closed: boolean }>(`/v1/projects/${projectId}/terminals/${terminalId}`);
+  }
+
+  // eventURL builds the event-stream WebSocket URL. Native clients that hold a
+  // device credential obtain a short-lived single-use ticket first, so the
+  // long-lived credential never appears in a URL; browser clients rely on the
+  // HttpOnly session cookie sent with the same-origin handshake.
+  async eventURL(lastSeq = 0, projectId?: string, runId?: string): Promise<string> {
+    const u = new URL(this.baseUrl.replace(/^http/, "ws") + "/v1/ws");
+    u.searchParams.set("lastEventSeq", String(lastSeq));
+    if (projectId) u.searchParams.set("projectId", projectId);
+    if (runId) u.searchParams.set("runId", runId);
+    if (this.token) {
+      const t = await this.post<{ ticket?: string }>("/v1/ws/ticket");
+      if (t.ticket) u.searchParams.set("ticket", t.ticket);
+    }
+    return u.toString();
   }
 
   events(lastSeq = 0, projectId?: string, runId?: string): WebSocket {

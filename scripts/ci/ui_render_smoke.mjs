@@ -80,7 +80,16 @@ function startServer() {
 // The mock is stateful: approvals resolve, terminals are created/closed, file
 // writes are captured, and stage status advances on demand.
 const SEED = `(() => {
-  try { if (location.search.includes("noauth")) localStorage.removeItem("wayshard.connection"); else localStorage.setItem("wayshard.connection", JSON.stringify({ baseUrl: location.origin, token: "smoke-token" })); } catch {}
+  // Simulate the server's HttpOnly session cookie for authenticated pages and
+  // its absence for the pairing gate. The browser client no longer stores a
+  // bearer token in localStorage.
+  try {
+    if (location.search.includes("noauth")) {
+      document.cookie = "wayshard_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    } else {
+      document.cookie = "wayshard_session=smoke; path=/";
+    }
+  } catch {}
   window.__wayshardDocId = (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random());
   const project = { id: "prj_smoke", name: "wayshard", path: "/home/dev/wayshard", sourceKind: "git", status: "ready" };
   const conv1 = { id: "cnv_1", projectId: project.id, title: "Smoke session" };
@@ -159,6 +168,11 @@ const SEED = `(() => {
     try {
       const u = new URL(url, location.origin);
       if (u.pathname.startsWith("/v1/")) {
+        // Unauthenticated page: the server rejects authenticated requests, so
+        // the app surfaces the pairing gate (cookie/session auth model).
+        if (location.search.includes("noauth")) {
+          return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "content-type": "application/json" } });
+        }
         let body;
         try { body = init && init.body ? JSON.parse(init.body) : undefined; } catch {}
         state.calls.push({ method, path: u.pathname, search: u.search, body });
@@ -605,7 +619,7 @@ async function main() {
     // ---- Pairing gate (unauthenticated) ----
     {
       const p = await openPage(cdp, `${base}/?noauth=1`, { width: 390, height: 844 }, SHOTS, "pairing-390");
-      const gate = await p.evaluate(`(async () => { ${HELPERS} await sleep(300); const v = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(); return { visible: !!document.querySelector(".wh-pairing"), theme: document.documentElement.getAttribute("data-theme"), varDeep: v("--v2-background-bg-deep"), hasVerify: !!document.querySelector(".wh-pairing button") }; })()`);
+      const gate = await p.evaluate(`(async () => { ${HELPERS} await sleep(300); const v = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(); const el = document.querySelector(".wh-pairing"); return { visible: vis(el), theme: document.documentElement.getAttribute("data-theme"), varDeep: v("--v2-background-bg-deep"), hasVerify: !!document.querySelector(".wh-pairing button") }; })()`);
       check("pairing: gate visible", gate.visible === true, JSON.stringify(gate));
       check("pairing: themed before auth", gate.theme === "oc-2" && gate.varDeep.length > 0, JSON.stringify(gate));
       await p.shot("pairing-390.png");

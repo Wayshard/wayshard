@@ -191,7 +191,12 @@ func main() {
 
 Pairing refuses a bare code: verified pairing requires the expected server id and
 fingerprint from the trusted invitation (--invitation, or --server-id/--fingerprint).
-Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN
+The device credential is stored in platform-secure storage (macOS Keychain,
+Windows Credential Manager, Linux Secret Service); when that is unavailable, or
+when WAYSHARD_HEADLESS=1 is set, it falls back to a 0600 file under the user
+config directory. WAYSHARD_TOKEN supplies the credential explicitly and takes
+precedence over stored material.
+Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN, WAYSHARD_HEADLESS
 `)
 	default:
 		fatal("unknown command " + args[0])
@@ -236,22 +241,6 @@ func (c *client) do(method, path string, body any) ([]byte, error) {
 func (c *client) get(path string) ([]byte, error) { return c.do(http.MethodGet, path, nil) }
 func (c *client) post(path string, body any) ([]byte, error) {
 	return c.do(http.MethodPost, path, body)
-}
-
-func tokenPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "wayshard", "device.token")
-}
-
-func saveToken(t string) error {
-	p := tokenPath()
-	_ = os.MkdirAll(filepath.Dir(p), 0o700)
-	return os.WriteFile(p, []byte(t), 0o600)
-}
-
-func loadToken() (string, error) {
-	b, err := os.ReadFile(tokenPath())
-	return strings.TrimSpace(string(b)), err
 }
 
 func need(args []string, n int, usage string) {

@@ -512,7 +512,7 @@ Web ships inside Server rather than as a separate ordinary download.
 
 Third-party coding harnesses and ACP bridges are never bundled or installed by Wayshard releases.
 
-## 24. Client implementation foundation (Pass 1E)
+## 27. Client implementation foundation (Pass 1E)
 
 The Web, Desktop and Android clients are one shared graphical application adapted
 from the imported OpenCode 2 application source, mounted by Web and hosted by

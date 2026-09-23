@@ -28,6 +28,11 @@ SIGNING_BLOCK = '''
             storePassword = keystoreProperties.getProperty("storePassword")
                 ?: keystoreProperties.getProperty("password")
                 ?: error("storePassword/password missing from keystore.properties")
+            // Sign with APK Signature Scheme v2 and v3 (v3 supports key
+            // rotation). v1 (JAR) is retained for maximum compatibility.
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 '''

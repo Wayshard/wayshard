@@ -7,6 +7,7 @@
 import { createContext, createMemo, createSignal, onCleanup, useContext, type Accessor, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { WayshardClient, type Approval, type Artifact, type Conversation, type Notification, type Project, type Run, type Stage } from "@wayshard/sdk"
+import { credentialStore } from "./secure-store"
 
 export interface ConnectionConfig {
   baseUrl: string
@@ -15,12 +16,15 @@ export interface ConnectionConfig {
 
 const STORAGE_KEY = "wayshard.connection"
 
+// Only the endpoint is persisted in web storage. The device credential lives in
+// platform-secure storage (native clients) or the HttpOnly server session
+// (browser clients) and is never written to localStorage.
 export function loadConnection(): ConnectionConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as ConnectionConfig
-      if (parsed.baseUrl) return { baseUrl: parsed.baseUrl, token: parsed.token ?? "" }
+      const parsed = JSON.parse(raw) as Partial<ConnectionConfig>
+      if (parsed.baseUrl) return { baseUrl: parsed.baseUrl, token: "" }
     }
   } catch {
     // ignore
@@ -30,10 +34,13 @@ export function loadConnection(): ConnectionConfig {
 
 export function saveConnection(cfg: ConnectionConfig) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ baseUrl: cfg.baseUrl }))
   } catch {
     // ignore
   }
+  const store = credentialStore()
+  if (cfg.token) void store.save(cfg.token)
+  else void store.clear()
 }
 
 export interface MessageView {
@@ -46,6 +53,10 @@ export interface State {
   connection: ConnectionConfig
   connected: boolean
   connectionError: string
+  // authRequired is set when the server rejects an authenticated request, so
+  // the pairing gate shows for browser clients that rely on the session cookie
+  // as well as native clients with a stale credential.
+  authRequired: boolean
   lastEventSeq: number
   meta: { product: string; version: string } | null
   projects: Project[]
@@ -69,6 +80,7 @@ function initialState(): State {
     connection: loadConnection(),
     connected: false,
     connectionError: "",
+    authRequired: false,
     lastEventSeq: 0,
     meta: null,
     projects: [],
@@ -95,6 +107,7 @@ export interface StateAPI {
   activeConversation: Accessor<Conversation | undefined>
   activeRun: Accessor<Run | undefined>
   setConnection(cfg: ConnectionConfig): void
+  hydrateCredentials(): Promise<void>
   refreshAll(): Promise<void>
   openProject(path: string): Promise<void>
   selectProject(id: string): Promise<void>
@@ -183,18 +196,28 @@ function createStateAPI(): StateAPI {
       await refreshMessages()
       await refreshGlobal()
       setState("connected", true)
+      setState("authRequired", false)
       setState("connectionError", "")
-      connectEvents()
+      await connectEvents()
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
       setState("connected", false)
-      setState("connectionError", String(err))
+      setState("authRequired", message.startsWith("401"))
+      setState("connectionError", message)
     }
   }
 
-  function connectEvents() {
+  async function connectEvents() {
     if (socket) socket.close()
+    let url: string
     try {
-      socket = client().events(state.lastEventSeq)
+      url = await client().eventURL(state.lastEventSeq)
+    } catch (err) {
+      setState("connectionError", String(err))
+      return
+    }
+    try {
+      socket = new WebSocket(url)
     } catch (err) {
       setState("connectionError", String(err))
       return
@@ -202,7 +225,7 @@ function createStateAPI(): StateAPI {
     socket.onopen = () => setState("connected", true)
     socket.onclose = () => {
       setState("connected", false)
-      reconnectTimer = setTimeout(connectEvents, 2000)
+      reconnectTimer = setTimeout(() => void connectEvents(), 2000)
     }
     socket.onerror = () => setState("connectionError", "event stream error")
     socket.onmessage = (ev) => {
@@ -238,9 +261,22 @@ function createStateAPI(): StateAPI {
     activeConversation,
     activeRun,
     setConnection(cfg) {
-      saveConnection(cfg)
-      setState("connection", cfg)
+      // Browser clients authenticate with the HttpOnly server session and never
+      // retain the device credential; native clients keep it in secure storage.
+      const store = credentialStore()
+      const effective = store.kind === "browser" ? { baseUrl: cfg.baseUrl, token: "" } : cfg
+      saveConnection(effective)
+      setState("connection", effective)
+      setState("authRequired", false)
       void refreshAll()
+    },
+    async hydrateCredentials() {
+      // Native clients load the device credential from platform-secure storage
+      // once at startup; browser clients use the HttpOnly server session.
+      const store = credentialStore()
+      if (store.kind !== "tauri") return
+      const token = await store.load()
+      if (token && !state.connection.token) setState("connection", "token", token)
     },
     refreshAll,
     async openProject(path) {
@@ -320,9 +356,12 @@ const StateContext = createContext<StateAPI>()
 
 export function StateProvider(props: ParentProps) {
   const api = createStateAPI()
-  void api.refreshAll().then(() => {
-    // events are connected by the provider after initial load
-  })
+  void api
+    .hydrateCredentials()
+    .then(() => api.refreshAll())
+    .then(() => {
+      // events are connected by the provider after initial load
+    })
   return <StateContext.Provider value={api}>{props.children}</StateContext.Provider>
 }
 

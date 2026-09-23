@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/auth"
@@ -49,6 +50,15 @@ type Server struct {
 	// Catalog is the effective harness catalog for discovery diagnostics.
 	Catalog *harness.Catalog
 	http    *http.Server
+
+	wsTicketsOnce sync.Once
+	wsTickets     *wsTickets
+}
+
+// ticketStore lazily initializes the single-use WebSocket ticket store.
+func (s *Server) ticketStore() *wsTickets {
+	s.wsTicketsOnce.Do(func() { s.wsTickets = newWSTickets(wsTicketTTL) })
+	return s.wsTickets
 }
 
 func (s *Server) Handler() http.Handler {
@@ -107,6 +117,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/projects/{id}/terminals", s.requireAuth(s.startTerminal))
 	mux.HandleFunc("DELETE /v1/projects/{id}/terminals/{tid}", s.requireAuth(s.closeTerminal))
 	mux.HandleFunc("GET /v1/ws/pty", s.ptyWS)
+	mux.HandleFunc("POST /v1/ws/ticket", s.requireAuth(s.wsTicket))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	mux.Handle("/", webembed.Handler())
 	return s.middleware(mux)
@@ -781,7 +792,15 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request, _ *auth.Princ
 }
 
 func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.principal(r); err != nil {
+	authorized := false
+	if _, err := s.principal(r); err == nil {
+		authorized = true
+	} else if s.ticketStore().consume(r.URL.Query().Get("ticket")) {
+		// Native clients authenticate the handshake with a single-use ticket
+		// obtained with their securely stored device credential.
+		authorized = true
+	}
+	if !authorized {
 		http.Error(w, "unauthorized", 401)
 		return
 	}

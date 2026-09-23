@@ -106,6 +106,7 @@ release-scripts-test:
 	bash scripts/release/package_cli_tui_test.sh
 	bash scripts/release/windows_pfx_test.sh
 	bash scripts/release/minisign_test.sh
+	bash scripts/release/appimage_fix_diricon_test.sh
 	bash scripts/release/release_policy_test.sh
 	bash scripts/release/set_tauri_version_test.sh
 

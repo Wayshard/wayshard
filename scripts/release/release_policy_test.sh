@@ -165,4 +165,34 @@ if darwin_arm64.get("target") != "bun-darwin-arm64" or darwin_arm64.get("goarch"
 print("darwin-amd64 uses a supported Intel runner; CLI+TUI matrix complete")
 PY
 
+# --- Desktop platform coverage, reproducible Go stamping, AppImage icon -------
+python3 - "$REL" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+
+m = re.search(r"^  desktop:\s*$", text, re.M)
+if not m:
+    raise SystemExit("release.yml is missing the desktop job")
+rest = text[m.end():]
+end = re.search(r"^  [A-Za-z0-9_-]+:\s*$", rest, re.M)
+block = rest[: end.start()] if end else rest
+if "macos-15-intel" not in block:
+    raise SystemExit("desktop matrix must build Intel macOS (macos-15-intel)")
+if block.count("target: macos") < 2:
+    raise SystemExit("desktop matrix must build both macOS architectures")
+
+if "rm -rf internal/webembed/dist" in text:
+    raise SystemExit(
+        "release.yml must preserve internal/webembed/dist/.gitkeep so the Go build stamp stays clean"
+    )
+if ".gitkeep" not in text:
+    raise SystemExit("release.yml must preserve internal/webembed/dist/.gitkeep")
+
+if "appimage-fix-diricon.sh" not in text:
+    raise SystemExit("release.yml must fix the AppImage .DirIcon before packaging")
+print("desktop coverage, clean Go stamp, AppImage icon fix ok")
+PY
+
 echo "release policy test ok"

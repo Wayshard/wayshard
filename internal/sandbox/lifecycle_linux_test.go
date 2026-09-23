@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -50,6 +51,21 @@ func TestHostileHelperProcess(t *testing.T) {
 		time.Sleep(5 * time.Minute)
 		os.Exit(0)
 	case "sleep":
+		time.Sleep(5 * time.Minute)
+		os.Exit(0)
+	case "term-trap":
+		// Install a SIGTERM handler, advertise readiness, then exit cleanly when
+		// the supervisor forwards the graceful signal.
+		sigc := make(chan os.Signal, 1)
+		signal.Notify(sigc, syscall.SIGTERM)
+		_ = os.WriteFile(arg+".ready", []byte("ready\n"), 0o600)
+		<-sigc
+		_ = os.WriteFile(arg, []byte("term\n"), 0o600)
+		os.Exit(0)
+	case "term-ignore":
+		// Ignore SIGTERM; only the supervisor's forced teardown should end it.
+		signal.Ignore(syscall.SIGTERM)
+		_ = os.WriteFile(arg+".ready", []byte("ready\n"), 0o600)
 		time.Sleep(5 * time.Minute)
 		os.Exit(0)
 	case "orphan-parent":
@@ -482,5 +498,103 @@ func TestLinuxReconcileTokenHashSparesUnrelated(t *testing.T) {
 	}
 	if !pidAlive(pid) {
 		t.Fatalf("unrelated process %d was killed by token reconciliation", pid)
+	}
+}
+
+// waitReady polls for a fixture readiness marker written once a target has
+// installed its signal handling.
+func waitReady(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("readiness marker %s was not written", path)
+}
+
+// TestSupervisorForwardsSIGTERMBeforeForceKill proves cancellation forwards a
+// graceful SIGTERM to the target (which can clean up) before any forced kill.
+func TestSupervisorForwardsSIGTERMBeforeForceKill(t *testing.T) {
+	c := AsConstrainer(DefaultBackend())
+	if !c.Report().Available {
+		t.Skipf("required isolation unavailable: %s", c.Report().Detail)
+	}
+	token, _ := process.NewToken()
+	ws := t.TempDir()
+	home := t.TempDir()
+	markerFile := filepath.Join(ws, "term.marker")
+	p := hostilePolicy(t, ws, home)
+
+	cmd := exec.Command(hostileExe(t), "-test.run=TestHostileHelperProcess")
+	cmd.Env = append(ToolEnv(home, home, map[string]string{process.TokenEnv: token}),
+		hostileHelperEnv+"=1", "HOSTILE_MODE=term-trap", "HOSTILE_ARG="+markerFile)
+	if err := c.Constrain(cmd, p); err != nil {
+		t.Fatalf("constrain: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	cleanup, err := c.Attach(cmd, p)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("attach: %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	waitReady(t, markerFile+".ready", 20*time.Second)
+
+	// Cancel the launch: SIGTERM to the supervisor must reach the target.
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal supervisor: %v", err)
+	}
+	waitCmdExit(t, cmd)
+	if _, err := os.Stat(markerFile); err != nil {
+		t.Fatalf("target did not receive a forwarded SIGTERM: %v", err)
+	}
+}
+
+// TestSupervisorForceKillsSIGTERMIgnoringTarget proves a target that ignores the
+// forwarded SIGTERM is still torn down, but only after the bounded grace period.
+func TestSupervisorForceKillsSIGTERMIgnoringTarget(t *testing.T) {
+	c := AsConstrainer(DefaultBackend())
+	if !c.Report().Available {
+		t.Skipf("required isolation unavailable: %s", c.Report().Detail)
+	}
+	token, _ := process.NewToken()
+	ws := t.TempDir()
+	home := t.TempDir()
+	markerFile := filepath.Join(ws, "term.marker")
+	p := hostilePolicy(t, ws, home)
+
+	cmd := exec.Command(hostileExe(t), "-test.run=TestHostileHelperProcess")
+	cmd.Env = append(ToolEnv(home, home, map[string]string{process.TokenEnv: token}),
+		hostileHelperEnv+"=1", "HOSTILE_MODE=term-ignore", "HOSTILE_ARG="+markerFile)
+	if err := c.Constrain(cmd, p); err != nil {
+		t.Fatalf("constrain: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	cleanup, err := c.Attach(cmd, p)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("attach: %v", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	waitReady(t, markerFile+".ready", 20*time.Second)
+
+	start := time.Now()
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal supervisor: %v", err)
+	}
+	waitCmdExit(t, cmd)
+	if elapsed := time.Since(start); elapsed < gracefulShutdownGrace {
+		t.Fatalf("supervisor force-killed before the %s grace period (elapsed %s)", gracefulShutdownGrace, elapsed)
 	}
 }

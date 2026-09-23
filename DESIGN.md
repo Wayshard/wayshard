@@ -485,7 +485,7 @@ github.com/Wayshard
 - Do not hide meaningful recovery or conflicts.
 - Do not turn Wayshard into a Git client, IDE, networking appliance, model credential manager, or workflow-management suite beyond the product requirements.
 
-## 21. Client source lineage (Pass 1E)
+## 25. Client source lineage (Pass 1E)
 
 The live graphical client and TUI are adapted from the imported OpenCode 2
 application source, not recreated. The graphical **application composition** —

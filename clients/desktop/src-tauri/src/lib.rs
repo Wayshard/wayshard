@@ -3,6 +3,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+mod credentials;
+
 #[tauri::command]
 fn provision_local_server() -> Result<String, String> {
     let dir = data_dir();
@@ -96,7 +98,12 @@ fn health_ok() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![provision_local_server])
+        .invoke_handler(tauri::generate_handler![
+            provision_local_server,
+            credentials::save_credential,
+            credentials::load_credential,
+            credentials::clear_credential
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Wayshard");
 }

@@ -7,7 +7,26 @@ import (
 	"os/exec"
 	"syscall"
 	"testing"
+	"time"
 )
+
+// TestCapabilityProbeTimeoutIsBounded proves a wedged capability probe cannot
+// hang Compile/Report: runProbeTimeout force-kills it after the bound.
+func TestCapabilityProbeTimeoutIsBounded(t *testing.T) {
+	if _, err := exec.LookPath("/bin/sleep"); err != nil {
+		t.Skip("sleep unavailable")
+	}
+	start := time.Now()
+	if runProbeTimeout("/bin/sleep", nil, "300", 200*time.Millisecond) {
+		t.Fatal("hanging probe unexpectedly succeeded")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("probe timeout not bounded: %s", elapsed)
+	}
+	if !runProbeTimeout("/bin/true", nil, "", 2*time.Second) {
+		t.Fatal("fast probe should succeed")
+	}
+}
 
 // openFDCount returns the number of open file descriptors for the test process.
 func openFDCount(t *testing.T) int {

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -48,6 +49,29 @@ func providerHarnessHelper() int {
 	role := os.Getenv("PROBE_ROLE")
 	public := os.Getenv("PROBE_PUBLIC_ADDR")
 	proxy := os.Getenv("PROBE_PROXY_ADDR")
+
+	if role == "sleep" {
+		time.Sleep(5 * time.Minute)
+		return 0
+	}
+	if role == "hang" {
+		// A provider harness that leaves a detached descendant behind so the
+		// lifecycle test can prove the whole tree is torn down when the shim
+		// (the holder of the harness death pipe) dies.
+		if exe, err := os.Executable(); err == nil {
+			child := exec.Command(exe)
+			child.Env = append(os.Environ(), "GO_PROVIDER_HARNESS=1", "PROBE_ROLE=sleep")
+			child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			child.Stdout = os.Stdout
+			child.Stderr = os.Stderr
+			_ = child.Start()
+		}
+		if ready := os.Getenv("PROVIDER_LIFECYCLE_READY"); ready != "" {
+			_ = os.WriteFile(ready, []byte(os.Getenv("PROVIDER_LIFECYCLE_MARKER")+"\n"), 0o600)
+		}
+		time.Sleep(5 * time.Minute)
+		return 0
+	}
 
 	if role == "child" || role == "grand" {
 		label := "CHILD"
@@ -276,4 +300,148 @@ func TestProviderNetnsEnforcement(t *testing.T) {
 			t.Fatalf("bypass matrix missing %q\nstdout:\n%s\nstderr:\n%s", want, out, stderr.String())
 		}
 	}
+}
+
+// providerMarkerPids returns the host PIDs of processes whose environment
+// carries the lifecycle marker.
+func providerMarkerPids(marker string) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	needle := "PROVIDER_LIFECYCLE_MARKER=" + marker
+	var out []int
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join("/proc", e.Name(), "environ"))
+		if err != nil {
+			continue
+		}
+		for _, kv := range strings.Split(string(b), "\x00") {
+			if kv == needle {
+				out = append(out, pid)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// TestProviderHarnessLifecycleTornDownOnShimDeath proves the provider harness
+// tree (including a setsid descendant) is torn down when the shim that owns the
+// harness death pipe dies — the crash/cancellation lifecycle for provider
+// routes. The shim is the direct child of the server and is killed on
+// cancellation or on server death (Pdeathsig), which closes the death pipe.
+func TestProviderHarnessLifecycleTornDownOnShimDeath(t *testing.T) {
+	capability := Detect()
+	if !capability.Available {
+		t.Skipf("provider capability unavailable: %s", capability.Reason)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := shortDir(t)
+	ws := filepath.Join(work, "ws")
+	synthetic := filepath.Join(work, "tmp")
+	_ = os.MkdirAll(ws, 0o700)
+	_ = os.MkdirAll(synthetic, 0o700)
+
+	marker := "PROVLIFE" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	ready := filepath.Join(ws, "ready")
+
+	wrapper := filepath.Join(ws, "harness.sh")
+	script := "#!/bin/sh\nexport GO_PROVIDER_HARNESS=1\nexec " + exe + "\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	pol := sandbox.HarnessPolicy(ws, synthetic)
+	pol.Network = sandbox.NetProvider
+	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(exe))
+
+	bearer, err := RandomBearer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &fakeResolver{addrs: map[string][]netip.Addr{"provider.test": {netip.MustParseAddr("93.184.216.34")}}}
+	broker, err := StartBroker(
+		filepath.Join(work, "s"), bearer,
+		Policy{Allowed: []Destination{{Host: "provider.test", Port: 443}}},
+		resolver, mapDialer{target: "127.0.0.1:1"},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = broker.Close() })
+	proxyPort, err := RandomPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := ShimConfig{
+		BrokerSocket:   broker.SocketPath(),
+		Bearer:         bearer,
+		ProxyPort:      proxyPort,
+		Policy:         pol,
+		HarnessCommand: wrapper,
+		HarnessDir:     ws,
+	}
+	cfgPath, err := WriteShimConfig(work, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	attr, err := NewUserNetNSAttr()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe)
+	cmd.Env = append(os.Environ(),
+		"GO_PROVIDER_SHIM=1", "GO_PROVIDER_SHIM_CFG="+cfgPath,
+		"PROBE_ROLE=hang", "PROVIDER_LIFECYCLE_MARKER="+marker, "PROVIDER_LIFECYCLE_READY="+ready)
+	cmd.SysProcAttr = attr
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := os.Stat(ready); err != nil {
+		t.Fatalf("provider harness never became ready: %v", err)
+	}
+	if pids := providerMarkerPids(marker); len(pids) < 2 {
+		t.Fatalf("expected the harness and its detached descendant, found %v", pids)
+	}
+
+	// Crash the shim. Its death must close the harness death pipe and tear the
+	// whole harness namespace down.
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = cmd.Process.Wait()
+
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(providerMarkerPids(marker)) == 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("provider harness tree survived shim death: %v", providerMarkerPids(marker))
 }

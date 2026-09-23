@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -50,6 +51,25 @@ var (
 	loopOK   bool
 )
 
+// capabilityProbeTimeout bounds the sandbox capability probes. A wedged probe
+// process must not hang Compile/Report (and therefore server startup).
+const capabilityProbeTimeout = 5 * time.Second
+
+// runProbe runs an in-binary capability probe under a bounded timeout. The
+// probe process is created in the requested namespaces; a timeout force-kills
+// it (and, when it is a PID-namespace init, its whole namespace).
+func runProbe(exe string, attr *syscall.SysProcAttr, arg string) bool {
+	return runProbeTimeout(exe, attr, arg, capabilityProbeTimeout)
+}
+
+func runProbeTimeout(exe string, attr *syscall.SysProcAttr, arg string, timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, exe, arg)
+	cmd.SysProcAttr = attr
+	return cmd.Run() == nil
+}
+
 // loopbackProbeSupported probes once whether this platform can create a private
 // network namespace with loopback. When it cannot, the ACP discovery probe
 // falls back to NetworkNone (a local-socket harness then reports incompatible
@@ -67,9 +87,7 @@ func loopbackProbeSupported() bool {
 			attr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
 			attr.GidMappingsEnableSetgroups = false
 		}
-		cmd := exec.Command(exe, LoopbackProbeArg)
-		cmd.SysProcAttr = attr
-		loopOK = cmd.Run() == nil
+		loopOK = runProbe(exe, attr, LoopbackProbeArg)
 	})
 	return loopOK
 }
@@ -100,9 +118,7 @@ func procIsolationSupported() bool {
 			attr.GidMappings = []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getegid(), Size: 1}}
 			attr.GidMappingsEnableSetgroups = false
 		}
-		cmd := exec.Command(exe, ProcProbeArg)
-		cmd.SysProcAttr = attr
-		procOK = cmd.Run() == nil
+		procOK = runProbe(exe, attr, ProcProbeArg)
 	})
 	return procOK
 }

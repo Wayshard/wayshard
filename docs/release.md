@@ -27,7 +27,7 @@ There is no Tauri auto-updater (not required by the canonicals).
 | Go buildinfo | `wayshard-<tag>-buildinfo-server-linux-amd64.txt` | Same (not an SBOM) |
 | Notices | `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md` | Same |
 | Desktop Linux | `wayshard-desktop-<tag>-linux-<arch>.{AppImage,deb}` | Checksums + minisign only |
-| Desktop macOS | `wayshard-desktop-<tag>-macos-<arch>.dmg` | **Ad-hoc** `codesign -s -` (identity `-`). No Developer ID |
+| Desktop macOS | `wayshard-desktop-<tag>-macos-<arch>.dmg` (`aarch64`, `x86_64`) | **Ad-hoc** `codesign -s -` (identity `-`). No Developer ID |
 | Desktop Windows | `wayshard-desktop-<tag>-windows-x64.msi` and `-setup.exe` | **Self-signed Authenticode** from maintainer PFX |
 | Android APK | `wayshard-<tag>-android.apk` | **JKS/PKCS12** upload key, verified before publish |
 | Checksums | `SHA256SUMS.txt` + `SHA256SUMS.txt.minisig` | SHA-256 plus minisign |

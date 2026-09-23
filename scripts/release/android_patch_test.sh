@@ -23,6 +23,8 @@ python3 "$ROOT/scripts/release/android-patch-gradle.py" "$TMP/build.gradle.kts"
 grep -q 'keystore.properties' "$TMP/build.gradle.kts"
 grep -q 'signingConfig = signingConfigs.getByName("release")' "$TMP/build.gradle.kts"
 grep -q 'import java.util.Properties' "$TMP/build.gradle.kts"
+grep -q 'enableV3Signing = true' "$TMP/build.gradle.kts"
+grep -q 'enableV2Signing = true' "$TMP/build.gradle.kts"
 if grep -q 'java.util.Properties()' "$TMP/build.gradle.kts"; then
   echo "must use imported Properties(), not java.util.Properties()" >&2
   exit 1

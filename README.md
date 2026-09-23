@@ -68,6 +68,75 @@ launches the adjacent `wayshard-tui` companion. Standalone server, CLI, and TUI
 binaries are also published for advanced users, but the archive is the normal
 installable unit.
 
+## Install Desktop and Android
+
+Desktop and Android host the same shared graphical client.
+
+| Platform | Desktop artifact |
+|---|---|
+| Linux x86-64 | `wayshard-desktop-vX-linux-amd64.AppImage` and `.deb` |
+| macOS Apple silicon | `wayshard-desktop-vX-macos-aarch64.dmg` |
+| macOS Intel | `wayshard-desktop-vX-macos-x86_64.dmg` |
+| Windows x86-64 | `wayshard-desktop-vX-windows-x64.msi` and `-setup.exe` |
+
+Android ships as `wayshard-vX-android.apk` (minSdk 26; arm64-v8a,
+armeabi-v7a, x86, x86_64). It connects to a selected Wayshard Server; it does
+not host project execution itself.
+
+**Signing and OS warnings.** Official artifacts are cryptographically signed by
+Wayshard with maintainer-generated keys; they are **not** trusted by Apple,
+Microsoft, or Google platform PKI. Expect OS warnings until you explicitly trust
+the publisher:
+
+- macOS uses ad-hoc signing, so Gatekeeper reports that the developer cannot be
+  verified (Privacy & Security → Open Anyway).
+- Windows installers use a self-signed Authenticode certificate, so SmartScreen
+  and "Unknown publisher" prompts appear.
+- Android is a maintainer-signed APK sideloaded without Google Play.
+
+Verify a download with:
+
+```sh
+minisign -V -p keys/wayshard-release.minisign.pub -m SHA256SUMS.txt
+sha256sum -c SHA256SUMS.txt
+```
+
+Details and maintainer signing setup: [`docs/release.md`](./docs/release.md).
+
+## Supported platforms and verification status
+
+Wayshard Server, CLI/TUI, and Desktop are built for Linux (amd64/arm64), macOS
+(Intel and Apple silicon), and Windows (x86-64); Android ships as an APK. The Web
+client is embedded in Server.
+
+Platform containment is reported honestly:
+
+- **Linux** is the only platform that advertises a non-removable process-tree
+  boundary (`FeatureProcessTree`). Required harness/tool/probe/validation
+  execution runs under a trusted PID-namespace supervisor, and provider
+  networking runs in an isolated per-attempt network namespace whose only
+  reachable endpoint is a Wayshard broker.
+- **macOS** confines execution with Seatbelt (filesystem read/write and network
+  denial) but has no non-removable process-tree ownership boundary, so required
+  local harness/tool/probe/validation execution **fails closed** rather than
+  running with weaker containment. macOS remains a full
+  Server/Desktop/CLI/TUI/control-plane platform.
+- **Windows** Job Objects are process/resource management only, so required
+  local execution also **fails closed**.
+
+Verification status:
+
+- Go server/orchestration/recovery/sandbox suites and the native Linux
+  process-boundary adversarial tests run in CI; the macOS/Windows
+  fail-before-exec and validation fail-closed tests are mandatory in the
+  `native-security` jobs.
+- Client source lineage is verified against the vendored OpenCode 2 blobs.
+- Desktop/Android on-device runtime is not exercised by official CI: release
+  artifacts are built, checksummed, and signed, but on-device behavior is not
+  machine-verified here.
+- Real installed ACP harness interoperability is verified natively (OpenCode,
+  codex-acp) and remains fixture-backed in CI.
+
 ## Server model
 
 Projects and execution live where **Wayshard Server** runs.

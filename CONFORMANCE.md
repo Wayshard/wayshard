@@ -524,3 +524,54 @@ harness/tool/probe/validation execution runs, so no ownership marker can be
 stripped and no descendant can survive. Linux remains the only platform that
 advertises `FeatureProcessTree`, backed by an authoritative post-hoc ownership
 mechanism.
+
+## Stable-readiness remediation (rc.9 P2/P3)
+
+Independent audits of `v0.1.0-rc.9` (`778add0`) found no P0/P1 and a set of
+P2/P3 items. This pass closed them without changing the signing policy (no paid
+or external certificate/service).
+
+- **Credential handling.** Web/Desktop/Android share one graphical client, but
+  credential storage is now platform-appropriate. The shared state layer
+  (`clients/gui/src/wayshard/state.tsx`) persists only the endpoint in
+  `localStorage`; the device credential is never written to web storage. Browser
+  clients authenticate with the server's `HttpOnly` `wayshard_session` cookie
+  (the SDK sends `credentials: same-origin`). Native clients
+  (`clients/gui/src/wayshard/secure-store.ts`) store the credential through Tauri
+  commands backed by the OS credential store on desktop (`clients/desktop/src-tauri/src/credentials.rs`,
+  `keyring` crate: macOS Keychain, Windows Credential Manager, Linux Secret
+  Service) and by app-private storage on Android. The CLI
+  (`cmd/wayshard/credentials.go`) uses the OS keychain and falls back to a 0600
+  file only when the keychain is unavailable or `WAYSHARD_HEADLESS=1` is set;
+  `WAYSHARD_TOKEN` always takes precedence.
+- **Native WebSocket authentication.** Browsers/webviews cannot set an
+  `Authorization` header on a WebSocket and native clients have no cross-origin
+  cookie, so `POST /v1/ws/ticket` issues a short-lived, single-use ticket
+  (`internal/api/wsticket.go`) that the SDK appends to the handshake URL
+  (`WayshardClient.eventURL`). The long-lived credential never appears in a URL.
+- **Desktop platform coverage.** The release `desktop` matrix now builds Intel
+  macOS (`macos-15-intel`) alongside Apple silicon, producing
+  `wayshard-desktop-<tag>-macos-x86_64.dmg` in addition to `-aarch64.dmg`, so
+  Desktop matches the CLI/TUI architecture coverage.
+- **Clean Go build stamp.** The release workflow's web-embed step preserves the
+  tracked `internal/webembed/dist/.gitkeep` instead of deleting the directory, so
+  the Go build stamp is `v0.1.0-rc.N` rather than `+dirty`.
+- **AppImage `.DirIcon`.** `scripts/release/appimage-fix-diricon.sh` repacks the
+  Linux AppImage with a relative `.DirIcon` (preserving the original runtime
+  ELF), so the published icon resolves instead of dangling to the build machine.
+  Covered by `appimage_fix_diricon_test.sh`.
+- **Android v3 signing.** `scripts/release/android-patch-gradle.py` now enables
+  APK Signature Scheme v2 and v3 (`enableV3Signing = true`), so the published APK
+  supports key rotation.
+- **Sandbox robustness.** Capability probes are bounded
+  (`capabilityProbeTimeout`, `runProbeTimeout`) so a wedged probe cannot hang
+  `Compile`/`Report`. The Linux PID-namespace supervisor forwards `SIGTERM` to
+  the target group and grants a bounded grace period before force-killing
+  (`gracefulShutdownGrace`), so cancellation allows clean shutdown.
+- **Provider lifecycle coverage.** `TestProviderHarnessLifecycleTornDownOnShimDeath`
+  proves that a provider harness tree (including a `setsid` descendant) is torn
+  down when the shim that owns the harness death pipe dies — the crash/cancel
+  lifecycle for provider routes.
+- **Docs.** Duplicate canonical section numbers were removed; `README.md` now
+  documents Desktop/Android installation, signing/OS warnings, supported
+  architectures, fail-closed platform limitations, and verification status.
