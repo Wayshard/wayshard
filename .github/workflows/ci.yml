@@ -119,27 +119,19 @@ jobs:
           go-version-file: go.mod
       - name: Native sandbox security tests (verbose)
         run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt|Darwin' -v -count=1
-      - name: macOS setsid cancellation is mandatory (must not skip)
-        if: runner.os == 'macOS'
+      - name: Required policies fail closed before exec (mandatory, must not skip)
         shell: bash
         run: |
           set -o pipefail
-          go test ./internal/sandbox/ -run 'TestNativeSetsidDescendantReconciled' -v -count=1 | tee setsid.log
-          grep -q -- '--- PASS: TestNativeSetsidDescendantReconciled' setsid.log
-      - name: macOS ownership lifecycle is mandatory (must not skip)
-        if: runner.os == 'macOS'
+          go test ./internal/sandbox/ -run 'TestNativeRequiredPoliciesFailBeforeExec|TestNativeFailClosedBeforeExec' -v -count=1 | tee failclosed.log
+          grep -q -- '--- PASS: TestNativeRequiredPoliciesFailBeforeExec' failclosed.log
+          grep -q -- '--- PASS: TestNativeFailClosedBeforeExec' failclosed.log
+      - name: Validation fails closed before exec (mandatory, must not skip)
         shell: bash
         run: |
           set -o pipefail
-          go test ./internal/harness/ -run 'TestDarwin(FinishProcessOwnerReconcilesDetached|CleanProbeLeavesNoActiveOwner|DetachedProbeReconciledOnRestart|CleanProbeTwoStart|ACPExecReconcilesProcessOwner|ToolReleaseReconcilesDetached)' -v -count=1 | tee owner.log
-          grep -c -- '--- PASS: TestDarwin' owner.log | grep -q '^6$'
-      - name: macOS validation detached-child is mandatory (must not skip)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -o pipefail
-          go test ./internal/validation/ -run 'TestDarwinValidationReconcilesDetached' -v -count=1 | tee val.log
-          grep -q -- '--- PASS: TestDarwinValidationReconcilesDetached' val.log
+          go test ./internal/validation/ -run 'TestNativeValidationFailsClosed' -v -count=1 | tee valfail.log
+          grep -q -- '--- PASS: TestNativeValidationFailsClosed' valfail.log
       - name: Native sandbox full package
         run: go test ./internal/sandbox/ -count=1
       - name: Process ownership / recovery / harness packages

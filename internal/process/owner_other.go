@@ -1,22 +1,23 @@
-//go:build !linux && !darwin
+//go:build !linux
 
 package process
 
 import "time"
 
-// Supported reports whether ownership can be verified on this platform. Windows
-// cannot observe a process environment after the fact, so reconciliation is not
-// authoritative and callers must treat it as unsupported.
+// Supported reports whether ownership can be verified on this platform. Only
+// Linux can observe a process environment after the fact. macOS and Windows
+// cannot establish a non-removable process-tree ownership boundary, so
+// reconciliation is not authoritative and callers must treat it as unsupported.
 func Supported() bool { return false }
 
-// ReconcileTokenHash is not authoritative off Linux/macOS. It reports
-// unsupported without killing anything, so callers can fail closed rather than
-// guess ownership.
+// ReconcileTokenHash is not authoritative off Linux. It reports unsupported
+// without killing anything, so callers can fail closed rather than guess
+// ownership.
 func ReconcileTokenHash(tokenHash string, pgid int, wait time.Duration) (observed, remaining int, supported bool, err error) {
 	return 0, 0, false, nil
 }
 
-// ReconcileEnvToken is not authoritative off Linux/macOS.
+// ReconcileEnvToken is not authoritative off Linux.
 func ReconcileEnvToken(envName, tokenHash string, pgid int, wait time.Duration) (observed, remaining int, supported bool, err error) {
 	return 0, 0, false, nil
 }

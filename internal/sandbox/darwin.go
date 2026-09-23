@@ -9,8 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
-
-	"github.com/Wayshard/wayshard/internal/process"
 )
 
 func sandboxExecPath() string {
@@ -33,18 +31,15 @@ func (DarwinBackend) Compile(p Policy) (Compiled, error) {
 	if err != nil {
 		return Compiled{Backend: "darwin"}, err
 	}
-	// process_tree is advertised only when authoritative token-based ownership is
-	// available: a process group alone is not a process tree, because a setsid
-	// descendant can escape it. When ownership is unavailable the feature is
-	// omitted and required policies fail closed.
+	// FeatureProcessTree is NOT advertised on macOS. Seatbelt confines the
+	// process, but there is no non-removable OS-backed ownership boundary: the
+	// untrusted process controls its children's environment, so an environment
+	// token can be stripped, and a process group is escaped by setsid. A required
+	// policy therefore fails closed before untrusted code runs.
 	c := Compiled{Backend: "darwin", Features: []string{
 		"process_group", "env_filter",
 	}, Profile: profile}
-	if process.Supported() {
-		c.Features = append(c.Features, string(FeatureProcessTree))
-	} else {
-		c.Unavailable = append(c.Unavailable, string(FeatureProcessTree))
-	}
+	c.Unavailable = append(c.Unavailable, string(FeatureProcessTree))
 	if p.SyntheticHome != "" || p.SyntheticTemp != "" {
 		c.Features = append(c.Features, string(FeatureSyntheticEnv))
 	}
@@ -145,41 +140,32 @@ func (DarwinBackend) KillTree(cmd *exec.Cmd) error {
 }
 
 func (DarwinBackend) Report() IsolationReport {
+	// macOS cannot establish a non-removable process-tree ownership boundary.
+	// Seatbelt filesystem/network confinement works, but a process group is
+	// escaped by setsid and an environment token can be stripped by the untrusted
+	// process, so FeatureProcessTree is not advertised and required local
+	// execution fails closed. macOS remains a full server/client platform.
+	features := []string{
+		"seatbelt", "process_group", "env_filter",
+		string(FeatureFSRead), string(FeatureFSWrite), string(FeatureNetworkNone), string(FeatureSyntheticEnv),
+	}
+	missing := []string{string(FeatureProcessTree), string(FeatureResourceLimits)}
 	if sandboxExecPath() == "" {
 		return IsolationReport{
 			Backend:   "darwin",
 			Available: false,
 			Mode:      "unavailable",
-			Missing:   []string{"seatbelt", string(FeatureFSRead), string(FeatureFSWrite), string(FeatureNetworkNone), string(FeatureProcessTree)},
-			Detail:    "sandbox-exec not found; required isolation unavailable and refused (no silent unrestricted execution)",
-		}
-	}
-	features := []string{
-		"seatbelt", "process_group", "env_filter",
-		string(FeatureFSRead), string(FeatureFSWrite), string(FeatureNetworkNone), string(FeatureSyntheticEnv),
-	}
-	missing := []string{string(FeatureResourceLimits)}
-	if !process.Supported() {
-		// Seatbelt confinement works, but whole-tree ownership does not: a setsid
-		// descendant can survive the process group. Required local execution must
-		// fail closed rather than advertise process-tree containment it cannot
-		// provide.
-		return IsolationReport{
-			Backend:   "darwin",
-			Available: false,
-			Mode:      "seatbelt_no_ownership",
 			Features:  features,
-			Missing:   append(missing, string(FeatureProcessTree)),
-			Detail:    "macOS Seatbelt confinement available but authoritative process-tree ownership is unavailable; required local execution fails closed",
+			Missing:   append(missing, "seatbelt"),
+			Detail:    "sandbox-exec not found and no non-removable process-tree ownership; required local execution fails closed",
 		}
 	}
-	features = append(features, string(FeatureProcessTree))
 	return IsolationReport{
 		Backend:   "darwin",
-		Available: true,
-		Mode:      "seatbelt",
+		Available: false,
+		Mode:      "seatbelt_no_ownership",
 		Features:  features,
 		Missing:   missing,
-		Detail:    "macOS sandbox-exec seatbelt profile (filesystem read/write confinement, network denial) + token-verified process-tree ownership; CPU/memory limits are not OS-enforced here",
+		Detail:    "macOS Seatbelt confinement is available but there is no non-removable OS-backed process-tree ownership boundary (an untrusted process can strip the ownership marker and setsid), so required local harness/tool/probe/validation execution fails closed",
 	}
 }

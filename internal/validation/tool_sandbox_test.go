@@ -13,14 +13,14 @@ import (
 )
 
 // These tests exercise real OS confinement through the production validation
-// Runner. They run on POSIX hosts whose native backend can enforce required
-// isolation (Linux Landlock/seccomp, macOS Seatbelt); a platform that cannot
-// establish required isolation fails closed in production, so the test skips
-// there rather than asserting a weaker outcome.
+// Runner. They run on Linux, whose native backend can enforce required
+// isolation (Landlock/seccomp). macOS and Windows cannot establish a
+// non-removable process-tree ownership boundary, so required validation
+// execution fails closed there (see the fail-closed test below).
 func requirePosixSandbox(t *testing.T) {
 	t.Helper()
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("validation tool sandbox is exercised on Linux and macOS")
+	if runtime.GOOS != "linux" {
+		t.Skip("validation tool sandbox is exercised on Linux")
 	}
 	if !sandbox.Probe().Available {
 		t.Skipf("required isolation unavailable: %s", sandbox.Probe().Detail)
