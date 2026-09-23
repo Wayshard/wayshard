@@ -21,6 +21,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Enable unprivileged user namespaces (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default. The
+          # Linux PID-namespace supervisor (the non-removable process-lifecycle
+          # boundary) needs either an unprivileged user namespace or root.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
+          unshare --user --map-root-user --pid --fork --mount-proc true && echo "userns available" || echo "userns NOT available"
       - name: Vet
         run: go vet ./...
       - name: Test
@@ -119,6 +128,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Enable unprivileged user namespaces (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
+          unshare --user --map-root-user --pid --fork --mount-proc true && echo "userns available" || echo "userns NOT available"
       - name: Native sandbox security tests (verbose)
         run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt|Darwin|Linux' -v -count=1
       - name: Linux PID-namespace lifecycle boundary (mandatory, must not skip)
@@ -126,7 +141,13 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          go test ./internal/sandbox/ -run 'TestLinuxNamespaceBoundary|TestLinuxReconcileTokenHashSparesUnrelated' -v -count=1 | tee linuxboundary.log
+          if unshare --user --map-root-user --pid --fork --mount-proc true 2>/dev/null; then
+            go test ./internal/sandbox/ -run 'TestLinuxNamespaceBoundary|TestLinuxReconcileTokenHashSparesUnrelated' -v -count=1 | tee linuxboundary.log
+          else
+            # Root can create a PID namespace without an unprivileged user namespace.
+            echo "unprivileged userns unavailable; running the boundary tests as root"
+            sudo -E env "PATH=$PATH" "HOME=$HOME" go test ./internal/sandbox/ -run 'TestLinuxNamespaceBoundary|TestLinuxReconcileTokenHashSparesUnrelated' -v -count=1 | tee linuxboundary.log
+          fi
           grep -q -- '--- PASS: TestLinuxNamespaceBoundaryTerminatesTokenStrippedDescendant' linuxboundary.log
           grep -q -- '--- PASS: TestLinuxNamespaceBoundaryTerminatesOnNormalCompletion' linuxboundary.log
           grep -q -- '--- PASS: TestLinuxNamespaceBoundaryOnServerDeath' linuxboundary.log
