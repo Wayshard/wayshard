@@ -100,6 +100,7 @@ release-scripts-test:
 	python3 scripts/release/checksums.py --self-test
 	bash scripts/release/checksums_test.sh
 	bash scripts/release/android_patch_test.sh
+	bash scripts/release/android_keystore_patch_test.sh
 	bash scripts/release/android_jks_test.sh
 	bash scripts/release/android_version_properties_test.sh
 	bash scripts/release/package_go_test.sh

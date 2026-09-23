@@ -1,9 +1,12 @@
 // Platform-secure device-credential storage.
 //
 // Native clients (Desktop and Android, Tauri) store the device credential in
-// platform-secure storage through the host keychain. Browser clients never store
-// the credential: they authenticate with the server's HttpOnly session cookie
-// and never place a bearer token in web storage.
+// platform-secure storage: the OS keychain on desktop (macOS Keychain, Windows
+// Credential Manager, Linux Secret Service) and Android Keystore-backed
+// AES-256-GCM on Android (non-exportable key; only ciphertext is written to
+// app-private storage). Browser clients never store the credential: they
+// authenticate with the server's HttpOnly session cookie and never place a
+// bearer token in web storage.
 export type CredentialStoreKind = "tauri" | "browser"
 
 export interface CredentialStore {

@@ -192,7 +192,16 @@ if ".gitkeep" not in text:
 
 if "appimage-fix-diricon.sh" not in text:
     raise SystemExit("release.yml must fix the AppImage .DirIcon before packaging")
-print("desktop coverage, clean Go stamp, AppImage icon fix ok")
+
+m = re.search(r"^  android:\s*$", text, re.M)
+if not m:
+    raise SystemExit("release.yml is missing the android job")
+rest = text[m.end():]
+end = re.search(r"^  [A-Za-z0-9_-]+:\s*$", rest, re.M)
+android_block = rest[: end.start()] if end else rest
+if "android-keystore-patch.sh" not in android_block:
+    raise SystemExit("android job must install the Android Keystore credential helper")
+print("desktop coverage, clean Go stamp, AppImage icon fix, Android keystore ok")
 PY
 
 echo "release policy test ok"

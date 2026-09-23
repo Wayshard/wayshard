@@ -540,7 +540,8 @@ or external certificate/service).
   (`clients/gui/src/wayshard/secure-store.ts`) store the credential through Tauri
   commands backed by the OS credential store on desktop (`clients/desktop/src-tauri/src/credentials.rs`,
   `keyring` crate: macOS Keychain, Windows Credential Manager, Linux Secret
-  Service) and by app-private storage on Android. The CLI
+  Service) and by Android Keystore-backed AES-256-GCM encryption on Android
+  (non-exportable key; only ciphertext in app-private storage). The CLI
   (`cmd/wayshard/credentials.go`) uses the OS keychain and falls back to a user-private
   file (0600 on Unix, the user-profile ACL on Windows) only when the keychain
   is unavailable or `WAYSHARD_HEADLESS=1` is set;

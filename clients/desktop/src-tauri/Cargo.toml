@@ -19,7 +19,19 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Platform-secure credential storage on desktop targets (macOS Keychain,
-# Windows Credential Manager, Linux Secret Service). Android uses app-private
-# storage instead; the keyring crate has no Android backend.
+# Windows Credential Manager, Linux Secret Service).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+# Android Keystore-backed storage: the AES-256-GCM key is non-exportable and only
+# ciphertext is written to app-private storage.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+libc = "0.2"
+
+# The Android Keystore binding and the encrypted-envelope logic are compiled for
+# host tests too, so their JNI/envelope usage is type-checked on the CI host.
+[dev-dependencies]
+jni = "0.21"
+libc = "0.2"
+base64 = "0.21"

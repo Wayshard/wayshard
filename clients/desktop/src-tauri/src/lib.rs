@@ -4,6 +4,10 @@ use std::thread;
 use std::time::Duration;
 
 mod credentials;
+#[cfg(any(target_os = "android", test))]
+mod android_keystore;
+#[cfg(any(target_os = "android", test))]
+mod credential_store;
 
 #[tauri::command]
 fn provision_local_server() -> Result<String, String> {

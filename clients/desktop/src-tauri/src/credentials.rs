@@ -3,8 +3,10 @@
 //!
 //! Desktop targets use the OS credential store (macOS Keychain, Windows
 //! Credential Manager, Linux Secret Service) through the `keyring` crate.
-//! Android uses the app's private internal storage, which is sandboxed to the
-//! application by the platform.
+//! Android uses an Android Keystore AES-256-GCM key that is non-exportable: only
+//! ciphertext plus metadata is written to app-private storage
+//! (`credential_store`), and the Kotlin helper performs the Keystore operations
+//! (`android_keystore`).
 
 const KEYRING_SERVICE: &str = "dev.wayshard.app";
 const KEYRING_USER: &str = "device-credential";
@@ -46,32 +48,39 @@ pub fn clear_credential() -> Result<(), String> {
 fn credential_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     use tauri::Manager;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("device-credential"))
+    Ok(dir.join("credential.json"))
 }
 
 #[cfg(target_os = "android")]
 #[tauri::command]
 pub fn save_credential(app: tauri::AppHandle, credential: String) -> Result<(), String> {
-    std::fs::write(credential_path(&app)?, credential).map_err(|e| e.to_string())
+    crate::credential_store::save_encrypted(
+        &credential_path(&app)?,
+        &crate::android_keystore::KeystoreCipher,
+        &credential,
+    )
 }
 
 #[cfg(target_os = "android")]
 #[tauri::command]
 pub fn load_credential(app: tauri::AppHandle) -> Result<String, String> {
-    match std::fs::read_to_string(credential_path(&app)?) {
-        Ok(v) => Ok(v),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(e) => Err(e.to_string()),
-    }
+    Ok(crate::credential_store::load_encrypted(
+        &credential_path(&app)?,
+        &crate::android_keystore::KeystoreCipher,
+    )?
+    .unwrap_or_default())
 }
 
 #[cfg(target_os = "android")]
 #[tauri::command]
 pub fn clear_credential(app: tauri::AppHandle) -> Result<(), String> {
-    match std::fs::remove_file(credential_path(&app)?) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+    let path = credential_path(&app)?;
+    let removed = crate::credential_store::clear_file(&path);
+    if removed.is_ok() {
+        // Best-effort: drop the Keystore key too so key material does not
+        // linger. Only done once the ciphertext is gone, so a failure here can
+        // never strand undecryptable data.
+        let _ = crate::android_keystore::invoke("deleteKey", "");
     }
+    removed
 }

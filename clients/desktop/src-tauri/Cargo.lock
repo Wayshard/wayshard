@@ -4481,7 +4481,10 @@ dependencies = [
 name = "wayshard-desktop"
 version = "0.0.0"
 dependencies = [
+ "base64 0.21.7",
+ "jni",
  "keyring",
+ "libc",
  "serde",
  "serde_json",
  "tauri",
