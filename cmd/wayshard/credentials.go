@@ -13,8 +13,9 @@ import (
 // The CLI is a native client, so it stores its device credential in
 // platform-secure storage (macOS Keychain, Windows Credential Manager, Linux
 // Secret Service). When that is unavailable — or when the operator explicitly
-// opts into headless mode — it falls back to a 0600 file in the user config
-// directory, which is the documented secure headless fallback.
+// opts into headless mode — it falls back to a user-private file (0600 on Unix,
+// the user-profile ACL on Windows), which is the documented secure headless
+// fallback.
 const (
 	keyringService = "wayshard"
 	keyringUser    = "device-credential"
@@ -30,7 +31,7 @@ func headlessForced() bool {
 	return false
 }
 
-// tokenPath is the secure headless fallback location (0600).
+// tokenPath is the secure headless fallback location (0600 on Unix).
 func tokenPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "wayshard", "device.token")

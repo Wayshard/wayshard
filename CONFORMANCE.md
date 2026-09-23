@@ -541,8 +541,9 @@ or external certificate/service).
   commands backed by the OS credential store on desktop (`clients/desktop/src-tauri/src/credentials.rs`,
   `keyring` crate: macOS Keychain, Windows Credential Manager, Linux Secret
   Service) and by app-private storage on Android. The CLI
-  (`cmd/wayshard/credentials.go`) uses the OS keychain and falls back to a 0600
-  file only when the keychain is unavailable or `WAYSHARD_HEADLESS=1` is set;
+  (`cmd/wayshard/credentials.go`) uses the OS keychain and falls back to a user-private
+  file (0600 on Unix, the user-profile ACL on Windows) only when the keychain
+  is unavailable or `WAYSHARD_HEADLESS=1` is set;
   `WAYSHARD_TOKEN` always takes precedence.
 - **Native WebSocket authentication.** Browsers/webviews cannot set an
   `Authorization` header on a WebSocket and native clients have no cross-origin

@@ -2,11 +2,12 @@ package main
 
 import (
 	"os"
+	"runtime"
 	"testing"
 )
 
 // TestTokenHeadlessFallbackIsProtected proves the explicit headless fallback
-// stores the credential in a 0600 file and round-trips it.
+// stores the credential in a user-private file and round-trips it.
 func TestTokenHeadlessFallbackIsProtected(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -27,8 +28,11 @@ func TestTokenHeadlessFallbackIsProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat token file: %v", err)
 	}
-	if perm := fi.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("token file mode = %o, want 600", perm)
+	// Unix enforces 0600; Windows relies on the user-profile ACL instead.
+	if runtime.GOOS != "windows" {
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("token file mode = %o, want 600", perm)
+		}
 	}
 }
 

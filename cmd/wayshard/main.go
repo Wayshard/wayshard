@@ -193,8 +193,8 @@ Pairing refuses a bare code: verified pairing requires the expected server id an
 fingerprint from the trusted invitation (--invitation, or --server-id/--fingerprint).
 The device credential is stored in platform-secure storage (macOS Keychain,
 Windows Credential Manager, Linux Secret Service); when that is unavailable, or
-when WAYSHARD_HEADLESS=1 is set, it falls back to a 0600 file under the user
-config directory. WAYSHARD_TOKEN supplies the credential explicitly and takes
+when WAYSHARD_HEADLESS=1 is set, it falls back to a user-private file under
+the user config directory (0600 on Unix, the user-profile ACL on Windows). WAYSHARD_TOKEN supplies the credential explicitly and takes
 precedence over stored material.
 Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN, WAYSHARD_HEADLESS
 `)
