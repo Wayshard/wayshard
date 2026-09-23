@@ -192,10 +192,11 @@ func main() {
 Pairing refuses a bare code: verified pairing requires the expected server id and
 fingerprint from the trusted invitation (--invitation, or --server-id/--fingerprint).
 The device credential is stored in platform-secure storage (macOS Keychain,
-Windows Credential Manager, Linux Secret Service); when that is unavailable, or
-when WAYSHARD_HEADLESS=1 is set, it falls back to a user-private file under
-the user config directory (0600 on Unix, the user-profile ACL on Windows). WAYSHARD_TOKEN supplies the credential explicitly and takes
-precedence over stored material.
+Windows Credential Manager, Linux Secret Service). If that storage is unavailable
+the CLI fails closed rather than writing a plaintext credential; set
+WAYSHARD_HEADLESS=1 to opt into the protected user-private file fallback (0600 on
+Unix, the user-profile ACL on Windows). WAYSHARD_TOKEN supplies the credential
+explicitly and takes precedence over stored material.
 Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN, WAYSHARD_HEADLESS
 `)
 	default:
@@ -223,8 +224,14 @@ func (c *client) do(method, path string, body any) ([]byte, error) {
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
-	} else if t, err := loadToken(); err == nil {
-		req.Header.Set("Authorization", "Bearer "+t)
+	} else {
+		t, err := loadToken()
+		if err != nil {
+			return nil, err
+		}
+		if t != "" {
+			req.Header.Set("Authorization", "Bearer "+t)
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

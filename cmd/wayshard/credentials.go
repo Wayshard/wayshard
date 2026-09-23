@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,15 +12,23 @@ import (
 
 // Device-credential storage for the Wayshard CLI.
 //
-// The CLI is a native client, so it stores its device credential in
-// platform-secure storage (macOS Keychain, Windows Credential Manager, Linux
-// Secret Service). When that is unavailable — or when the operator explicitly
-// opts into headless mode — it falls back to a user-private file (0600 on Unix,
-// the user-profile ACL on Windows), which is the documented secure headless
-// fallback.
+// The CLI is a native client, so in normal operation it stores its device
+// credential in platform-secure storage (macOS Keychain, Windows Credential
+// Manager, Linux Secret Service). It fails closed when that storage is
+// unavailable: it never silently downgrades to a plaintext credential file. The
+// protected user-private file fallback is used only when the operator explicitly
+// opts into headless mode with WAYSHARD_HEADLESS=1. WAYSHARD_TOKEN always takes
+// precedence.
 const (
 	keyringService = "wayshard"
 	keyringUser    = "device-credential"
+)
+
+// keyringSet/keyringGet are indirection points so tests can simulate an
+// unavailable or failing OS keyring deterministically.
+var (
+	keyringSet = keyring.Set
+	keyringGet = keyring.Get
 )
 
 // headlessForced reports whether the operator explicitly asked to skip the OS
@@ -37,30 +47,50 @@ func tokenPath() string {
 	return filepath.Join(home, ".config", "wayshard", "device.token")
 }
 
-// saveToken stores the device credential in platform-secure storage, falling
-// back to the protected file only when the OS keychain is unavailable or
-// headless mode is explicitly requested.
-func saveToken(t string) error {
-	if !headlessForced() {
-		if err := keyring.Set(keyringService, keyringUser, t); err == nil {
-			return nil
-		}
-	}
-	return saveTokenFile(t)
+// keyringUnavailable wraps a keyring failure with the explicit opt-in the
+// operator needs to use the protected file fallback instead.
+func keyringUnavailable(err error) error {
+	return fmt.Errorf(
+		"OS keyring unavailable (%v); refusing to store a plaintext credential — set WAYSHARD_HEADLESS=1 to use the protected file fallback",
+		err,
+	)
 }
 
-// loadToken resolves the device credential: explicit environment, then
-// platform-secure storage, then the protected file fallback.
+// saveToken stores the device credential in platform-secure storage. It fails
+// closed when the OS keyring is unavailable; the protected file fallback is used
+// only in explicit headless mode.
+func saveToken(t string) error {
+	if headlessForced() {
+		return saveTokenFile(t)
+	}
+	if err := keyringSet(keyringService, keyringUser, t); err != nil {
+		return keyringUnavailable(err)
+	}
+	return nil
+}
+
+// loadToken resolves the device credential: explicit environment first, then
+// platform-secure storage (normal mode) or the protected file (headless mode).
+// A missing entry is not an error; an unavailable keyring is.
 func loadToken() (string, error) {
 	if v := strings.TrimSpace(os.Getenv("WAYSHARD_TOKEN")); v != "" {
 		return v, nil
 	}
-	if !headlessForced() {
-		if t, err := keyring.Get(keyringService, keyringUser); err == nil && t != "" {
-			return t, nil
+	if headlessForced() {
+		t, err := loadTokenFile()
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
 		}
+		return t, err
 	}
-	return loadTokenFile()
+	t, err := keyringGet(keyringService, keyringUser)
+	if err != nil {
+		if errors.Is(err, keyring.ErrNotFound) {
+			return "", nil
+		}
+		return "", keyringUnavailable(err)
+	}
+	return t, nil
 }
 
 func saveTokenFile(t string) error {
