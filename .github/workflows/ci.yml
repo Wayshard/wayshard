@@ -106,6 +106,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: linux-amd64
+            os: ubuntu-latest
           - name: macos-arm64
             os: macos-latest
           - name: macos-intel
@@ -118,8 +120,20 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Native sandbox security tests (verbose)
-        run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt|Darwin' -v -count=1
+        run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt|Darwin|Linux' -v -count=1
+      - name: Linux PID-namespace lifecycle boundary (mandatory, must not skip)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -o pipefail
+          go test ./internal/sandbox/ -run 'TestLinuxNamespaceBoundary|TestLinuxReconcileTokenHashSparesUnrelated' -v -count=1 | tee linuxboundary.log
+          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryTerminatesTokenStrippedDescendant' linuxboundary.log
+          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryTerminatesOnNormalCompletion' linuxboundary.log
+          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryOnServerDeath' linuxboundary.log
+          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryOnLoopbackPolicy' linuxboundary.log
+          grep -q -- '--- PASS: TestLinuxReconcileTokenHashSparesUnrelated' linuxboundary.log
       - name: Required policies fail closed before exec (mandatory, must not skip)
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           set -o pipefail
@@ -127,6 +141,7 @@ jobs:
           grep -q -- '--- PASS: TestNativeRequiredPoliciesFailBeforeExec' failclosed.log
           grep -q -- '--- PASS: TestNativeFailClosedBeforeExec' failclosed.log
       - name: Validation fails closed before exec (mandatory, must not skip)
+        if: runner.os != 'Linux'
         shell: bash
         run: |
           set -o pipefail

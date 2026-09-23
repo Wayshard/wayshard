@@ -116,6 +116,9 @@ func RunConstrainedOutputWithStart(ctx context.Context, p Policy, timeout time.D
 	if err := cmd.Start(); err != nil {
 		return buf.Bytes(), err
 	}
+	if cleanup, aerr := c.Attach(cmd, p); aerr == nil && cleanup != nil {
+		defer cleanup()
+	}
 	if onStart != nil && cmd.Process != nil {
 		onStart(cmd.Process.Pid)
 	}

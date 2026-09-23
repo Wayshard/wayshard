@@ -77,9 +77,9 @@ func orphanFixture(t *testing.T, root, fakeBin string) (fixtureEnv, []string) {
 	return fx, append(fx.serverEnv(), "WAYSHARD_FAKE_TOOL_CMD="+orphanToolScript)
 }
 
-// TestProcessBoundaryOrphanGrandchildReconciled proves a backgrounded grandchild
-// that survives server SIGKILL is explicitly terminated by startup
-// reconciliation before the workspace is restored and retried.
+// TestProcessBoundaryOrphanGrandchildReconciled proves the trusted PID-namespace
+// supervisor tears a backgrounded grandchild down when the server dies (the
+// death pipe closes), so no owned writer survives to race workspace restore.
 func TestProcessBoundaryOrphanGrandchildReconciled(t *testing.T) {
 	requireGit(t)
 	serverBin := buildServerBinary(t)
@@ -100,26 +100,21 @@ func TestProcessBoundaryOrphanGrandchildReconciled(t *testing.T) {
 	waitFileRun(t, psA, cred, runID, fx.signalFile, 40*time.Second)
 	rw := runWorkspacePath(dataDir, runID)
 
-	orphanPid := readPid(t, filepath.Join(rw, "orphan.pid"))
-	if orphanPid <= 0 {
-		t.Fatal("orphan pid not recorded")
-	}
-	t.Cleanup(func() { _ = syscall.Kill(orphanPid, syscall.SIGKILL) })
 	orphanFile := filepath.Join(rw, "orphan.txt")
 	if s := fileSize(orphanFile); s <= 0 {
 		t.Fatalf("orphan writer not active before crash: %d", s)
 	}
 
-	// SIGKILL server A. Do NOT reap the fixture: the grandchild must survive.
+	// SIGKILL server A. The PID-namespace supervisor holds the read end of a
+	// death pipe whose write end is owned by the server, so server death tears
+	// the owned tree down: the backgrounded grandchild does not survive and its
+	// writer stops.
 	psA.kill(t)
-	time.Sleep(1 * time.Second)
-	if !procAlive(orphanPid) {
-		t.Fatalf("expected backgrounded grandchild %d to survive server SIGKILL", orphanPid)
-	}
-	before := fileSize(orphanFile)
+	time.Sleep(1500 * time.Millisecond)
+	stopped0 := fileSize(orphanFile)
 	time.Sleep(700 * time.Millisecond)
-	if after := fileSize(orphanFile); after <= before {
-		t.Fatalf("orphan not writing while server is down: %d -> %d", before, after)
+	if after := fileSize(orphanFile); after != stopped0 {
+		t.Fatalf("owned writer survived server SIGKILL: %d -> %d", stopped0, after)
 	}
 
 	_ = os.WriteFile(fx.markerFile, []byte("go\n"), 0o644)
@@ -128,14 +123,14 @@ func TestProcessBoundaryOrphanGrandchildReconciled(t *testing.T) {
 	if psA.pid() == psB.pid() {
 		t.Fatalf("server PIDs not distinct: %d", psA.pid())
 	}
-	t.Logf("orphan success path: server A=%d server B=%d orphan=%d", psA.pid(), psB.pid(), orphanPid)
+	t.Logf("orphan success path: server A=%d server B=%d", psA.pid(), psB.pid())
 
-	// Startup reconciliation must terminate the orphan before restoring.
-	waitProcGone(t, orphanPid, 15*time.Second)
+	// Recovery restores the pre-attempt checkpoint; the torn-down writer cannot
+	// keep writing.
 	stopped := fileSize(orphanFile)
 	time.Sleep(700 * time.Millisecond)
 	if after := fileSize(orphanFile); after != stopped {
-		t.Fatalf("orphan kept writing after reconciliation: %d -> %d", stopped, after)
+		t.Fatalf("orphan kept writing after recovery: %d -> %d", stopped, after)
 	}
 
 	final := waitRun(t, psB, cred, runID, func(r domain.Run) bool {
@@ -207,29 +202,29 @@ func TestProcessBoundaryMultipleRunOrphans(t *testing.T) {
 
 	rw1 := runWorkspacePath(dataDir, run1)
 	rw2 := runWorkspacePath(dataDir, run2)
-	orphan1 := readPid(t, filepath.Join(rw1, "orphan.pid"))
-	orphan2 := readPid(t, filepath.Join(rw2, "orphan.pid"))
-	if orphan1 <= 0 || orphan2 <= 0 || orphan1 == orphan2 {
-		t.Fatalf("bad orphan pids: %d %d", orphan1, orphan2)
-	}
-	t.Cleanup(func() {
-		_ = syscall.Kill(orphan1, syscall.SIGKILL)
-		_ = syscall.Kill(orphan2, syscall.SIGKILL)
-	})
+	// Wait for both backgrounded writers to start (each writes orphan.pid).
+	_ = readPid(t, filepath.Join(rw1, "orphan.pid"))
+	_ = readPid(t, filepath.Join(rw2, "orphan.pid"))
 
+	// Server death tears both owned trees down: each run's PID-namespace
+	// supervisor loses its death pipe when the server dies.
 	psA.kill(t)
-	time.Sleep(1 * time.Second)
-	if !procAlive(orphan1) || !procAlive(orphan2) {
-		t.Fatalf("orphans did not survive: %v %v", procAlive(orphan1), procAlive(orphan2))
-	}
+	time.Sleep(1500 * time.Millisecond)
 	_ = os.WriteFile(fx.markerFile, []byte("go\n"), 0o644)
 	portB := freePort(t)
 	psB := startServer(t, serverBin, dataDir, portB, env)
 	defer psB.kill(t)
-	t.Logf("multi-run orphans: A=%d B=%d orphan1=%d orphan2=%d", psA.pid(), psB.pid(), orphan1, orphan2)
+	t.Logf("multi-run: A=%d B=%d", psA.pid(), psB.pid())
 
-	waitProcGone(t, orphan1, 15*time.Second)
-	waitProcGone(t, orphan2, 15*time.Second)
+	// Both writers are gone, so neither can keep mutating its workspace.
+	for _, rw := range []string{rw1, rw2} {
+		orphanFile := filepath.Join(rw, "orphan.txt")
+		stopped := fileSize(orphanFile)
+		time.Sleep(500 * time.Millisecond)
+		if after := fileSize(orphanFile); after != stopped {
+			t.Fatalf("owned writer kept running in %s: %d -> %d", rw, stopped, after)
+		}
+	}
 
 	// Both workspaces were restored by recovery.
 	for _, rw := range []string{rw1, rw2} {
@@ -246,8 +241,9 @@ func TestProcessBoundaryMultipleRunOrphans(t *testing.T) {
 	}
 }
 
-// TestProcessBoundaryOrphanBlockedRecovery proves the orphan is terminated even
-// when checkpoint recovery fails and the run becomes BLOCKED/RECOVERY.
+// TestProcessBoundaryOrphanBlockedRecovery proves an owned writer is torn down
+// on server death and cannot keep mutating the workspace even when checkpoint
+// recovery fails and the run becomes BLOCKED/RECOVERY.
 func TestProcessBoundaryOrphanBlockedRecovery(t *testing.T) {
 	requireGit(t)
 	serverBin := buildServerBinary(t)
@@ -267,13 +263,13 @@ func TestProcessBoundaryOrphanBlockedRecovery(t *testing.T) {
 	runID := sendMessage(t, psA, cred, conv, "add agent.go")
 	waitFileRun(t, psA, cred, runID, fx.signalFile, 40*time.Second)
 	rw := runWorkspacePath(dataDir, runID)
-	orphanPid := readPid(t, filepath.Join(rw, "orphan.pid"))
-	t.Cleanup(func() { _ = syscall.Kill(orphanPid, syscall.SIGKILL) })
-
 	psA.kill(t)
-	time.Sleep(1 * time.Second)
-	if !procAlive(orphanPid) {
-		t.Fatal("orphan did not survive SIGKILL")
+	time.Sleep(1500 * time.Millisecond)
+	orphanFile := filepath.Join(rw, "orphan.txt")
+	stopped0 := fileSize(orphanFile)
+	time.Sleep(700 * time.Millisecond)
+	if after := fileSize(orphanFile); after != stopped0 {
+		t.Fatalf("owned writer survived server SIGKILL: %d -> %d", stopped0, after)
 	}
 
 	// Corrupt the checkpoint so recovery blocks and does not swap the workspace.
@@ -289,10 +285,8 @@ func TestProcessBoundaryOrphanBlockedRecovery(t *testing.T) {
 
 	portB := freePort(t)
 	psB := startServer(t, serverBin, dataDir, portB, env)
-	t.Logf("orphan blocked path: server A=%d server B=%d orphan=%d", psA.pid(), psB.pid(), orphanPid)
+	t.Logf("orphan blocked path: server A=%d server B=%d", psA.pid(), psB.pid())
 
-	waitProcGone(t, orphanPid, 15*time.Second)
-	orphanFile := filepath.Join(rw, "orphan.txt")
 	stopped := fileSize(orphanFile)
 	time.Sleep(700 * time.Millisecond)
 	if after := fileSize(orphanFile); after != stopped {

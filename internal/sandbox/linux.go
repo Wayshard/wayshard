@@ -111,13 +111,22 @@ func (LinuxBackend) Compile(p Policy) (Compiled, error) {
 	if err := compileCommon(p, true); err != nil {
 		return Compiled{Backend: "linux"}, err
 	}
-	// process_tree: Setpgid at creation + Pdeathsig, so the group is established
-	// before the child runs. resource_limits: rlimits/seccomp are applied by the
-	// helper before exec.
+	// process_tree: a trusted PID-namespace supervisor remains namespace init, so
+	// killing it tears down every descendant (including setsid/double-forked
+	// processes) and the untrusted process cannot remove or escape the boundary.
+	// resource_limits: rlimits/seccomp are applied by the helper before exec.
 	c := Compiled{Backend: "linux", Features: []string{
 		"process_group", "pdeathsig", "env_filter",
-		string(FeatureProcessTree), string(FeatureResourceLimits),
+		string(FeatureResourceLimits),
 	}}
+	if procIsolationSupported() {
+		c.Features = append(c.Features, string(FeatureProcessTree), "pid_namespace")
+	} else {
+		// Without a PID namespace there is no non-removable lifecycle boundary;
+		// required policies must fail closed rather than rely on a removable
+		// ownership marker.
+		c.Unavailable = append(c.Unavailable, string(FeatureProcessTree), "pid_namespace")
+	}
 	if _, err := landlockABI(); err != nil {
 		c.Unavailable = append(c.Unavailable, "landlock")
 		if p.Required {
@@ -191,15 +200,24 @@ func (b LinuxBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.Setpgid = true
-	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 	needUser := false
-	if p.ProcIsolation && procIsolationSupported() {
-		// A private PID + mount namespace lets the helper mount a procfs scoped
-		// to this process and its descendants, so /proc never exposes host
-		// processes.
+	useSupervisor := false
+	if procIsolationSupported() && (p.Required || p.ProcIsolation) {
+		// Required execution always runs under a trusted PID-namespace supervisor
+		// that remains namespace init. The lifecycle boundary is the namespace,
+		// not a removable ownership marker. A scoped procfs is mounted only when
+		// the policy requested ProcIsolation (harnesses/probes that need /proc);
+		// otherwise /proc stays denied.
 		cmd.SysProcAttr.Cloneflags |= unix.CLONE_NEWPID | unix.CLONE_NEWNS
 		p.ProcNamespaced = true
 		needUser = true
+		useSupervisor = true
+	}
+	if !useSupervisor {
+		// Direct-exec helper (non-required): Pdeathsig covers the direct child on
+		// server death. The PID-namespace supervisor uses a getppid watchdog
+		// instead, because PR_SET_PDEATHSIG is bound to the forking thread.
+		cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 	}
 	if p.Network == NetLoopback {
 		// A private network namespace with only loopback, so a harness that
@@ -259,13 +277,41 @@ func (b LinuxBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 	origPath := cmd.Path
 	origArgs := cmd.Args
 	cmd.Path = helper
-	cmd.Args = append([]string{helper, HelperArg, f.Name(), "--", origPath}, origArgs[1:]...)
+	if useSupervisor {
+		// A death pipe: the supervisor holds the read end (fd 3) and the server
+		// holds the write end. EOF means the server (or provider shim) died, so
+		// the supervisor tears the namespace down. getppid() cannot be used
+		// because namespace init sees 0 for a parent outside its namespace.
+		r, w, perr := os.Pipe()
+		if perr != nil {
+			return fmt.Errorf("supervisor death pipe: %w", perr)
+		}
+		cmd.ExtraFiles = append(cmd.ExtraFiles, r)
+		linuxDeathPipes.Store(cmd, &deathPipe{r: r, w: w})
+		cmd.Args = append([]string{helper, SupervisorArg, f.Name(), "--", origPath}, origArgs[1:]...)
+	} else {
+		cmd.Args = append([]string{helper, HelperArg, f.Name(), "--", origPath}, origArgs[1:]...)
+	}
 	return nil
 }
 
+type deathPipe struct {
+	r *os.File
+	w *os.File
+}
+
+// linuxDeathPipes holds the supervisor death pipe for a launch so Attach can
+// close the parent's read end and return a cleanup that closes the write end.
+var linuxDeathPipes sync.Map // map[*exec.Cmd]*deathPipe
+
 func (LinuxBackend) Attach(cmd *exec.Cmd, p Policy) (Cleanup, error) {
-	_ = cmd
 	_ = p
+	if v, ok := linuxDeathPipes.LoadAndDelete(cmd); ok {
+		dp := v.(*deathPipe)
+		// The child holds its own copy of the read end; close the parent's.
+		_ = dp.r.Close()
+		return func() { _ = dp.w.Close() }, nil
+	}
 	return func() {}, nil
 }
 
@@ -273,7 +319,13 @@ func (LinuxBackend) KillTree(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	pid := cmd.Process.Pid
+	// Kill the process group (covers grouped descendants) and the direct child
+	// explicitly. When the direct child is the PID-namespace supervisor/init, its
+	// death tears down the namespace and terminates setsid/double-forked
+	// descendants that escaped the process group.
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	return syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func (LinuxBackend) Report() IsolationReport {
@@ -289,9 +341,20 @@ func (LinuxBackend) Report() IsolationReport {
 	if _, err := seccompAuditArch(); err == nil {
 		r.Features = append(r.Features, "seccomp_network_deny")
 	}
+	if !procIsolationSupported() {
+		// No PID namespace means no non-removable process-tree boundary, so every
+		// required policy fails closed. Report truthfully rather than implying the
+		// required sandbox is available.
+		r.Available = false
+		r.Mode = "landlock_no_namespace"
+		r.Missing = append(r.Missing, string(FeatureProcessTree), "pid_namespace")
+		r.Detail = "linux landlock/seccomp confinement available but no PID-namespace process-tree boundary; required execution fails closed"
+		return r
+	}
+	r.Features = append(r.Features, "pid_namespace", string(FeatureProcessTree))
 	// Provider and loopback network isolation are runtime-probed capabilities
 	// reported separately (see providerNetwork on GET /v1/sandbox); this report
 	// covers the always-on filesystem/process confinement only.
-	r.Detail = "linux landlock filesystem confinement + seccomp network confinement (none by default) + process group + pdeathsig + env allowlist; isolated provider/loopback network modes are capability-probed and reported separately"
+	r.Detail = "linux landlock filesystem confinement + seccomp network confinement (none by default) + trusted PID-namespace supervisor (namespace init; killing it tears down the whole tree, so setsid/double-fork cannot escape) + process group + env allowlist; isolated provider/loopback network modes are capability-probed and reported separately"
 	return r
 }

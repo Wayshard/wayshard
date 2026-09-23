@@ -606,7 +606,7 @@ Platform backends compile the policy.
 
 Implementation should use appropriate supported OS primitives and runtime capability probing.
 
-Linux may combine filesystem/process/network/resource primitives such as Landlock/namespaces/no-new-privs/seccomp/cgroups as available.
+Linux combines Landlock filesystem confinement, seccomp communication-socket confinement, process groups and a trusted **PID-namespace supervisor**: required execution runs under an in-binary supervisor that remains namespace init, so killing it tears the namespace (and every descendant, including setsid/double-forked processes) down. A death pipe held by the parent tears the namespace down on server death. A scoped procfs is mounted when a policy requests `ProcIsolation`. `FeatureProcessTree` is advertised only when the PID-namespace capability is runtime-probed as available; otherwise required execution fails closed.
 
 macOS uses `sandbox-exec`/Seatbelt with a compiled profile (filesystem read/write confinement and network denial), passed inline via `-p`; `sandbox-exec` absence fails closed. macOS has no non-removable OS-backed process-tree ownership boundary: a process group is escaped by `setsid`, and an environment ownership token can be stripped by the untrusted process before it execs a child. `FeatureProcessTree` is therefore not advertised on macOS; `Report()` reports the required sandbox unavailable and required harness/tool/probe/validation execution fails closed before untrusted code runs. macOS remains a full Desktop/TUI/CLI/server platform. Native tests prove fail-before-exec on macOS arm64 and Intel (`TestNativeRequiredPoliciesFailBeforeExec`, `TestNativeFailClosedBeforeExec`, `TestNativeValidationFailsClosed`).
 
@@ -670,9 +670,9 @@ The scheduler starts only after this recovery completes. Harness discovery/probi
 
 ## 30. Process supervision
 
-Launched harness/tool processes are associated with run/stage/attempt identity and an OS process-group/job abstraction so cancellation and crash cleanup target descendants, not only a parent PID.
+Launched harness/tool/probe/validation processes are associated with run/stage/attempt identity. On Linux each required launch runs under a trusted in-binary **PID-namespace supervisor** that remains namespace init; the target and all descendants live in that namespace, a process cannot leave its PID namespace, and killing namespace init (the direct child) tears every descendant down — including setsid/double-forked processes. A **death pipe** whose write end the parent holds tears the namespace down when the server (or provider shim) dies, so a crash does not leave an orphan. A scoped procfs is mounted only when a policy requests `ProcIsolation`.
 
-Each attempt also carries a per-attempt ownership token inherited by its harness and Tool descendants. The token hash is persisted before launch. Direct children are additionally given a parent-death signal so a server crash terminates them, but that does not cover backgrounded or session-detached grandchildren; startup reconciliation therefore scans for surviving processes whose environment carries the attempt's token, terminates them (and their proven-owned process group), and only then allows workspace restore. Ownership is matched by token hash, not by PID, so a reused PID or process-group id cannot cause an unrelated process to be killed. A tree that cannot be terminated blocks its run rather than being raced.
+The per-attempt ownership token remains as a cooperative/diagnostic hint (and lets Linux recovery find a surviving supervisor); the token hash is persisted before launch. The token is never treated as proof of ownership of a hostile process, because an untrusted process controls its children's environment. macOS and Windows cannot establish a non-removable ownership boundary, so they do not advertise `FeatureProcessTree` and required local execution fails closed before untrusted code runs.
 
 Graceful shutdown stops new work, drains/checkpoints active runs where practical, marks interrupted attempts accurately, and then terminates managed processes.
 

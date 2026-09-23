@@ -7,6 +7,13 @@ import "os"
 // and all of its descendants inherit the confinement.
 const HelperArg = "__wayshard-sandbox-exec"
 
+// SupervisorArg is the hidden argv marker for the PID-namespace supervisor. The
+// supervisor is PID 1 in the target's PID namespace and remains init: the target
+// runs as its child. Killing the supervisor tears down the namespace and every
+// descendant with it (including setsid/double-forked processes), which is the
+// non-removable lifecycle boundary for Linux required execution.
+const SupervisorArg = "__wayshard-sandbox-supervise"
+
 // ProcProbeArg is the hidden argv marker for the scoped-procfs capability probe.
 const ProcProbeArg = "__wayshard-proc-probe"
 

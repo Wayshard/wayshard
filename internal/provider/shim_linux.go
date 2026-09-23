@@ -94,6 +94,9 @@ func ShimMain(configPath string) int {
 		fmt.Fprintln(os.Stderr, "wayshard-provider-shim: start harness:", err)
 		return 6
 	}
+	if cleanup, aerr := con.Attach(cmd, cfg.Policy); aerr == nil && cleanup != nil {
+		defer cleanup()
+	}
 	werr := cmd.Wait()
 	cancel()
 	if werr == nil {
