@@ -226,6 +226,20 @@ func waitPidDead(pid int, d time.Duration) bool {
 	return !pidAlive(pid)
 }
 
+// waitCmdExit waits for cmd to exit, failing the test instead of hanging forever
+// if lifecycle teardown is broken.
+func waitCmdExit(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("command did not exit within 30s (lifecycle teardown broken)")
+	}
+}
+
 func environHasToken(pid int, token string) bool {
 	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "environ"))
 	if err != nil {
@@ -279,9 +293,10 @@ func TestLinuxNamespaceBoundaryTerminatesTokenStrippedDescendant(t *testing.T) {
 	cmd := exec.Command(hostileExe(t), "-test.run=TestHostileHelperProcess")
 	cmd.Env = append(ToolEnv(home, home, map[string]string{process.TokenEnv: token}),
 		hostileHelperEnv+"=1", "HOSTILE_MODE=strip-setsid", "HOSTILE_ARG="+markerFile)
-	var out strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	// Use *os.File streams so exec does not spawn copy goroutines that would
+	// keep Wait blocked on a surviving descendant's inherited pipe.
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
 	if err := c.Constrain(cmd, p); err != nil {
 		t.Fatalf("constrain: %v", err)
 	}
@@ -312,7 +327,7 @@ func TestLinuxNamespaceBoundaryTerminatesTokenStrippedDescendant(t *testing.T) {
 	if err := c.KillTree(cmd); err != nil {
 		t.Fatalf("kill tree: %v", err)
 	}
-	_ = cmd.Wait()
+	waitCmdExit(t, cmd)
 	if !waitPidDead(descendant, 10*time.Second) {
 		t.Fatalf("token-stripped setsid descendant %d survived cancellation", descendant)
 	}
@@ -349,7 +364,7 @@ func TestLinuxNamespaceBoundaryTerminatesOnNormalCompletion(t *testing.T) {
 	defer clean()
 	marker := waitMarker(t, markerFile)
 	descendant := waitHostPid(t, marker)
-	_ = cmd.Wait()
+	waitCmdExit(t, cmd)
 	if !waitPidDead(descendant, 10*time.Second) {
 		t.Fatalf("token-stripped setsid descendant %d survived normal completion", descendant)
 	}
@@ -437,7 +452,7 @@ func TestLinuxNamespaceBoundaryOnLoopbackPolicy(t *testing.T) {
 	if err := c.KillTree(cmd); err != nil {
 		t.Fatalf("kill tree: %v", err)
 	}
-	_ = cmd.Wait()
+	waitCmdExit(t, cmd)
 	if !waitPidDead(descendant, 10*time.Second) {
 		t.Fatalf("loopback-policy token-stripped descendant %d survived cancellation", descendant)
 	}
