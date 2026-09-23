@@ -215,8 +215,10 @@ func (b LinuxBackend) Constrain(cmd *exec.Cmd, p Policy) error {
 	}
 	if !useSupervisor {
 		// Direct-exec helper (non-required): Pdeathsig covers the direct child on
-		// server death. The PID-namespace supervisor uses a getppid watchdog
-		// instead, because PR_SET_PDEATHSIG is bound to the forking thread.
+		// server death. The required PID-namespace supervisor uses a death pipe
+		// (its parent holds the write end) instead, because PR_SET_PDEATHSIG is
+		// bound to the forking thread and namespace init sees getppid() == 0 for
+		// a parent outside its namespace.
 		cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 	}
 	if p.Network == NetLoopback {
@@ -319,13 +321,25 @@ func (LinuxBackend) KillTree(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
+	// A reaped process's PID/PGID may already have been recycled, so signaling
+	// either could hit an unrelated process. Ownership is already gone: the
+	// PID-namespace supervisor has exited, which tears the whole tree down.
+	if cmd.ProcessState != nil {
+		return nil
+	}
 	pid := cmd.Process.Pid
-	// Kill the process group (covers grouped descendants) and the direct child
-	// explicitly. When the direct child is the PID-namespace supervisor/init, its
-	// death tears down the namespace and terminates setsid/double-forked
-	// descendants that escaped the process group.
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
-	return syscall.Kill(pid, syscall.SIGKILL)
+	if pid > 0 {
+		// The owned supervisor is the process-group leader. Signal the group only
+		// while the process is still unreaped, so the PGID cannot have been
+		// recycled; this covers descendants that stayed in the group. A
+		// setsid/double-forked descendant is not in the group and is torn down by
+		// the PID-namespace boundary when the supervisor dies.
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+	}
+	// Kill the direct child (the PID-namespace init) through the guarded process
+	// handle, which never signals a reused PID (pidfd, or a statusDone check
+	// once the process has been waited on). Its death tears down the namespace.
+	return cmd.Process.Kill()
 }
 
 func (LinuxBackend) Report() IsolationReport {

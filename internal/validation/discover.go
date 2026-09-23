@@ -164,7 +164,24 @@ func (r *Runner) execCheck(ctx context.Context, dir string, c artifacts.Validati
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		// Release the supervisor death pipe: Attach closes the parent's read end
+		// and returns the cleanup that closes the write end. Always run the
+		// returned cleanup so a required validation command does not retain
+		// death-pipe FDs or linuxDeathPipes entries for the life of the server.
+		cleanup, aerr := con.Attach(cmd, pol)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if aerr != nil {
+			_ = con.KillTree(cmd)
+			_ = cmd.Wait()
+			err = aerr
+		} else {
+			err = cmd.Wait()
+		}
+	}
 	// Reconcile any descendant that escaped the process group (setsid) by its
 	// token, so a timeout/cancellation cannot leave an owned process behind.
 	if token != "" && cmd.Process != nil {

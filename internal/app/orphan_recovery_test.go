@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -58,6 +59,36 @@ func fileSize(p string) int {
 		return -1
 	}
 	return int(fi.Size())
+}
+
+// supervisorCmdlineMarker identifies a Wayshard PID-namespace supervisor, the
+// root of a sandboxed harness/tool tree.
+const supervisorCmdlineMarker = "__wayshard-sandbox-supervise"
+
+// isSupervisorProcess reports whether pid is currently a Wayshard sandbox
+// supervisor. This is a strong, host-observable identity: unlike a bare PID it
+// cannot be satisfied by an unrelated process that reused the number.
+func isSupervisorProcess(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(b, []byte(supervisorCmdlineMarker))
+}
+
+func waitSupervisorGone(t *testing.T, pid int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !isSupervisorProcess(pid) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("owned sandbox supervisor %d still alive after graceful shutdown", pid)
 }
 
 func orphanFixture(t *testing.T, root, fakeBin string) (fixtureEnv, []string) {
@@ -369,8 +400,26 @@ func TestProcessBoundaryGracefulShutdownReconciles(t *testing.T) {
 	conv := createConversation(t, psA, cred, proj)
 	runID := sendMessage(t, psA, cred, conv, "add agent.go")
 	waitFileRun(t, psA, cred, runID, fx.signalFile, 40*time.Second)
-	orphanPid := readPid(t, filepath.Join(runWorkspacePath(dataDir, runID), "orphan.pid"))
-	t.Cleanup(func() { _ = syscall.Kill(orphanPid, syscall.SIGKILL) })
+
+	// Capture the production-recorded host PID of the attempt's sandbox
+	// supervisor (the root of the harness tree). This is a real host PID, unlike
+	// the namespace PID written to orphan.pid.
+	supervisorPID := 0
+	withStore(t, dataDir, func(st *storage.Store) {
+		owners, _ := st.ListActiveProcessOwners(context.Background())
+		for _, o := range owners {
+			if o.PGID > 0 {
+				supervisorPID = o.PGID
+			}
+		}
+	})
+	if supervisorPID <= 0 {
+		t.Fatalf("no active process owner recorded a host supervisor PID before shutdown")
+	}
+	if !isSupervisorProcess(supervisorPID) {
+		t.Fatalf("recorded host PID %d is not an owned sandbox supervisor before shutdown", supervisorPID)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(supervisorPID, syscall.SIGKILL) })
 
 	if err := psA.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
@@ -382,7 +431,9 @@ func TestProcessBoundaryGracefulShutdownReconciles(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("server did not exit on SIGTERM")
 	}
-	waitProcGone(t, orphanPid, 10*time.Second)
+	// The owned supervisor (and therefore its whole PID-namespace tree) must be
+	// gone, asserted by strong host identity rather than a namespace-local PID.
+	waitSupervisorGone(t, supervisorPID, 10*time.Second)
 	withStore(t, dataDir, func(st *storage.Store) {
 		active, _ := st.ListActiveProcessOwners(context.Background())
 		if len(active) != 0 {
