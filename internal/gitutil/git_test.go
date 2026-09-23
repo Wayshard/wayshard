@@ -7,7 +7,32 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// waitStatus polls git status until ready is satisfied. Windows may need the
+// git index stat cache to notice freshly written files, so a single immediate
+// read can transiently report a clean tree.
+func waitStatus(t *testing.T, repo *Repo, ready func(map[string]StatusEntry) bool) map[string]StatusEntry {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last map[string]StatusEntry
+	for time.Now().Before(deadline) {
+		st, err := repo.Status(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		last = map[string]StatusEntry{}
+		for _, e := range st {
+			last[e.Path] = e
+		}
+		if ready(last) {
+			return last
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return last
+}
 
 func requireGit(t *testing.T) {
 	t.Helper()
@@ -109,14 +134,9 @@ func TestDiscoverHEADBranchStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err = repo.Status(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]StatusEntry{}
-	for _, e := range st {
-		found[e.Path] = e
-	}
+	found := waitStatus(t, repo, func(m map[string]StatusEntry) bool {
+		return m["README"].Unstaged() && m["new.txt"].Untracked()
+	})
 	if e, ok := found["README"]; !ok || !e.Unstaged() {
 		t.Fatalf("README status = %+v", e)
 	}
