@@ -5,20 +5,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
+	"github.com/Wayshard/wayshard/internal/testutil"
 )
 
 // TestCancellationInterruptsActiveHarness proves cancellation propagates to the
 // active harness process and yields a cancelled run instead of hanging.
 func TestCancellationInterruptsActiveHarness(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("process-tree cancellation semantics are verified on POSIX; Windows remains unverified")
-	}
+	// Cancellation propagates through an actually-running harness, so it needs a
+	// platform that can launch one under required isolation (Linux).
+	testutil.RequireNativeIsolation(t)
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "timeout")
