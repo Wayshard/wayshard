@@ -8,7 +8,9 @@
 //! (`credential_store`), and the Kotlin helper performs the Keystore operations
 //! (`android_keystore`).
 
+#[cfg(not(target_os = "android"))]
 const KEYRING_SERVICE: &str = "dev.wayshard.app";
+#[cfg(not(target_os = "android"))]
 const KEYRING_USER: &str = "device-credential";
 
 #[cfg(not(target_os = "android"))]
@@ -80,7 +82,7 @@ pub fn clear_credential(app: tauri::AppHandle) -> Result<(), String> {
         // Best-effort: drop the Keystore key too so key material does not
         // linger. Only done once the ciphertext is gone, so a failure here can
         // never strand undecryptable data.
-        let _ = crate::android_keystore::invoke("deleteKey", "");
+        let _ = crate::android_keystore::delete_key();
     }
     removed
 }

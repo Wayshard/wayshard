@@ -578,3 +578,26 @@ or external certificate/service).
 - **Docs.** Duplicate canonical section numbers were removed; `README.md` now
   documents Desktop/Android installation, signing/OS warnings, supported
   architectures, fail-closed platform limitations, and verification status.
+
+## rc.10 release-defect remediation
+
+The `v0.1.0-rc.10` release run failed on two packaging defects; both are fixed in
+a subsequent source revision (rc.10 is immutable failed history; a corrected
+release is cut separately).
+
+- **Android-target Rust gate.** `crate::android_keystore::invoke` was private but
+  called from `credentials.rs`, a cross-module call that only compiled on the
+  Android target. Host `cargo test`/`cargo check` cfg out the
+  `#[cfg(target_os = "android")]` command bodies, so the error escaped to the
+  release build. The delete-key call is now a narrow
+  `pub(crate) fn android_keystore::delete_key()`, and CI compiles the Android
+  target (`make android-check` → `cargo check --target aarch64-linux-android`) so
+  Android-only command bodies cannot escape host checks. Guarded by
+  `release_policy_test.sh`.
+- **AppImage `.DirIcon`.** The fix script scanned for the `hsqs` magic, which
+  matched a decoy inside the runtime (offset 36081) before the real SquashFS
+  superblock (193728), so `unsquashfs` failed. It now reads the payload offset
+  from the AppImage runtime's `--appimage-offset`, validates the numeric offset,
+  the file bounds, the SquashFS magic and extraction before repacking, and
+  preserves the runtime ELF byte-for-byte. `appimage_fix_diricon_test.sh` uses a
+  synthetic AppImage with a decoy `hsqs` before the real payload.

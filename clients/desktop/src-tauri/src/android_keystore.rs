@@ -66,9 +66,15 @@ fn invoke(op: &str, input: &str) -> Result<String, String> {
     Ok(out.to_string_lossy().into_owned())
 }
 
+/// delete_key removes the Android Keystore key (best effort). This is a narrow
+/// helper so the credential module never needs access to the generic JNI
+/// invoker.
+pub(crate) fn delete_key() -> Result<(), String> {
+    invoke("deleteKey", "").map(|_| ())
+}
+
 /// KeystoreCipher encrypts with the Android Keystore AES-256-GCM key.
 pub struct KeystoreCipher;
-
 impl CredentialCipher for KeystoreCipher {
     fn name(&self) -> &'static str {
         "android-keystore-aes-gcm"

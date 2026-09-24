@@ -72,6 +72,18 @@ jobs:
           UI_SMOKE_SHOTS: ${{ runner.temp }}/ui-smoke
 
 
+  tauri-android:
+    name: Tauri Android target check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Compile the Android-target Rust path
+        run: make android-check
+
+
   tui:
     name: Interactive TUI (shipped path)
     runs-on: ubuntu-latest

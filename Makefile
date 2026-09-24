@@ -76,6 +76,14 @@ build-cross:
 
 ci: fmt vet test build
 
+# Compile the Tauri Android-target Rust path. This type-checks the
+# #[cfg(target_os = "android")] command bodies that host cargo test/check cannot
+# see, so a cross-module or Android-only error fails in CI instead of at release.
+android-check:
+	mkdir -p clients/web/dist
+	[ -f clients/web/dist/index.html ] || printf '<!doctype html><title>Wayshard</title>' > clients/web/dist/index.html
+	cargo check --manifest-path clients/desktop/src-tauri/Cargo.toml --target aarch64-linux-android
+
 # Build everything for the host platform (Go server/CLI + interactive TUI).
 build-all: build build-tui
 

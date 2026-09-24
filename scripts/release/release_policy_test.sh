@@ -16,6 +16,10 @@ if grep -E 'TYPESAFE_API_KEY|WAYSHARD_VAULT' "$CI"; then
   fail "ci.yml must not reference runtime vault/Jev secrets"
 fi
 
+# The Android-target Rust path (#[cfg(target_os = "android")] command bodies)
+# must be compiled in CI so it cannot escape host cargo test/check.
+grep -q 'make android-check' "$CI" || fail "ci.yml must run the Android-target Rust check (make android-check)"
+
 grep -q 'environment: release' "$REL" || fail "release.yml must use environment: release"
 grep -q "github.repository == 'Wayshard/wayshard'" "$REL" || fail "official publish must be gated to Wayshard/wayshard"
 
