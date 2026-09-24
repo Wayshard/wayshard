@@ -106,11 +106,14 @@ android:
 release-scripts-test:
 	chmod +x scripts/release/*.sh scripts/release/*.py
 	python3 scripts/release/checksums.py --self-test
+	python3 scripts/release/android-keystore-verify.py --self-test
 	bash scripts/release/checksums_test.sh
 	bash scripts/release/android_patch_test.sh
 	bash scripts/release/android_keystore_patch_test.sh
+	bash scripts/release/android_keystore_verify_test.sh
 	bash scripts/release/android_jks_test.sh
 	bash scripts/release/android_version_properties_test.sh
+	bash scripts/release/desktop_macos_checksums_test.sh
 	bash scripts/release/package_go_test.sh
 	bash scripts/release/package_cli_tui_test.sh
 	bash scripts/release/windows_pfx_test.sh

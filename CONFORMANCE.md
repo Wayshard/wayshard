@@ -113,9 +113,9 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Desktop Linux | `.github/workflows/release.yml` job `desktop` | checksums + minisign; no paid Linux signing | done |
 | Desktop macOS ad-hoc sign (identity `-`, no Apple account) | `tauri.conf.json` `bundle.macOS.signingIdentity`, `APPLE_SIGNING_IDENTITY=-`, `scripts/release/macos-verify-adhoc.sh` | `release_policy_test.sh`; live `codesign` on macOS runners only; Gatekeeper warnings expected | done |
 | Desktop Windows self-signed Authenticode | `scripts/release/windows-sign.ps1`; secrets `WAYSHARD_WINDOWS_PFX_*` | `windows_pfx_test.sh`; live `signtool` on Windows runners only; SmartScreen/untrusted publisher expected | done |
-| Android Tauri APK, maintainer JKS, no Play | job `android`, `scripts/release/android-sign.sh` | `android_jks_test.sh`, `android_patch_test.sh`; APK verified; unsigned not published as signed | done |
+| Android Tauri APK, maintainer JKS, no Play | job `android`, `scripts/release/android-sign.sh`, `clients/desktop/android/WayshardKeystore.{kt,pro}` | `android_jks_test.sh`, `android_patch_test.sh`, `android_keystore_patch_test.sh`, `android_keystore_verify_test.sh` (real R8); APK verified; unsigned not published as signed | done |
 | Minisign on combined SHA256SUMS.txt | `scripts/release/minisign-sign.sh`; secrets `WAYSHARD_RELEASE_MINISIGN_*`; public key `keys/wayshard-release.minisign.pub` | `minisign_test.sh`; checksums job verifies before upload | done |
-| Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`android`/`checksums` | `make release-scripts-test` (overlapping globs cannot duplicate server rows) | done |
+| Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`desktop-macos-checksums`/`android`/`checksums` | `make release-scripts-test` (overlapping globs cannot duplicate server rows); `desktop_macos_checksums_test.sh` proves both macOS DMGs appear exactly once, order-independent | done |
 | CycloneDX SBOM (not `go version -m`) | `scripts/release/sbom.sh` | fails the release job on generator/validation error | done |
 | Frozen client lockfile on release (and PR client install) | `bun install --frozen-lockfile` in `ci.yml` + `release.yml` | lockfile `clients/bun.lock` | done |
 | Release credentials isolated | `environment: release` on publish jobs; `ci.yml` has no `secrets.*` | `release_policy_test.sh`; PR CI remains secret-free | done |
@@ -601,3 +601,38 @@ release is cut separately).
   the file bounds, the SquashFS magic and extraction before repacking, and
   preserves the runtime ELF byte-for-byte. `appimage_fix_diricon_test.sh` uses a
   synthetic AppImage with a decoy `hsqs` before the real payload.
+
+## rc.11 release-defect remediation (cut as rc.12)
+
+The `v0.1.0-rc.11` release was blocked by two defects. Both are fixed here;
+rc.11 is immutable history and the corrected release is cut separately as
+rc.12. Neither changes product behavior or the signing policy.
+
+- **Android R8 stripped the Keystore helper.** Tauri 2.5.0's generated release
+  build type enables `isMinifyEnabled = true` and collects every `**/*.pro`
+  under the app module. `dev.wayshard.app.WayshardKeystore` is reached only from
+  Rust over JNI (`find_class` + `call_static_method`), so R8 saw no Java/Kotlin
+  reference and tree-shook the class (and would rename its
+  `encrypt`/`decrypt`/`deleteKey` methods) out of the minified APK, breaking
+  credential storage on Android. The fix adds
+  `clients/desktop/android/WayshardKeystore.pro` (installed with the package
+  substituted by `android-keystore-patch.sh`) with
+  `-keep class <pkg>.WayshardKeystore { *; }`. A release-artifact gate,
+  `scripts/release/android-keystore-verify.py`, parses the built APK's
+  `classes*.dex` (class defs plus defined static methods) and fails closed if the
+  class or any required method is absent; it runs on the signed APK in the
+  `android` release job. Coverage: the verifier's synthetic-DEX self-test, the
+  real-R8 keep/strip test in `android_keystore_verify_test.sh` (mandatory in the
+  new `android-keystore-r8` CI job via `WAYSHARD_REQUIRE_R8=1`), the minified
+  gradle fixture in `android_patch_test.sh`, and `release_policy_test.sh`.
+- **macOS per-component checksum race.** The `desktop` matrix builds Apple
+  silicon (`aarch64`) and Intel (`x86_64`) macOS on separate runners, both
+  writing/uploading `SHA256SUMS-desktop-macos.txt`; whichever leg uploaded last
+  won, so the published file could list only one architecture. The macOS legs no
+  longer generate a per-component checksum; a single `desktop-macos-checksums`
+  job runs after the whole matrix, downloads both DMGs, and writes
+  `SHA256SUMS-desktop-macos.txt` with exactly one `aarch64` and one `x86_64` row
+  (`scripts/release/desktop-macos-checksums.sh`, which fails closed on a missing,
+  duplicated, or unexpected architecture). The combined `checksums` job now
+  waits for it. Covered by `desktop_macos_checksums_test.sh` and
+  `release_policy_test.sh`.

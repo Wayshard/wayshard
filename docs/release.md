@@ -31,6 +31,29 @@ There is no Tauri auto-updater (not required by the canonicals).
 | Desktop Windows | `wayshard-desktop-<tag>-windows-x64.msi` and `-setup.exe` | **Self-signed Authenticode** from maintainer PFX |
 | Android APK | `wayshard-<tag>-android.apk` | **JKS/PKCS12** upload key, verified before publish |
 | Checksums | `SHA256SUMS.txt` + `SHA256SUMS.txt.minisig` | SHA-256 plus minisign |
+| Per-component checksums | `SHA256SUMS-go.txt`, `SHA256SUMS-desktop-linux.txt`, `SHA256SUMS-desktop-macos.txt`, `SHA256SUMS-desktop-windows.txt`, `SHA256SUMS-android.txt` | SHA-256 only |
+
+### Per-component checksums
+
+Each release family also publishes its own SHA-256 manifest. Because the two
+macOS desktop DMGs are built on separate matrix runners, they must **not** each
+write `SHA256SUMS-desktop-macos.txt` (that raced on the shared asset name and
+could publish only one architecture). A single `desktop-macos-checksums` job
+runs after the whole desktop matrix, downloads both DMGs, and writes
+`SHA256SUMS-desktop-macos.txt` with exactly one `aarch64` and one `x86_64` row
+(`scripts/release/desktop-macos-checksums.sh`). The combined `checksums` job
+waits for it. The Linux and Windows desktop legs are single-runner, so they
+generate their own manifest in-matrix.
+
+### Android Keystore R8 gate
+
+`dev.wayshard.app.WayshardKeystore` is called only from Rust over JNI, so the
+minified release build (Tauri enables `isMinifyEnabled = true`) would strip or
+rename it without keep rules. `clients/desktop/android/WayshardKeystore.pro`
+is installed by `android-keystore-patch.sh`, and the `android` job runs
+`scripts/release/android-keystore-verify.py` against the signed APK's
+`classes*.dex`, failing the release if the class or its
+`encrypt`/`decrypt`/`deleteKey` methods are absent.
 
 ### CLI+TUI bundle layout
 
@@ -74,7 +97,7 @@ raw `wayshard` binary alone is not a functional interactive client.
 
 Exact name: **`release`**.
 
-Jobs: `release`, `tui`, `desktop`, `android`, `checksums` in `.github/workflows/release.yml`.
+Jobs: `release`, `tui`, `desktop`, `desktop-macos-checksums`, `android`, `checksums` in `.github/workflows/release.yml`.
 
 Recommended: required reviewers; restrict to tags `v*`.
 
@@ -266,17 +289,21 @@ tar -xzf wayshard-vX-linux-amd64.tar.gz -C wayshard
 ```
 
 `SHA256SUMS.txt` covers every published asset, including each CLI+TUI bundle.
-The combined checksums job runs only after `release`, `tui`, `desktop`, and
-`android` finish, and it fails if any expected bundle is missing before the
-manifest is minisigned.
+The combined checksums job runs only after `release`, `tui`, `desktop`,
+`desktop-macos-checksums`, and `android` finish, and it fails if any expected
+bundle is missing before the manifest is minisigned.
 
-macOS: `codesign -dv --verbose=4 Wayshard.app` should mention `adhoc`.
+macOS: `codesign -dv --verbose=4 Wayshard.app` should mention `adhoc`. Verify
+that `SHA256SUMS-desktop-macos.txt` lists both `-macos-aarch64.dmg` and
+`-macos-x86_64.dmg` exactly once.
 
 Windows: `Get-AuthenticodeSignature .\installer.msi` should show a signer
 certificate (Status often `UnknownError`/`NotTrusted` for self-signed, never
 `NotSigned`).
 
-Android: `apksigner verify --verbose wayshard-vX.Y.Z-android.apk`.
+Android: `apksigner verify --verbose wayshard-vX.Y.Z-android.apk`. The release
+job also runs `scripts/release/android-keystore-verify.py` on the APK, which
+fails if R8 stripped the JNI-invoked `WayshardKeystore` helper.
 
 ## 8. Still external / manual
 

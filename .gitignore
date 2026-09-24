@@ -59,6 +59,8 @@ local.properties
 
 # Tooling
 .codegraph/
+__pycache__/
+*.pyc
 
 # IDE
 .idea/

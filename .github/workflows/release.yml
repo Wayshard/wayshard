@@ -238,7 +238,8 @@ jobs:
         if: always() && matrix.target == 'windows'
         shell: bash
         run: bash scripts/release/windows-cleanup.sh
-      - name: Checksums (desktop)
+      - name: Checksums (desktop, single-runner targets)
+        if: matrix.target != 'macos'
         shell: bash
         run: |
           if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
@@ -249,6 +250,38 @@ jobs:
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.IS_PRERELEASE == 'false' }}
           files: dist/desktop/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  desktop-macos-checksums:
+    # Both macOS DMGs are built on separate matrix runners. Generating the
+    # per-component SHA256SUMS-desktop-macos.txt inside the matrix made the two
+    # runners race to upload the same asset name, so the published file could
+    # list only one architecture. This runs once, after the whole matrix, and
+    # writes both aarch64 and x86_64 rows exactly once.
+    name: Desktop macOS checksums (both architectures)
+    needs: desktop
+    if: github.repository == 'Wayshard/wayshard'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download macOS desktop installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p desktop-macos
+          gh release download "${GITHUB_REF_NAME}" \
+            -p "wayshard-desktop-${GITHUB_REF_NAME}-macos-*.dmg" -D desktop-macos
+      - name: Generate per-component macOS checksums
+        run: |
+          bash scripts/release/desktop-macos-checksums.sh \
+            "${GITHUB_REF_NAME}" desktop-macos SHA256SUMS-desktop-macos.txt
+      - name: Upload macOS checksums
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ env.IS_PRERELEASE }}
+          make_latest: ${{ env.IS_PRERELEASE == 'false' }}
+          files: SHA256SUMS-desktop-macos.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -316,7 +349,12 @@ jobs:
           mkdir -p dist/android
           bash scripts/release/package-android.sh "${GITHUB_REF_NAME}" \
             clients/desktop/src-tauri/gen/android dist/android
-          python3 scripts/release/checksums.py --out dist/android/SHA256SUMS-android.txt dist/android/*
+      - name: Verify Keystore helper survived R8 in the signed APK
+        run: |
+          python3 scripts/release/android-keystore-verify.py \
+            "dist/android/wayshard-${GITHUB_REF_NAME}-android.apk"
+      - name: Checksums (Android)
+        run: python3 scripts/release/checksums.py --out dist/android/SHA256SUMS-android.txt dist/android/*
       - name: Remove signing material
         if: always()
         run: bash scripts/release/android-cleanup.sh
@@ -331,7 +369,7 @@ jobs:
 
   checksums:
     name: Combined SHA256SUMS
-    needs: [release, tui, desktop, android]
+    needs: [release, tui, desktop, desktop-macos-checksums, android]
     if: github.repository == 'Wayshard/wayshard'
     environment: release
     runs-on: ubuntu-latest

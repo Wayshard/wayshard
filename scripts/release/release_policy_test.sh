@@ -107,7 +107,7 @@ if raw.startswith("["):
     deps = {d.strip() for d in raw.strip("[]").split(",") if d.strip()}
 else:
     deps = set(re.findall(r"^\s+-\s+(\S+)", checksums[m.end():], re.M))
-required = {"release", "tui", "desktop", "android"}
+required = {"release", "tui", "desktop", "desktop-macos-checksums", "android"}
 missing = required - deps
 if missing:
     raise SystemExit(
@@ -176,16 +176,35 @@ import sys
 
 text = open(sys.argv[1], encoding="utf-8").read()
 
-m = re.search(r"^  desktop:\s*$", text, re.M)
-if not m:
-    raise SystemExit("release.yml is missing the desktop job")
-rest = text[m.end():]
-end = re.search(r"^  [A-Za-z0-9_-]+:\s*$", rest, re.M)
-block = rest[: end.start()] if end else rest
+
+def job_block(name):
+    m = re.search(rf"^  {re.escape(name)}:\s*$", text, re.M)
+    if not m:
+        raise SystemExit(f"release.yml is missing job {name!r}")
+    rest = text[m.end():]
+    end = re.search(r"^  [A-Za-z0-9_-]+:\s*$", rest, re.M)
+    return rest[: end.start()] if end else rest
+
+
+block = job_block("desktop")
 if "macos-15-intel" not in block:
     raise SystemExit("desktop matrix must build Intel macOS (macos-15-intel)")
 if block.count("target: macos") < 2:
     raise SystemExit("desktop matrix must build both macOS architectures")
+# Both macOS legs share the `macos` target, so a per-leg
+# SHA256SUMS-desktop-macos.txt would race on the same release asset name.
+if "SHA256SUMS-desktop-macos.txt" in block:
+    raise SystemExit(
+        "desktop matrix must not generate SHA256SUMS-desktop-macos.txt (upload race)"
+    )
+
+mac_block = job_block("desktop-macos-checksums")
+if "desktop-macos-checksums.sh" not in mac_block:
+    raise SystemExit("desktop-macos-checksums job must use desktop-macos-checksums.sh")
+if "macos-*.dmg" not in mac_block:
+    raise SystemExit("desktop-macos-checksums job must download both macOS DMGs")
+if "SHA256SUMS-desktop-macos.txt" not in mac_block:
+    raise SystemExit("desktop-macos-checksums job must write SHA256SUMS-desktop-macos.txt")
 
 if "rm -rf internal/webembed/dist" in text:
     raise SystemExit(
@@ -197,15 +216,31 @@ if ".gitkeep" not in text:
 if "appimage-fix-diricon.sh" not in text:
     raise SystemExit("release.yml must fix the AppImage .DirIcon before packaging")
 
-m = re.search(r"^  android:\s*$", text, re.M)
-if not m:
-    raise SystemExit("release.yml is missing the android job")
-rest = text[m.end():]
-end = re.search(r"^  [A-Za-z0-9_-]+:\s*$", rest, re.M)
-android_block = rest[: end.start()] if end else rest
+android_block = job_block("android")
 if "android-keystore-patch.sh" not in android_block:
     raise SystemExit("android job must install the Android Keystore credential helper")
+if "android-keystore-verify.py" not in android_block:
+    raise SystemExit("android job must verify the Keystore helper survived R8 in the APK")
 print("desktop coverage, clean Go stamp, AppImage icon fix, Android keystore ok")
 PY
+
+# --- Android Keystore R8 keep rules and release-artifact gate -----------------
+test -s "$ROOT/clients/desktop/android/WayshardKeystore.pro" \
+  || fail "missing the R8/ProGuard keep-rule template WayshardKeystore.pro"
+test -s "$ROOT/scripts/release/android-keystore-verify.py" \
+  || fail "missing scripts/release/android-keystore-verify.py"
+grep -q 'WayshardKeystore.pro' "$ROOT/scripts/release/android-keystore-patch.sh" \
+  || fail "android-keystore-patch.sh must install the keep rules"
+grep -q 'android-keystore-verify.py' "$REL" \
+  || fail "release.yml must run the Android Keystore DEX verifier"
+grep -q 'android-keystore-verify.py' "$ROOT/Makefile" \
+  || fail "Makefile release-scripts-test must run the Android Keystore DEX verifier"
+grep -q 'desktop_macos_checksums_test.sh' "$ROOT/Makefile" \
+  || fail "Makefile release-scripts-test must run the macOS checksum test"
+# The keep rule must retain the exact JNI class and all members.
+grep -q -- '-keep class __PACKAGE__.WayshardKeystore { \*; }' \
+  "$ROOT/clients/desktop/android/WayshardKeystore.pro" \
+  || fail "keep rules must retain the Keystore class and all JNI-invoked members"
+echo "android keystore R8 keep rules + DEX gate ok"
 
 echo "release policy test ok"
