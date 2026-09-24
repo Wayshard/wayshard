@@ -121,7 +121,7 @@ func TestDiscoverHEADBranchStatus(t *testing.T) {
 		t.Fatalf("clean status = %+v", st)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("dirty\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("dirty content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("u\n"), 0o644); err != nil {
@@ -167,7 +167,7 @@ func TestDiscoverHEADBranchStatus(t *testing.T) {
 		t.Fatalf("capture mutated source status\nbefore=%q\nafter=%q", before, after)
 	}
 	got, _ := os.ReadFile(filepath.Join(dir, "README"))
-	if string(got) != "dirty\n" {
+	if string(got) != "dirty content\n" {
 		t.Fatalf("source README mutated: %q", got)
 	}
 }
