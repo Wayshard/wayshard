@@ -269,6 +269,10 @@ Expected release families:
 
 The Web client ships inside Wayshard Server.
 
+## Application icon source
+
+[`wayshard.png`](./wayshard.png) is the canonical transparent Wayshard application mark. The checked-in Web and desktop icons are derived from it, and Android launcher/adaptive icons are generated from the same source during release initialization. [`docs/assets/wayshard-app-icon-example.png`](./docs/assets/wayshard-app-icon-example.png) shows the mark on the deep background used for opaque and maskable platform variants.
+
 ## Canonical documentation
 
 Before implementation work, read the canonical documents:

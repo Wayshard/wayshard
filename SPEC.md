@@ -512,6 +512,12 @@ Web ships inside Server rather than as a separate ordinary download.
 
 Third-party coding harnesses and ACP bridges are never bundled or installed by Wayshard releases.
 
+### 26.1 Application icons
+
+The repository-root `wayshard.png` is the canonical raster source for Wayshard application icons. Web/PWA, Linux, macOS, Windows, and Android releases use derivatives of that same mark at their required sizes and formats. Derivation may add an opaque Wayshard background or safe-area scaling where a platform requires an opaque or maskable icon, but must not redraw, recolor, or replace the mark.
+
+Desktop bundle configuration references committed PNG, ICNS, and ICO derivatives. The Web build publishes favicon, Apple touch, and installable Web-app icon derivatives plus a Web manifest. Because the generated Android project is created during release CI, its launcher and adaptive-icon resources are regenerated from the canonical source immediately after `tauri android init` and before the signed APK build.
+
 ## 27. Client implementation foundation (Pass 1E)
 
 The Web, Desktop and Android clients are one shared graphical application adapted

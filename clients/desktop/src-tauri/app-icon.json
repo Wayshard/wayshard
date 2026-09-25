@@ -1,0 +1,7 @@
+{
+  "default": "../../../wayshard.png",
+  "bg_color": "#0e0f12",
+  "android_fg": "../../../wayshard.png",
+  "android_fg_scale": 64,
+  "android_monochrome": "../../../wayshard.png"
+}

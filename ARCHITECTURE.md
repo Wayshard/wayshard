@@ -781,3 +781,15 @@ a separate terminal-appropriate client built from the imported OpenCode terminal
 foundation. All clients speak only Wayshard domain HTTP/JSON and WebSocket APIs;
 none speaks ACP or OpenCode. Live updates use the durable event stream (`/v1/ws`)
 with reconnect and polling only as a narrow fallback.
+
+Application-icon assets have one repository-owned source of truth:
+`wayshard.png` at the repository root. Committed desktop derivatives live in
+`clients/desktop/src-tauri/icons` and are selected by `tauri.conf.json` for
+Linux PNG, macOS ICNS, and Windows ICO packaging. Web favicon, Apple touch, and
+PWA `any`/`maskable` derivatives live in `clients/web/public`; Vite copies that
+directory into the embedded Web distribution and `site.webmanifest` declares
+the installable icons. Android is initialized into an ephemeral
+`src-tauri/gen/android` tree during release CI, so the workflow runs Tauri's icon
+generator with `src-tauri/app-icon.json` immediately after initialization. That
+manifest binds launcher, adaptive foreground, monochrome mask, deep-background
+color, and safe-area scale to the same canonical mark before APK compilation.

@@ -475,6 +475,10 @@ wayshard.dev
 github.com/Wayshard
 ```
 
+The crossed-path mark in the repository-root `wayshard.png` is the canonical application icon artwork. Preserve its geometry, white/black treatment, cyan endpoint, and transparency. Use the same mark for browser favicons, installable Web icons, Linux, macOS, Windows, and Android rather than inventing platform-specific logos.
+
+Platform presentation may adapt the container without altering the mark: transparent desktop and browser icons are preferred where supported, while Apple touch and Android maskable/adaptive icons may place the mark on the Wayshard deep background (`#0e0f12`) and scale it into the platform safe area. Small raster sizes should be high-quality downscales of the canonical source.
+
 ## 24. Design guardrails
 
 - Keep the main coding/session experience simple even though the backend is sophisticated.
