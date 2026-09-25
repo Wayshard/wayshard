@@ -376,7 +376,7 @@ func probeOne(ctx context.Context, inst *Installation, def Definition, timeout t
 // harnesses run normally as the server OS user, so the environment is inherited.
 func probeEnv(exePath string) []string {
 	extra := map[string]string{}
-	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_INIT_CANARY", "WAYSHARD_FAKE_PROBE_DAEMON", "WAYSHARD_FAKE_PROBE_DAEMON_HANG"} {
+	for _, k := range []string{"WAYSHARD_FAKE_SCENARIO", "WAYSHARD_FAKE_HANG_VERSION", "WAYSHARD_FAKE_HANG_INITIALIZE"} {
 		if v := os.Getenv(k); v != "" {
 			extra[k] = v
 		}

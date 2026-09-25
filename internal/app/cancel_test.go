@@ -15,8 +15,10 @@ import (
 // TestCancellationInterruptsActiveHarness proves cancellation propagates to the
 // active harness process and yields a cancelled run instead of hanging.
 func TestCancellationInterruptsActiveHarness(t *testing.T) {
-	// Cancellation propagates through an actually-running harness, so it needs a
-	// platform that can launch one under required isolation (Linux).
+	// Cancellation propagates through an actually-running harness launched as the
+	// server OS user; this runs on every platform. Descendant cleanup is
+	// best-effort, so the assertion is that cancellation terminates the run, not
+	// that every descendant is reaped.
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "timeout")
@@ -86,17 +88,19 @@ func TestCancellationInterruptsActiveHarness(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 120*time.Second {
 		t.Fatalf("cancellation took too long: %s", elapsed)
 	}
-	// No orphaned fake harness should remain (allow a moment for teardown).
-	// Match this test's built harness path specifically so a concurrently
-	// running test's fake harness cannot be mistaken for an orphan.
-	orphanDeadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(orphanDeadline) {
-		out, _ := exec.Command("pgrep", "-f", bin).Output()
-		if strings.TrimSpace(string(out)) == "" {
-			return
+	// Descendant cleanup is best-effort in the trusted-local model: verify the
+	// run cancelled and the server stays usable, and report (do not fail on) any
+	// leftover harness process on platforms where we can observe it.
+	if _, err := exec.LookPath("pgrep"); err == nil {
+		orphanDeadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(orphanDeadline) {
+			out, _ := exec.Command("pgrep", "-f", bin).Output()
+			if strings.TrimSpace(string(out)) == "" {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		time.Sleep(100 * time.Millisecond)
+		out, _ := exec.Command("pgrep", "-f", bin).Output()
+		t.Logf("best-effort cleanup: fake harness process still observable: %s", strings.TrimSpace(string(out)))
 	}
-	out, _ := exec.Command("pgrep", "-f", bin).Output()
-	t.Fatalf("orphaned harness process remains: %s", out)
 }

@@ -23,7 +23,14 @@ import (
 const jsonrpc = "2.0"
 
 func main() {
-	maybeSpawnProbeDaemon()
+	recordProcessLaunch()
+	// Deterministic timeout fixture: never answer the version probe so a caller's
+	// probe timeout is exercised. The caller bounds (and ultimately kills) it.
+	if os.Getenv("WAYSHARD_FAKE_HANG_VERSION") == "1" {
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	for _, a := range os.Args[1:] {
 		if a == "--version" || a == "-version" || a == "-v" {
 			fmt.Println("wayshard-fake-acp 0.0.0-dev")
@@ -187,19 +194,15 @@ func (a *agent) onInitialize(req request) {
 		a.writeRaw([]byte("this is not json-rpc\n"))
 		return
 	}
+	// Deterministic timeout fixture: never answer initialize so a caller's
+	// handshake/probe timeout is exercised. The caller bounds (and kills) it.
+	if os.Getenv("WAYSHARD_FAKE_HANG_INITIALIZE") == "1" {
+		time.Sleep(24 * time.Hour)
+		return
+	}
 	auth := []any{}
 	if a.scenario == "auth_required" {
 		auth = []any{map[string]any{"id": "fake", "name": "Fake auth"}}
-	}
-	// Test hook: if an initialize canary is configured, report whether it was
-	// readable. A confined ACP initialize probe must not be able to read it.
-	version := "0.0.0-dev"
-	if p := os.Getenv("WAYSHARD_FAKE_INIT_CANARY"); p != "" {
-		if b, err := os.ReadFile(p); err == nil {
-			version = "LEAK:" + strings.TrimSpace(string(b))
-		} else {
-			version = "confined"
-		}
 	}
 	a.initDone = true
 	a.reply(req, map[string]any{
@@ -212,7 +215,7 @@ func (a *agent) onInitialize(req request) {
 		"agentInfo": map[string]any{
 			"name":    "wayshard-fake-acp",
 			"title":   "Wayshard Fake ACP",
-			"version": version,
+			"version": "0.0.0-dev",
 		},
 		"authMethods": auth,
 	})
@@ -589,6 +592,39 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// recordProcessLaunch is a test fixture: when WAYSHARD_FAKE_RECORD names a file,
+// the fake appends one JSON line describing its working directory, argv and the
+// environment values named by WAYSHARD_FAKE_RECORD_KEYS. Native tests use it to
+// verify exactly what Wayshard passed to a launched process — working directory,
+// argument quoting, and inherited environment — on every platform.
+func recordProcessLaunch() {
+	path := os.Getenv("WAYSHARD_FAKE_RECORD")
+	if path == "" {
+		return
+	}
+	cwd, _ := os.Getwd()
+	payload := map[string]any{"cwd": cwd, "args": os.Args[1:]}
+	if keys := os.Getenv("WAYSHARD_FAKE_RECORD_KEYS"); keys != "" {
+		env := map[string]string{}
+		for _, k := range strings.Split(keys, ",") {
+			if k != "" {
+				env[k] = os.Getenv(k)
+			}
+		}
+		payload["env"] = env
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(b, '\n'))
+	_ = f.Close()
 }
 
 func artifactJSON(stage string, ok bool) string {

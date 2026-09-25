@@ -31,6 +31,25 @@ jobs:
           go build -o wayshard ./cmd/wayshard
           go build -o wayshard-fake-acp ./cmd/wayshard-fake-acp
 
+  native-execution:
+    name: Native execution (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build the deterministic fake ACP harness
+        run: go build -o wayshard-fake-acp ./cmd/wayshard-fake-acp
+      - name: Harness discovery, PATH resolution, ACP transport, probe timeout (native)
+        run: go test ./internal/harness/ ./internal/acp/ -run 'TestNative|TestDiscoverAdvertisedAuthIsUnknownAndRoutable|TestDriverTimeout|TestDriverIgnoreCancel' -count=1 -v -timeout 10m
+      - name: Full product path, routing, cancellation (native)
+        run: go test ./internal/app/ -run 'TestNative|TestSourceChangingOrchestrationThroughIntegrate|TestOrchestratorIntegrationConflictBlocks|TestCancellationInterruptsActiveHarness|TestFakeACPIntakeToCompleteArtifactOnly' -count=1 -v -timeout 25m
+
   clients:
     name: Clients
     runs-on: ubuntu-latest

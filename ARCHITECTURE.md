@@ -660,7 +660,7 @@ Desktop may manage the local user-level server installation but does not couple 
 
 GitHub Actions is the authoritative official CI/CD path.
 
-Normal CI covers server/storage/routing/context/workspace/fake-ACP/client/build behavior without requiring external harness installations or production credentials.
+Normal CI covers server/storage/routing/context/workspace/fake-ACP/client/build behavior without requiring external harness installations or production credentials. A dedicated `native-execution` job runs the deterministic fake harness through discovery, ACP initialize, the full PLAN/EXECUTE/VALIDATE/REVIEW/INTEGRATE/COMPLETE path, routing, cancellation, and probe/handshake timeouts on Linux, macOS, and Windows.
 
 The fake ACP harness simulates deterministic success, permissions, crashes, malformed protocol, ignored cancellation, invalid artifact output, provider/config errors, and recovery flows.
 
