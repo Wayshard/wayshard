@@ -3,6 +3,10 @@
 
 GO        ?= go
 GOFLAGS   ?=
+# Release binaries are CGO-free so Linux artifacts are statically linked and run
+# on any distro (musl/Alpine, minimal containers) without glibc coupling. The
+# server uses the pure-Go modernc.org/sqlite, so nothing requires cgo.
+GOBUILD   := CGO_ENABLED=0 $(GO) build
 BINDIR    ?= bin
 HOSTOS    ?= $(shell $(GO) env GOOS)
 HOSTARCH  ?= $(shell $(GO) env GOARCH)
@@ -38,11 +42,11 @@ build: build-server build-cli build-fake-acp
 
 build-server:
 	mkdir -p $(BINDIR)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server$(EXE) ./cmd/wayshard-server
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server$(EXE) ./cmd/wayshard-server
 
 build-cli:
 	mkdir -p $(BINDIR)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard$(EXE) ./cmd/wayshard
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard$(EXE) ./cmd/wayshard
 
 # Build the interactive companion under its canonical runtime name so that
 # bin/wayshard finds bin/wayshard-tui directly (no rename, no override).
@@ -57,22 +61,22 @@ build-tui-versioned: build-tui
 
 build-fake-acp:
 	mkdir -p $(BINDIR)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-fake-acp$(EXE) ./cmd/wayshard-fake-acp
+	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-fake-acp$(EXE) ./cmd/wayshard-fake-acp
 
 # Cross-compilation of Go binaries (CGO-free). Desktop/Android packaging is CI-only.
 # Artifact names used for GitHub Releases are applied by scripts/release/package-go.sh.
 build-cross:
 	mkdir -p $(BINDIR)
-	GOOS=linux   GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-linux-amd64 ./cmd/wayshard-server
-	GOOS=linux   GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-linux-arm64 ./cmd/wayshard-server
-	GOOS=darwin  GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-darwin-amd64 ./cmd/wayshard-server
-	GOOS=darwin  GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-darwin-arm64 ./cmd/wayshard-server
-	GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-windows-amd64.exe ./cmd/wayshard-server
-	GOOS=linux   GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-linux-amd64 ./cmd/wayshard
-	GOOS=linux   GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-linux-arm64 ./cmd/wayshard
-	GOOS=darwin  GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-darwin-amd64 ./cmd/wayshard
-	GOOS=darwin  GOARCH=arm64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-darwin-arm64 ./cmd/wayshard
-	GOOS=windows GOARCH=amd64 $(GO) build -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-windows-amd64.exe ./cmd/wayshard
+	GOOS=linux   GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-linux-amd64 ./cmd/wayshard-server
+	GOOS=linux   GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-linux-arm64 ./cmd/wayshard-server
+	GOOS=darwin  GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-darwin-amd64 ./cmd/wayshard-server
+	GOOS=darwin  GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-darwin-arm64 ./cmd/wayshard-server
+	GOOS=windows GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-server-windows-amd64.exe ./cmd/wayshard-server
+	GOOS=linux   GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-linux-amd64 ./cmd/wayshard
+	GOOS=linux   GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-linux-arm64 ./cmd/wayshard
+	GOOS=darwin  GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-darwin-amd64 ./cmd/wayshard
+	GOOS=darwin  GOARCH=arm64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-darwin-arm64 ./cmd/wayshard
+	GOOS=windows GOARCH=amd64 $(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard-windows-amd64.exe ./cmd/wayshard
 
 ci: fmt vet test build
 
@@ -115,6 +119,7 @@ release-scripts-test:
 	bash scripts/release/android_version_properties_test.sh
 	bash scripts/release/icon_policy_test.sh
 	bash scripts/release/windows_installer_icon_test.sh
+	bash scripts/release/linux_static_test.sh
 	bash scripts/release/desktop_macos_checksums_test.sh
 	bash scripts/release/package_go_test.sh
 	bash scripts/release/package_cli_tui_test.sh

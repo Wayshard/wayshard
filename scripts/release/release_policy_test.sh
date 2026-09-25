@@ -47,7 +47,11 @@ grep -q 'prerelease:' "$REL" || fail "release.yml must classify prerelease tags"
 test -s "$ROOT/clients/desktop/src-tauri/icons/icon.png" || fail "missing Tauri icon.png"
 test -s "$ROOT/clients/desktop/src-tauri/icons/icon.ico" || fail "missing Tauri icon.ico"
 test -s "$ROOT/clients/desktop/src-tauri/icons/icon.icns" || fail "missing Tauri icon.icns"
-grep -q 'packages: platform-tools' "$REL" || fail "android job must not install obsolete sdkmanager tools package"
+grep -q 'platforms;android-36' "$REL" || fail "android job must install the compile SDK (platforms;android-36)"
+grep -q 'build-tools;36.0.0' "$REL" || fail "android job must install build-tools;36.0.0"
+if grep -qE 'packages:.*[^-]tools( |$)' "$REL"; then
+  fail "android job must not install the obsolete sdkmanager tools package"
+fi
 grep -q 'github.ref_name' "$REL" || fail "tag version scripts must use github.ref_name, not PowerShell \${GITHUB_REF_NAME}"
 grep -q "contains(github.ref_name, '-rc.')" "$REL" || fail "release.yml must treat -rc. tags as prereleases"
 grep -q 'make_latest:' "$REL" || fail "release.yml must not promote prereleases to latest"
@@ -293,5 +297,14 @@ grep -q 'wayshard-desktop-${GITHUB_REF_NAME}-windows-x64-setup.exe' "$REL" \
 grep -q 'windows_installer_icon_test.sh' "$ROOT/Makefile" \
   || fail "Makefile release-scripts-test must run the Windows installer icon test"
 echo "windows installer branding ok"
+
+# --- Pre-stable cleanup guards ------------------------------------------------
+test -s "$ROOT/clients/web/public/social-share.png" \
+  || fail "missing the Web social card clients/web/public/social-share.png"
+test ! -e "$ROOT/clients/ui/src/assets/favicon" \
+  || fail "dead duplicate favicon assets must not return (clients/ui/src/assets/favicon)"
+test ! -e "$ROOT/clients/ui/src/assets/images" \
+  || fail "dead OpenCode-branded social assets must not return (clients/ui/src/assets/images)"
+echo "pre-stable cleanup guards ok"
 
 echo "release policy test ok"

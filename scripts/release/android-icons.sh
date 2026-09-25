@@ -8,15 +8,11 @@
 # monochrome themed icon and background resources from the canonical branding
 # art in `assets/branding`.
 #
-# Tauri's icon manifest landed in tauri-cli 2.9.0, while this project pins
-# tauri-cli 2.5.0 for its mobile build template. Only this icon step runs the
-# pinned, manifest-capable generator; the build template and toolchain are
-# unchanged. Bump `WAYSHARD_ICON_CLI_VERSION` deliberately, together with
-# app-icon.json, when the pinned build CLI is upgraded.
+# The repo-pinned tauri-cli supports icon manifests (>= 2.9.0), so this uses the
+# same aligned CLI as the rest of the desktop/mobile build.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ICON_CLI_VERSION="${WAYSHARD_ICON_CLI_VERSION:-2.11.5}"
 DESKTOP="$ROOT/clients/desktop"
 MANIFEST="$DESKTOP/src-tauri/app-icon.json"
 
@@ -25,7 +21,7 @@ MANIFEST="$DESKTOP/src-tauri/app-icon.json"
   || { echo "missing generated Android project; run: bunx tauri android init --ci" >&2; exit 1; }
 
 cd "$DESKTOP"
-bunx "@tauri-apps/cli@${ICON_CLI_VERSION}" icon src-tauri/app-icon.json
+bunx tauri icon src-tauri/app-icon.json
 
 # The generator must have produced the adaptive icon resources, not just legacy
 # launcher PNGs.

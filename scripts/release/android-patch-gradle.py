@@ -28,9 +28,11 @@ SIGNING_BLOCK = '''
             storePassword = keystoreProperties.getProperty("storePassword")
                 ?: keystoreProperties.getProperty("password")
                 ?: error("storePassword/password missing from keystore.properties")
-            // Sign with APK Signature Scheme v2 and v3 (v3 supports key
-            // rotation). v1 (JAR) is retained for maximum compatibility.
-            enableV1Signing = true
+            // APK Signature Scheme v2 + v3 (v3 supports key rotation). The
+            // app's minSdk is 26, so the legacy v1/JAR scheme is never used:
+            // `apksigner verify` reports it as `false` at the APK's own minSdk.
+            // Do not emit or claim v1.
+            enableV1Signing = false
             enableV2Signing = true
             enableV3Signing = true
         }

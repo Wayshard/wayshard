@@ -272,6 +272,46 @@ def check_branding_ico(root: Path) -> None:
             )
 
 
+SOCIAL_SHARE = "clients/web/public/social-share.png"
+SOCIAL_SIZE = (1200, 630)
+
+
+def check_social_share(root: Path) -> None:
+    """The Web social card must exist, be the standard size, and be on-brand."""
+    path = root / SOCIAL_SHARE
+    if not path.is_file():
+        raise SystemExit(f"missing Web social card {path}")
+    w, h, channels, px = read_png(path)
+    if (w, h) != SOCIAL_SIZE:
+        raise SystemExit(f"{path}: expected {SOCIAL_SIZE[0]}x{SOCIAL_SIZE[1]}, got {w}x{h}")
+
+    def pixel(x: int, y: int) -> tuple[int, int, int]:
+        o = (y * w + x) * channels
+        return px[o], px[o + 1], px[o + 2]
+
+    br, bg, bb = pixel(0, 0)
+    if abs(br - 14) > 12 or abs(bg - 15) > 12 or abs(bb - 18) > 12:
+        raise SystemExit(f"{path}: background must be the Wayshard deep background #0e0f12")
+
+    cyan = white = 0
+    for i in range(0, len(px), channels):
+        r, g, b = px[i], px[i + 1], px[i + 2]
+        if r < 130 and g > 150 and b > 190:
+            cyan += 1
+        if r > 235 and g > 235 and b > 235:
+            white += 1
+    if cyan < 50:
+        raise SystemExit(f"{path}: missing the Wayshard cyan accent")
+    if white < 500:
+        raise SystemExit(f"{path}: missing the Wayshard mark/wordmark")
+
+    html = (root / "clients/web/index.html").read_text(encoding="utf-8")
+    if "/social-share.png" not in html:
+        raise SystemExit("clients/web/index.html must reference /social-share.png")
+    if 'content="1200"' not in html or 'content="630"' not in html:
+        raise SystemExit("clients/web/index.html must declare the social card dimensions")
+
+
 def check_tauri_nsis_icon(root: Path) -> None:
     """The Tauri NSIS config must name the Wayshard installer icon explicitly."""
     conf_path = root / "clients/desktop/src-tauri/tauri.conf.json"
@@ -293,17 +333,32 @@ def check_tauri_nsis_icon(root: Path) -> None:
         raise SystemExit(f"{conf_path}: installerIcon does not exist: {icon}")
 
 
-def parse_icon_cli_version(script: str) -> tuple[int, int, int]:
-    patterns = (
-        r"WAYSHARD_ICON_CLI_VERSION:-(\d+)\.(\d+)\.(\d+)",
-        r"ICON_CLI_VERSION:?-?\s*=\s*\"?(\d+)\.(\d+)\.(\d+)",
-        r"cli@(\d+)\.(\d+)\.(\d+)",
-    )
-    for pattern in patterns:
-        m = re.search(pattern, script)
-        if m:
-            return int(m.group(1)), int(m.group(2)), int(m.group(3))
-    raise SystemExit("android-icons.sh does not pin a Tauri CLI version")
+def tauri_cli_version(root: Path) -> tuple[int, int, int]:
+    """The pinned @tauri-apps/cli version from clients/desktop/package.json."""
+    pkg = json.loads((root / "clients/desktop/package.json").read_text(encoding="utf-8"))
+    version = (pkg.get("devDependencies") or {}).get("@tauri-apps/cli")
+    if not version:
+        raise SystemExit("clients/desktop/package.json must pin @tauri-apps/cli")
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version.strip())
+    if not m:
+        raise SystemExit(f"@tauri-apps/cli must be an exact version, got {version!r}")
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+def check_tauri_alignment(root: Path) -> tuple[int, int, int]:
+    """The pinned Tauri CLI must match the locked Tauri Rust crate (major.minor)."""
+    lock = (root / "clients/desktop/src-tauri/Cargo.lock").read_text(encoding="utf-8")
+    m = re.search(r'name = "tauri"\nversion = "(\d+)\.(\d+)\.(\d+)"', lock)
+    if not m:
+        raise SystemExit("Cargo.lock is missing the tauri crate")
+    crate = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    cli = tauri_cli_version(root)
+    if cli[:2] != crate[:2]:
+        raise SystemExit(
+            f"@tauri-apps/cli {'.'.join(map(str, cli))} must match the locked "
+            f"tauri crate {'.'.join(map(str, crate))}"
+        )
+    return cli
 
 
 def main() -> None:
@@ -343,12 +398,12 @@ def main() -> None:
         check_png_size(root / "clients/web/public" / rel, size)
 
     script = (root / "scripts/release/android-icons.sh").read_text(encoding="utf-8")
-    if "app-icon.json" not in script:
-        raise SystemExit("android-icons.sh must generate from app-icon.json")
-    version = parse_icon_cli_version(script)
+    if "app-icon.json" not in script or "bunx tauri icon" not in script:
+        raise SystemExit("android-icons.sh must generate from app-icon.json with the repo CLI")
+    version = check_tauri_alignment(root)
     if version < (2, 9, 0):
         raise SystemExit(
-            f"android-icons.sh pins tauri-cli {'.'.join(map(str, version))}, which cannot read an icon manifest (needs >= 2.9.0)"
+            f"@tauri-apps/cli {'.'.join(map(str, version))} cannot read an icon manifest (needs >= 2.9.0)"
         )
 
     workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -359,10 +414,11 @@ def main() -> None:
 
     check_branding_ico(root)
     check_tauri_nsis_icon(root)
+    check_social_share(root)
 
     print(
         "icon policy ok: canonical mark, adaptive safe-area foreground, "
-        f"desktop/Web derivatives, Windows installer icon, "
+        f"desktop/Web derivatives, Windows installer icon, social card, "
         f"tauri-cli {'.'.join(map(str, version))} icon generator"
     )
 

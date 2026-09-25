@@ -2,13 +2,14 @@
 # Write the Android Gradle version properties consumed by the Tauri 2 Android
 # template.
 #
-# Tauri CLI 2.5.0's generated app/build.gradle.kts reads
+# Tauri CLI 2.11.x's generated app/build.gradle.kts reads
 #   versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1")
 #   versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
-# from gen/android/app/tauri.properties, but that CLI never writes the file.
-# Without it the published APK falls back to versionCode 1 / versionName "1.0"
-# and ignores bundle.android.versionCode from tauri.conf.json. Write the file
-# from tauri.conf.json so the APK carries the intended release metadata.
+# from gen/android/app/tauri.properties, but `tauri android init` does not write
+# the file. Without it the published APK falls back to versionCode 1 /
+# versionName "1.0" and ignores bundle.android.versionCode from
+# tauri.conf.json. Write the file from tauri.conf.json so the APK carries the
+# intended release metadata.
 set -euo pipefail
 
 CONF="${1:-clients/desktop/src-tauri/tauri.conf.json}"

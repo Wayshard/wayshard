@@ -43,8 +43,19 @@ jobs:
           mkdir -p internal/webembed/dist
           find internal/webembed/dist -mindepth 1 ! -name .gitkeep -delete
           cp -a clients/web/dist/. internal/webembed/dist/
+          # The Web social card must be embedded so the published server serves it.
+          test -s internal/webembed/dist/social-share.png \
+            || { echo "embedded Web is missing social-share.png" >&2; exit 1; }
       - name: Cross-compile Server and CLI
         run: make build-cross VERSION=${GITHUB_REF_NAME} COMMIT=${GITHUB_SHA}
+      - name: Assert Linux binaries are statically linked
+        run: |
+          set -euo pipefail
+          for b in bin/wayshard-server-linux-amd64 bin/wayshard-linux-amd64 \
+                   bin/wayshard-server-linux-arm64 bin/wayshard-linux-arm64; do
+            file "$b" | grep -q "statically linked" \
+              || { echo "$b is not statically linked" >&2; file "$b" >&2; exit 1; }
+          done
       - name: Name Go artifacts
         run: |
           chmod +x scripts/release/*.sh scripts/release/*.py
@@ -136,7 +147,7 @@ jobs:
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
           mkdir -p dist/cli-tui/stage dist/cli-tui/out
-          go build -ldflags "-s -w \
+          CGO_ENABLED=0 go build -ldflags "-s -w \
             -X github.com/Wayshard/wayshard/internal/version.Version=${GITHUB_REF_NAME} \
             -X github.com/Wayshard/wayshard/internal/version.Commit=${GITHUB_SHA} \
             -X github.com/Wayshard/wayshard/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -306,7 +317,8 @@ jobs:
           java-version: "17"
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          # The aligned tauri-cli (2.11.x) template compiles against SDK 36.
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
           accept-android-sdk-licenses: true
       - uses: oven-sh/setup-bun@v2
         with:

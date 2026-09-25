@@ -115,6 +115,10 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Desktop Windows self-signed Authenticode | `scripts/release/windows-sign.ps1`; secrets `WAYSHARD_WINDOWS_PFX_*` | `windows_pfx_test.sh`; live `signtool` on Windows runners only; SmartScreen/untrusted publisher expected | done |
 | Android Tauri APK, maintainer JKS, no Play | job `android`, `scripts/release/android-sign.sh`, `clients/desktop/android/WayshardKeystore.{kt,pro}` | `android_jks_test.sh`, `android_patch_test.sh`, `android_keystore_patch_test.sh`, `android_keystore_verify_test.sh` (real R8); APK verified; unsigned not published as signed | done |
 | Canonical branding mark → all platform icons | `assets/branding/wayshard.{png,ico}`, `clients/desktop/src-tauri/icons`, `clients/web/public`, `scripts/release/android-icons.sh`, NSIS `installerIcon` | `icon_policy_test.sh`, `windows_installer_icon_test.sh`, `release_policy_test.sh`; transparent derivatives match the mark exactly, the Android foreground fits the adaptive safe circle, and the built `-setup.exe` embeds the Wayshard installer icon | done |
+| Static, CGO-free Linux binaries | `Makefile` `CGO_ENABLED=0` build rules, `tui` job native CLI | `linux_static_test.sh`; release job asserts `statically linked` | done |
+| Android APK Signature Scheme v2 + v3 (no v1 claim) | `scripts/release/android-patch-gradle.py`, `package-android.sh` | `android_patch_test.sh`; `package-android.sh` asserts v2 and v3 | done |
+| Web social card served by the published server | `clients/web/public/social-share.png`, `clients/web/index.html`, release `release` job embed check | `icon_policy.py`; server returns 200 for `/social-share.png` | done |
+| Tauri CLI aligned with the locked crate | `clients/desktop/package.json` `@tauri-apps/cli` == `Cargo.lock` `tauri` major.minor | `icon_policy.py` `check_tauri_alignment` | done |
 | Minisign on combined SHA256SUMS.txt | `scripts/release/minisign-sign.sh`; secrets `WAYSHARD_RELEASE_MINISIGN_*`; public key `keys/wayshard-release.minisign.pub` | `minisign_test.sh`; checksums job verifies before upload | done |
 | Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`desktop-macos-checksums`/`android`/`checksums` | `make release-scripts-test` (overlapping globs cannot duplicate server rows); `desktop_macos_checksums_test.sh` proves both macOS DMGs appear exactly once, order-independent | done |
 | CycloneDX SBOM (not `go version -m`) | `scripts/release/sbom.sh` | fails the release job on generator/validation error | done |
@@ -699,6 +703,42 @@ Tauri's NSIS template left `MUI_ICON` empty.
   `windows_installer_icon_test.sh` builds a branded and a default `makensis`
   installer and proves the gate passes only the branded one.
 
-Out of scope for this change (recorded from the rc.13 audit): Linux x86-64
-dynamic linkage, the `/social-share.png` dangling reference, Android v1 signing,
-dead `-v3` favicon duplicates, and Tauri CLI/crate version alignment.
+Out of scope for this change (recorded from the rc.13 audit, addressed in
+rc.15): Linux x86-64 dynamic linkage, the `/social-share.png` dangling
+reference, Android v1 signing, dead `-v3` favicon duplicates, and Tauri CLI/crate
+version alignment.
+
+## rc.15 pre-stable cleanup
+
+Resolves the pre-stable findings carried from the rc.13/rc.14 audits. No product
+behavior changes; all existing tags/releases are preserved.
+
+- **Linux linkage.** Release Go builds are now CGO-free
+  (`CGO_ENABLED=0` in `make build-cross`/host targets and the `tui` job's native
+  CLI), so `linux/amd64` is statically linked like `linux/arm64` instead of
+  picking up glibc. The server uses the pure-Go `modernc.org/sqlite`, so nothing
+  requires cgo. Guards: `linux_static_test.sh` (release-scripts) and a release
+  job assertion that the Linux artifacts are static.
+- **Web social card.** Added `clients/web/public/social-share.png` (1200x630,
+  canonical mark on `#0e0f12` with the wordmark) and completed the `og:`/
+  `twitter:` metadata in `clients/web/index.html`. `icon_policy.py` validates
+  the card and its wiring; the release `release` job fails if the embedded Web
+  build lacks it. Verified the built server returns `/social-share.png` 200 with
+  the committed bytes.
+- **Android signing.** `android-patch-gradle.py` now sets
+  `enableV1Signing = false` (minSdk 26 never uses the v1/JAR scheme;
+  `apksigner verify` reports it `false` at that minSdk) while keeping v2 + v3.
+  `package-android.sh` asserts v2 and v3 are present on the packaged APK;
+  `android_patch_test.sh` forbids re-enabling v1 or its old "retained" claim.
+- **Dead assets.** Removed `clients/ui/src/assets/images/social-share*.png`
+  (OpenCode-branded, unshipped) and the obsolete duplicate
+  `clients/ui/src/assets/favicon/` tree after proving no production references
+  (no imports, not in `lineage.manifest.json`, not exported by `@wayshard/ui`).
+  The live favicons are served from `clients/web/public`; the adapted-lineage
+  test still passes. `release_policy_test.sh` guards against their return.
+- **Tauri alignment.** `@tauri-apps/cli` moved from 2.5.0 to **2.11.5**, matching
+  the locked `tauri` 2.11.6 crate (major.minor). `android-icons.sh` now uses the
+  repo-pinned CLI (manifest support no longer needs a separate pin);
+  `icon_policy.py` fails if the npm CLI and the crate drift. The Android job
+  installs `platforms;android-36`/`build-tools;36.0.0` for the aligned template's
+  compileSdk 36. The `--harness-catalog`/icon/branding behavior is unchanged.

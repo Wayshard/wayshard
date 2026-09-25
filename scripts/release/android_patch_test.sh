@@ -35,6 +35,13 @@ grep -q 'signingConfig = signingConfigs.getByName("release")' "$TMP/build.gradle
 grep -q 'import java.util.Properties' "$TMP/build.gradle.kts"
 grep -q 'enableV3Signing = true' "$TMP/build.gradle.kts"
 grep -q 'enableV2Signing = true' "$TMP/build.gradle.kts"
+# minSdk 26 -> the v1/JAR scheme is never used; apksigner reports it `false` at
+# the APK's own minSdk, so the config must not enable or claim it.
+grep -q 'enableV1Signing = false' "$TMP/build.gradle.kts"
+if grep -q 'enableV1Signing = true' "$TMP/build.gradle.kts"; then
+  echo "v1 signing must not be enabled (minSdk 26 never uses it)" >&2
+  exit 1
+fi
 # The release build must stay minified with the .pro glob so the keep rules in
 # WayshardKeystore.pro are applied to the real release configuration.
 grep -q 'isMinifyEnabled = true' "$TMP/build.gradle.kts"

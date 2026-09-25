@@ -35,13 +35,24 @@ out="$DEST/wayshard-${VERSION}-android.apk"
 cp -a "$pick" "$out"
 echo "packed $out from $pick"
 
-if command -v apksigner >/dev/null 2>&1; then
-  apksigner verify --verbose "$out"
-elif [[ -n "${ANDROID_SDK_ROOT:-}" && -x "$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | tail -n1)" ]]; then
-  AS="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | tail -n1)"
-  "$AS" verify --verbose "$out"
+# Verify the published APK actually carries the required APK Signature Scheme
+# v2 + v3 signatures. v1/JAR is intentionally not enabled (minSdk 26 never uses
+# it and apksigner reports it false at that minSdk).
+AS="$(command -v apksigner 2>/dev/null || true)"
+if [[ -z "$AS" && -n "${ANDROID_SDK_ROOT:-}" ]]; then
+  AS="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1 || true)"
+fi
+
+if [[ -n "$AS" && -x "$AS" ]]; then
+  verify_out="$("$AS" verify --verbose "$out" 2>&1)"
+  echo "$verify_out"
+  grep -qiE 'v2 scheme \(APK Signature Scheme v2\): true' <<<"$verify_out" \
+    || { echo "APK is not signed with APK Signature Scheme v2" >&2; exit 1; }
+  grep -qiE 'v3 scheme \(APK Signature Scheme v3\): true' <<<"$verify_out" \
+    || { echo "APK is not signed with APK Signature Scheme v3" >&2; exit 1; }
+  echo "verified APK Signature Scheme v2 + v3"
 else
-  echo "apksigner not on PATH; checking zip comment/signature files"
+  echo "apksigner not available; falling back to a META-INF signature-block check" >&2
   python3 - "$out" <<'PY'
 import sys, zipfile
 z = zipfile.ZipFile(sys.argv[1])
