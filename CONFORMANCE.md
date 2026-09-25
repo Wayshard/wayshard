@@ -114,6 +114,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Desktop macOS ad-hoc sign (identity `-`, no Apple account) | `tauri.conf.json` `bundle.macOS.signingIdentity`, `APPLE_SIGNING_IDENTITY=-`, `scripts/release/macos-verify-adhoc.sh` | `release_policy_test.sh`; live `codesign` on macOS runners only; Gatekeeper warnings expected | done |
 | Desktop Windows self-signed Authenticode | `scripts/release/windows-sign.ps1`; secrets `WAYSHARD_WINDOWS_PFX_*` | `windows_pfx_test.sh`; live `signtool` on Windows runners only; SmartScreen/untrusted publisher expected | done |
 | Android Tauri APK, maintainer JKS, no Play | job `android`, `scripts/release/android-sign.sh`, `clients/desktop/android/WayshardKeystore.{kt,pro}` | `android_jks_test.sh`, `android_patch_test.sh`, `android_keystore_patch_test.sh`, `android_keystore_verify_test.sh` (real R8); APK verified; unsigned not published as signed | done |
+| Canonical branding mark → all platform icons | `assets/branding/wayshard.{png}`, `clients/desktop/src-tauri/icons`, `clients/web/public`, `scripts/release/android-icons.sh` | `icon_policy_test.sh`, `release_policy_test.sh`; transparent derivatives match the mark exactly and the Android foreground fits the adaptive safe circle | done |
 | Minisign on combined SHA256SUMS.txt | `scripts/release/minisign-sign.sh`; secrets `WAYSHARD_RELEASE_MINISIGN_*`; public key `keys/wayshard-release.minisign.pub` | `minisign_test.sh`; checksums job verifies before upload | done |
 | Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`desktop-macos-checksums`/`android`/`checksums` | `make release-scripts-test` (overlapping globs cannot duplicate server rows); `desktop_macos_checksums_test.sh` proves both macOS DMGs appear exactly once, order-independent | done |
 | CycloneDX SBOM (not `go version -m`) | `scripts/release/sbom.sh` | fails the release job on generator/validation error | done |
@@ -636,3 +637,37 @@ rc.12. Neither changes product behavior or the signing policy.
   duplicated, or unexpected architecture). The combined `checksums` job now
   waits for it. Covered by `desktop_macos_checksums_test.sh` and
   `release_policy_test.sh`.
+
+## rc.13 branding-integration audit
+
+`assets/branding/wayshard.png` (the canonical mark, moved there in `da2d76c`) is
+the single source of every shipped icon. The transparent desktop, Web/PWA and
+favicon derivatives are byte-for-byte canonical downscales, and the `.ico`/`.icns`
+containers embed the same mark; no OpenCode, Tauri or placeholder icons remain in
+shipped paths.
+
+- **Android icon generation was broken.** The release workflow ran
+  `bunx tauri icon src-tauri/app-icon.json`, but Tauri's icon *manifest* landed in
+  tauri-cli 2.9.0 while the project pins 2.5.0 for its mobile build template; the
+  pinned CLI treats the JSON as an image and aborts the `android` job. Fixed by
+  `scripts/release/android-icons.sh`, which drives a pinned manifest-capable
+  generator (`@tauri-apps/cli@2.11.5`) for the icon step only, leaving the build
+  template and toolchain unchanged. It regenerates launcher, adaptive
+  foreground, monochrome and background resources into the ephemeral
+  `gen/android` tree and fails closed if the adaptive resources are missing.
+- **Adaptive foreground would have been cropped.** The manifest used the raw
+  canonical mark (content spanning ~98% of the canvas) as the adaptive
+  foreground, which Android's 66dp safe-zone mask would clip. Added the derived
+  `assets/branding/wayshard-android-fg.png`, which fits the mark inside the safe
+  circle, and used it for both the adaptive foreground and the monochrome mask
+  with `bg_color` `#0e0f12`.
+- **Guards.** `icon_policy.py` verifies the manifest references, the committed
+  desktop/Web derivative sizes, the safe-area padding, and that the workflow uses
+  the pinned manifest-capable generator; `release_policy_test.sh` asserts the
+  wiring. `Makefile` runs both in `release-scripts-test`.
+- **Known pre-existing, out of scope.** `clients/web/index.html` references
+  `/social-share.png`, which has never existed in `clients/web/public` (a
+  pre-existing dangling `og:image`); the only repo social images
+  (`clients/ui/src/assets/images/social-share*.png`) are OpenCode-branded and are
+  not imported or shipped. The unused `clients/ui/src/assets/favicon/` directory
+  (including the `-v3` duplicates) is dead but canonical-consistent.

@@ -1,7 +1,6 @@
 {
   "default": "../../../assets/branding/wayshard.png",
   "bg_color": "#0e0f12",
-  "android_fg": "../../../assets/branding/wayshard.png",
-  "android_fg_scale": 64,
-  "android_monochrome": "../../../assets/branding/wayshard.png"
+  "android_fg": "../../../assets/branding/wayshard-android-fg.png",
+  "android_monochrome": "../../../assets/branding/wayshard-android-fg.png"
 }

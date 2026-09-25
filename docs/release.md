@@ -55,6 +55,22 @@ is installed by `android-keystore-patch.sh`, and the `android` job runs
 `classes*.dex`, failing the release if the class or its
 `encrypt`/`decrypt`/`deleteKey` methods are absent.
 
+### Application icons
+
+`assets/branding/wayshard.png` is the canonical mark. Desktop PNG/ICNS/ICO and
+Web favicon/touch/PWA derivatives are committed. Because the Android Gradle
+project is generated fresh in CI, the `android` job runs
+`scripts/release/android-icons.sh` after `tauri android init` to regenerate the
+launcher, adaptive foreground, monochrome and background resources from
+`clients/desktop/src-tauri/app-icon.json`. The manifest points at the canonical
+mark for desktop/browser use and at the safe-area-padded
+`assets/branding/wayshard-android-fg.png` for the adaptive foreground and
+monochrome mask (`bg_color` `#0e0f12`). Tauri's icon manifest requires tauri-cli
+>= 2.9.0 while the project pins 2.5.0 for the mobile build template, so only
+this step runs the pinned manifest-capable generator; the build toolchain is
+unchanged. `icon_policy_test.sh` guards the manifest, the committed derivative
+sizes, and the safe-area padding.
+
 ### CLI+TUI bundle layout
 
 The `tui` matrix builds a native `wayshard` CLI and a self-contained

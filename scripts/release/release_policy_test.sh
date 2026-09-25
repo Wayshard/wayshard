@@ -243,4 +243,25 @@ grep -q -- '-keep class __PACKAGE__.WayshardKeystore { \*; }' \
   || fail "keep rules must retain the Keystore class and all JNI-invoked members"
 echo "android keystore R8 keep rules + DEX gate ok"
 
+# --- Canonical branding mark and platform icon derivatives --------------------
+test -s "$ROOT/assets/branding/wayshard.png" \
+  || fail "missing the canonical branding mark assets/branding/wayshard.png"
+test -s "$ROOT/assets/branding/wayshard-android-fg.png" \
+  || fail "missing the safe-area Android foreground derivative"
+test -s "$ROOT/clients/desktop/src-tauri/app-icon.json" \
+  || fail "missing the Tauri icon manifest clients/desktop/src-tauri/app-icon.json"
+test -s "$ROOT/scripts/release/android-icons.sh" \
+  || fail "missing scripts/release/android-icons.sh"
+grep -q 'android-icons.sh' "$REL" \
+  || fail "release.yml must generate Android icons via android-icons.sh"
+if grep -q 'run: bunx tauri icon src-tauri/app-icon.json' "$REL"; then
+  fail "release.yml must not invoke the pinned 2.5.0 CLI on an icon manifest"
+fi
+grep -q 'icon_policy_test.sh' "$ROOT/Makefile" \
+  || fail "Makefile release-scripts-test must run the branding icon policy test"
+grep -q '"default": "../../../assets/branding/wayshard.png"' \
+  "$ROOT/clients/desktop/src-tauri/app-icon.json" \
+  || fail "the icon manifest default must be the canonical mark"
+echo "branding icon policy ok"
+
 echo "release policy test ok"

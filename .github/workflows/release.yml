@@ -331,8 +331,7 @@ jobs:
         working-directory: clients/desktop
         run: bunx tauri android init --ci
       - name: Generate Wayshard Android launcher icons
-        working-directory: clients/desktop
-        run: bunx tauri icon src-tauri/app-icon.json
+        run: bash scripts/release/android-icons.sh
       - name: Install Android Keystore credential helper
         run: bash scripts/release/android-keystore-patch.sh
       - name: Set Android version metadata

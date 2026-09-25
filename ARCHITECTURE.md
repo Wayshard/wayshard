@@ -789,7 +789,12 @@ Linux PNG, macOS ICNS, and Windows ICO packaging. Web favicon, Apple touch, and
 PWA `any`/`maskable` derivatives live in `clients/web/public`; Vite copies that
 directory into the embedded Web distribution and `site.webmanifest` declares
 the installable icons. Android is initialized into an ephemeral
-`src-tauri/gen/android` tree during release CI, so the workflow runs Tauri's icon
-generator with `src-tauri/app-icon.json` immediately after initialization. That
-manifest binds launcher, adaptive foreground, monochrome mask, deep-background
-color, and safe-area scale to the same canonical mark before APK compilation.
+`src-tauri/gen/android` tree during release CI, so the workflow runs
+`scripts/release/android-icons.sh` immediately after initialization. That script
+drives Tauri's icon generator from `src-tauri/app-icon.json`, which points at the
+canonical mark for desktop/browser use and at
+`assets/branding/wayshard-android-fg.png` — a safe-area-padded derivative — for
+both the adaptive foreground and the monochrome mask, with `bg_color` supplying
+the deep background. Tauri's icon manifest requires tauri-cli >= 2.9.0 while the
+project pins 2.5.0 for its mobile build template, so only the icon step runs the
+pinned manifest-capable generator; the build toolchain is unchanged.
