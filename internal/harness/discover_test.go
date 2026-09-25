@@ -56,7 +56,6 @@ func placeFake(t *testing.T, dir, name string) string {
 }
 
 func TestDiscoverPATHReady(t *testing.T) {
-	testutil.RequireNativeIsolation(t)
 	dir := t.TempDir()
 	placeFake(t, dir, "wayshard-fake-acp")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -84,16 +83,12 @@ func TestDiscoverPATHReady(t *testing.T) {
 	if got[0].Compatibility != domain.CompatRoutable && got[0].Compatibility != domain.CompatEnhanced {
 		t.Fatalf("compat = %s", got[0].Compatibility)
 	}
-	if got[0].Isolation != domain.IsolationOuterOnly {
-		t.Fatalf("isolation = %s", got[0].Isolation)
-	}
 	if got[0].Resume != domain.ResumeReconstruct {
 		t.Fatalf("resume = %s (must not assume native resume)", got[0].Resume)
 	}
 }
 
 func TestDiscoverWellKnownDir(t *testing.T) {
-	testutil.RequireNativeIsolation(t)
 	home := t.TempDir()
 	placeFake(t, filepath.Join(home, ".local", "bin"), "wayshard-fake-acp")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -115,7 +110,6 @@ func TestDiscoverWellKnownDir(t *testing.T) {
 }
 
 func TestDiscoverExplicitPath(t *testing.T) {
-	testutil.RequireNativeIsolation(t)
 	dir := t.TempDir()
 	exe := placeFake(t, dir, "wayshard-fake-acp")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -179,7 +173,6 @@ func TestDiscoverNeverRunsNpx(t *testing.T) {
 }
 
 func TestDiscoverAuthAndMalformed(t *testing.T) {
-	testutil.RequireNativeIsolation(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -262,13 +255,7 @@ func TestCatalogDefinitionBehavior(t *testing.T) {
 	if oc.ACP != "native" || len(oc.ACPArgs) == 0 || oc.ACPArgs[0] != "acp" {
 		t.Fatalf("opencode acp args = %v", oc.ACPArgs)
 	}
-	if !oc.ACPRequiresLoopback {
-		t.Fatal("opencode acp requires loopback")
-	}
 	empty := acp.AgentCapabilities{}
-	if definitionIsolation(oc, empty) != domain.IsolationAdapterBridge {
-		t.Fatal("opencode reports adapter_bridge via command interposition")
-	}
 	if resumeFromCaps(empty) != domain.ResumeReconstruct {
 		t.Fatal("must not assume native resume without advertised capability")
 	}
@@ -279,10 +266,6 @@ func TestCatalogDefinitionBehavior(t *testing.T) {
 	cx, ok := cat.ByID("codex")
 	if !ok || cx.ACP != "bridge" || len(cx.Bridges) == 0 || cx.Bridges[0] != "codex-acp" {
 		t.Fatalf("codex definition = %+v", cx)
-	}
-	gen := Definition{ID: "x", ACP: "native"}
-	if definitionIsolation(gen, empty) != domain.IsolationOuterOnly {
-		t.Fatal("a non-interposing definition is outer_only")
 	}
 }
 

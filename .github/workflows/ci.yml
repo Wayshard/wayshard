@@ -21,15 +21,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Enable unprivileged user namespaces (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          # Ubuntu 24.04 restricts unprivileged user namespaces by default. The
-          # Linux PID-namespace supervisor (the non-removable process-lifecycle
-          # boundary) needs either an unprivileged user namespace or root.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
-          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
-          unshare --user --map-root-user --pid --fork --mount-proc true && echo "userns available" || echo "userns NOT available"
       - name: Vet
         run: go vet ./...
       - name: Test
@@ -140,71 +131,6 @@ jobs:
         env:
           WAYSHARD_REQUIRE_NSIS: "1"
         run: make release-scripts-test
-
-  native-security:
-    name: Native security (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: linux-amd64
-            os: ubuntu-latest
-          - name: macos-arm64
-            os: macos-latest
-          - name: macos-intel
-            os: macos-15-intel
-          - name: windows-amd64
-            os: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Enable unprivileged user namespaces (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
-          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
-          unshare --user --map-root-user --pid --fork --mount-proc true && echo "userns available" || echo "userns NOT available"
-      - name: Native sandbox security tests (verbose)
-        run: go test ./internal/sandbox/ -run 'Native|Required|Windows|Feature|Seatbelt|Darwin|Linux' -v -count=1
-      - name: Linux PID-namespace lifecycle boundary (mandatory, must not skip)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -o pipefail
-          if unshare --user --map-root-user --pid --fork --mount-proc true 2>/dev/null; then
-            go test ./internal/sandbox/ -run 'TestLinuxNamespaceBoundary|TestLinuxReconcileTokenHashSparesUnrelated' -v -count=1 | tee linuxboundary.log
-          else
-            # Root can create a PID namespace without an unprivileged user namespace.
-            echo "unprivileged userns unavailable; running the boundary tests as root"
-            sudo -E env "PATH=$PATH" "HOME=$HOME" go test ./internal/sandbox/ -run 'TestLinuxNamespaceBoundary|TestLinuxReconcileTokenHashSparesUnrelated' -v -count=1 | tee linuxboundary.log
-          fi
-          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryTerminatesTokenStrippedDescendant' linuxboundary.log
-          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryTerminatesOnNormalCompletion' linuxboundary.log
-          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryOnServerDeath' linuxboundary.log
-          grep -q -- '--- PASS: TestLinuxNamespaceBoundaryOnLoopbackPolicy' linuxboundary.log
-          grep -q -- '--- PASS: TestLinuxReconcileTokenHashSparesUnrelated' linuxboundary.log
-      - name: Required policies fail closed before exec (mandatory, must not skip)
-        if: runner.os != 'Linux'
-        shell: bash
-        run: |
-          set -o pipefail
-          go test ./internal/sandbox/ -run 'TestNativeRequiredPoliciesFailBeforeExec|TestNativeFailClosedBeforeExec' -v -count=1 | tee failclosed.log
-          grep -q -- '--- PASS: TestNativeRequiredPoliciesFailBeforeExec' failclosed.log
-          grep -q -- '--- PASS: TestNativeFailClosedBeforeExec' failclosed.log
-      - name: Validation fails closed before exec (mandatory, must not skip)
-        if: runner.os != 'Linux'
-        shell: bash
-        run: |
-          set -o pipefail
-          go test ./internal/validation/ -run 'TestNativeValidationFailsClosed' -v -count=1 | tee valfail.log
-          grep -q -- '--- PASS: TestNativeValidationFailsClosed' valfail.log
-      - name: Native sandbox full package
-        run: go test ./internal/sandbox/ -count=1
-      - name: Process ownership / recovery / harness packages
-        run: go test ./internal/process/ ./internal/recovery/ ./internal/harness/ -count=1
 
   canonicals:
     name: Canonicals present

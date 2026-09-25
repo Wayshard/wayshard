@@ -191,13 +191,10 @@ func main() {
 
 Pairing refuses a bare code: verified pairing requires the expected server id and
 fingerprint from the trusted invitation (--invitation, or --server-id/--fingerprint).
-The device credential is stored in platform-secure storage (macOS Keychain,
-Windows Credential Manager, Linux Secret Service). If that storage is unavailable
-the CLI fails closed rather than writing a plaintext credential; set
-WAYSHARD_HEADLESS=1 to opt into the protected user-private file fallback (0600 on
-Unix, the user-profile ACL on Windows). WAYSHARD_TOKEN supplies the credential
-explicitly and takes precedence over stored material.
-Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN, WAYSHARD_HEADLESS
+The device credential is stored in a restricted user config file (directory 0700;
+file 0600 on Unix, the user-profile ACL on Windows). WAYSHARD_TOKEN supplies the
+credential explicitly and takes precedence over stored material.
+Environment: WAYSHARD_SERVER, WAYSHARD_TOKEN, WAYSHARD_CONFIG
 `)
 	default:
 		fatal("unknown command " + args[0])

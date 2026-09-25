@@ -126,12 +126,6 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 	}
 	a, err := Open(ctx, Config{
 		DataDir: t.TempDir(), Listen: "127.0.0.1:0",
-		AllowProviderNetwork: true,
-		ProviderDestinations: []domain.ProviderDestination{
-			{Host: "opencode.ai", Port: 443},
-			{Host: "models.opencode.ai", Port: 443},
-		},
-		ProviderModel:      model,
 		HarnessCatalogPath: catalogPath,
 	})
 	if err != nil {
@@ -142,11 +136,9 @@ func TestRealHarnessSourceChangingE2E(t *testing.T) {
 	cands, _ := a.Engine.Candidates.Candidates(ctx)
 	foundReady := false
 	for _, c := range cands {
-		t.Logf("discovered candidate: %s/%s health=%s network=%s transport=%s model=%s",
-			c.Harness.DefinitionID, c.Harness.Executable, c.Harness.Health, c.Network, c.ProviderTransport, c.ModelID)
-		if c.Harness.DefinitionID == "opencode" && c.Network == domain.NetworkProvider &&
-			c.ProviderTransport == domain.TransportHTTPProxy && c.ModelID == model &&
-			c.Harness.Health == domain.HarnessReady {
+		t.Logf("discovered candidate: %s/%s health=%s model=%s",
+			c.Harness.DefinitionID, c.Harness.Executable, c.Harness.Health, c.ModelID)
+		if c.Harness.DefinitionID == "opencode" && c.Harness.Health == domain.HarnessReady {
 			foundReady = true
 		}
 	}
@@ -287,10 +279,7 @@ loop:
 		}
 	}
 
-	// Cleanup: no active owners/approvals/running attempts, no harness processes.
-	if owners, _ := a.Store.ListActiveProcessOwners(ctx); len(owners) != 0 {
-		t.Fatalf("active process owners remain: %+v", owners)
-	}
+	// Cleanup: no pending approvals or running attempts remain.
 	if apps, _ := a.Store.ListPendingApprovals(ctx); len(apps) != 0 {
 		t.Fatalf("pending approvals remain: %+v", apps)
 	}
@@ -304,9 +293,6 @@ loop:
 				t.Fatalf("attempt still running: %s", at.ID)
 			}
 		}
-	}
-	if out, _ := exec.Command("pgrep", "-f", "--", "--wayshard-provider-shim").Output(); len(strings.TrimSpace(string(out))) != 0 {
-		t.Fatalf("provider shim still alive: %s", out)
 	}
 }
 

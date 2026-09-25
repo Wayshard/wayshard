@@ -52,11 +52,12 @@ func TestUpgradeFromPriorVersions(t *testing.T) {
 			if _, err := s.DB.ExecContext(ctx, `SELECT material_state FROM workspace_checkpoints LIMIT 1`); err != nil {
 				t.Fatalf("material_state column missing: %v", err)
 			}
-			if _, err := s.DB.ExecContext(ctx, `SELECT token_hash FROM process_owners LIMIT 1`); err != nil {
-				t.Fatalf("process_owners table missing: %v", err)
+			// Migration 008 dropped the containment-era ownership tables.
+			if _, err := s.DB.ExecContext(ctx, `SELECT token_hash FROM process_owners LIMIT 1`); err == nil {
+				t.Fatal("process_owners table should have been dropped")
 			}
-			if _, err := s.DB.ExecContext(ctx, `SELECT token_hash FROM probe_owners LIMIT 1`); err != nil {
-				t.Fatalf("probe_owners table missing: %v", err)
+			if _, err := s.DB.ExecContext(ctx, `SELECT kind FROM probe_owners LIMIT 1`); err == nil {
+				t.Fatal("probe_owners table should have been dropped")
 			}
 		})
 	}

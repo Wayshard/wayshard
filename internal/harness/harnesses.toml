@@ -5,11 +5,11 @@
 # override or extend it with a user catalog (see the Wayshard documentation);
 # the user file is merged by harness `id`.
 #
-# The catalog describes harness *requirements*. It cannot weaken Wayshard
-# containment: there is no field to disable sandboxing, request host networking,
-# inherit arbitrary environment, grant filesystem roots, bypass approvals, or
-# mark a provider transport as trusted. Unknown or unsupported requirements fail
-# closed.
+# The catalog describes how Wayshard recognizes, probes and invokes a harness
+# family. Discovered harnesses run as the Wayshard server OS user with their
+# normal configuration, authentication, environment, filesystem and network
+# access; the catalog is a discovery/launch declaration, not a containment
+# policy.
 #
 # Fields:
 #   enabled                  bool   (default true)
@@ -23,12 +23,8 @@
 #   acp                      native|bridge (default: bridge if bridges set)
 #   acp_args                 list   argv for native ACP
 #   bridge_args              list   argv for bridge ACP
-#   acp_requires_loopback    bool   ACP server needs private local loopback
 #   interpose_commands       bool   harness uses ACP terminal/fs callbacks
 #   model_selection          none|config_option|set_model
-#   config_roots             list   harness-owned config paths, home-relative
-#   requires_provider_network bool
-#   transport                none|http_proxy|unknown (declared requirement)
 #
 # Sources for ACP invocations: the official Agent Client Protocol registry
 # (https://agentclientprotocol.com/get-started/registry) and official project
@@ -46,12 +42,8 @@ well_known = [".opencode/bin"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["acp"]
-acp_requires_loopback = true
 interpose_commands = true
 model_selection = "config_option"
-config_roots = [".config/opencode", ".local/share/opencode", ".local/state/opencode", ".cache/opencode", ".opencode"]
-requires_provider_network = true
-transport = "http_proxy"
 
 [[harness]]
 id = "codex"
@@ -64,9 +56,6 @@ acp = "bridge"
 bridge_args = []
 interpose_commands = true
 model_selection = "set_model"
-config_roots = [".codex", ".config/codex", ".local/share/codex", ".cache/codex"]
-requires_provider_network = true
-transport = "http_proxy"
 
 [[harness]]
 id = "claude"
@@ -78,9 +67,6 @@ version_args = ["--version"]
 acp = "bridge"
 bridge_args = []
 interpose_commands = true
-config_roots = [".claude", ".claude.json", ".config/claude", ".local/share/claude", ".cache/claude"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "grok"
@@ -91,9 +77,6 @@ well_known = [".grok/bin"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["agent", "stdio"]
-config_roots = [".grok", ".config/grok", ".cache/grok"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "gemini"
@@ -103,9 +86,6 @@ executables = ["gemini"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["--acp"]
-config_roots = [".gemini", ".config/gemini", ".cache/gemini"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "github-copilot"
@@ -115,9 +95,6 @@ executables = ["copilot"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["--acp"]
-config_roots = [".copilot", ".config/github-copilot", ".config/copilot"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "cursor"
@@ -127,9 +104,6 @@ executables = ["cursor-agent"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["acp"]
-config_roots = [".cursor", ".config/cursor", ".local/share/cursor-agent"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "kiro"
@@ -139,9 +113,6 @@ executables = ["kiro-cli"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["acp"]
-config_roots = [".kiro", ".config/kiro", ".local/share/kiro"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "junie"
@@ -151,9 +122,6 @@ executables = ["junie"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["--acp=true"]
-config_roots = [".junie", ".config/junie", ".cache/junie"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "goose"
@@ -163,9 +131,6 @@ executables = ["goose"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["acp"]
-config_roots = [".config/goose", ".local/share/goose", ".cache/goose"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "cline"
@@ -175,9 +140,6 @@ executables = ["cline"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["--acp"]
-config_roots = [".cline", ".config/cline", ".local/share/cline"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "qwen"
@@ -187,9 +149,6 @@ executables = ["qwen"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["--acp", "--experimental-skills"]
-config_roots = [".qwen", ".config/qwen", ".cache/qwen"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "qoder"
@@ -199,9 +158,6 @@ executables = ["qodercli", "qoder"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["--acp"]
-config_roots = [".qoder", ".config/qoder", ".cache/qoder"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "mistral-vibe"
@@ -211,9 +167,6 @@ executables = ["vibe-acp"]
 version_args = ["--version"]
 acp = "native"
 acp_args = []
-config_roots = [".vibe", ".config/vibe", ".config/mistral-vibe", ".local/share/mistral-vibe"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "devin"
@@ -223,9 +176,6 @@ executables = ["devin"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["acp"]
-config_roots = [".devin", ".config/devin", ".cache/devin"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "kilo"
@@ -235,9 +185,6 @@ executables = ["kilo", "kilocode"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["acp"]
-config_roots = [".kilocode", ".kilo", ".config/kilo", ".local/share/kilo"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "factory-droid"
@@ -247,9 +194,6 @@ executables = ["droid"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["exec", "--output-format", "acp-daemon"]
-config_roots = [".factory", ".config/droid", ".config/factory", ".cache/droid"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "auggie"
@@ -259,9 +203,6 @@ executables = ["auggie"]
 version_args = ["--version"]
 acp = "native"
 acp_args = ["--acp"]
-config_roots = [".augment", ".config/auggie", ".cache/auggie"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "amp"
@@ -273,9 +214,6 @@ version_args = ["--version"]
 acp = "bridge"
 bridge_args = []
 interpose_commands = true
-config_roots = [".amp", ".config/amp", ".local/share/amp"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "pi"
@@ -287,9 +225,6 @@ version_args = ["--version"]
 acp = "bridge"
 bridge_args = []
 interpose_commands = true
-config_roots = [".pi", ".config/pi", ".local/share/pi"]
-requires_provider_network = true
-transport = "unknown"
 
 [[harness]]
 id = "omp"
@@ -300,9 +235,6 @@ version_args = ["--version"]
 acp = "native"
 acp_args = ["acp"]
 interpose_commands = true
-config_roots = [".omp", ".config/omp", ".config/oh-my-pi", ".local/share/omp"]
-requires_provider_network = true
-transport = "unknown"
 
 # Deterministic ACP fixture shipped by Wayshard for its own test suites. It is
 # only discovered when the test fixture binary is on the search path.
@@ -313,5 +245,3 @@ executables = ["wayshard-fake-acp"]
 version_args = ["--version"]
 acp = "native"
 acp_args = []
-requires_provider_network = false
-transport = "http_proxy"

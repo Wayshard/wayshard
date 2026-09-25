@@ -199,7 +199,7 @@ An approval should communicate:
 - available scopes such as once/run/project where supported;
 - clear Allow/Deny actions.
 
-Examples include tool network access, imported external inputs, project secret use, Git push, or other policy boundaries.
+Examples include imported external inputs, protected file writes/edits, Git push, or other server policy boundaries.
 
 A denial is a real outcome, not an infrastructure failure: the protected operation must not execute and must not be automatically retried. Only the first resolution of an approval takes effect. Cancelling a run, or losing the server while an approval is pending, invalidates the approval rather than silently approving it.
 
@@ -384,7 +384,7 @@ Do not create a generic provider-credentials experience that suggests Wayshard o
 
 ### 19.1 Harnesses
 
-Show discovered executable path, version, ACP compatibility/capabilities, authentication state, model/options visibility, health, and diagnostics. Support rescan and explicitly configured custom ACP executable paths. Discovery probes run in isolation and cannot read a harness's real configuration, so an authentication state that cannot be determined is shown as unknown rather than implied healthy or authenticated.
+Show discovered executable path, version, ACP compatibility/capabilities, authentication state, model/options visibility, health, and diagnostics. Support rescan and explicitly configured custom ACP executable paths. Harnesses run as the server OS user with their normal configuration; the probe does not resolve harness-owned authentication, so an authentication state that cannot be determined is shown as unknown rather than implied healthy or authenticated.
 
 ### 19.2 Models
 
@@ -400,7 +400,7 @@ Jev appears as control-plane infrastructure with connection status, configured m
 
 ### 19.5 Security
 
-Expose understandable policy such as workspace isolation, network, external filesystem, project secrets, Git push, and force-push behavior. Previously granted persistent permissions should be reviewable/revocable.
+State the execution trust model plainly: discovered harnesses and their tools run as the server OS user with their normal configuration and network access; there is no sandbox. Expose policy Wayshard actually owns, such as workspace isolation, external file imports, approvals, budgets, and Git push/force-push behavior. Previously granted persistent permissions should be reviewable/revocable.
 
 ### 19.6 Storage
 

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
-	"github.com/Wayshard/wayshard/internal/testutil"
 )
 
 // approvalSetup starts an in-process server whose deterministic ACP fixture
@@ -22,14 +21,12 @@ import (
 // write only when the selected option is an allow.
 func approvalSetup(t *testing.T) (base, cred, runID, canary string, a *App) {
 	t.Helper()
-	testutil.RequireNativeIsolation(t)
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "permission")
 	t.Setenv("WAYSHARD_FAKE_PERMISSION_STAGE", "execute")
 	canaryDir := t.TempDir()
 	canary = filepath.Join(canaryDir, "must-not-exist-after-deny.txt")
-	t.Setenv("WAYSHARD_HARNESS_EXTRA_ROOTS", canaryDir)
 	t.Setenv("WAYSHARD_FAKE_PERMISSION_CANARY", canary)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

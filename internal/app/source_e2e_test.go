@@ -11,12 +11,10 @@ import (
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
-	"github.com/Wayshard/wayshard/internal/testutil"
 	"github.com/Wayshard/wayshard/internal/workspace"
 )
 
 func TestSourceChangingOrchestrationThroughIntegrate(t *testing.T) {
-	testutil.RequireNativeIsolation(t)
 	requireGit(t)
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -157,7 +155,6 @@ func TestSourceChangingOrchestrationThroughIntegrate(t *testing.T) {
 }
 
 func TestOrchestratorIntegrationConflictBlocks(t *testing.T) {
-	testutil.RequireNativeIsolation(t)
 	requireGit(t)
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -13,21 +14,16 @@ import (
 	"github.com/Wayshard/wayshard/internal/id"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/process"
-	"github.com/Wayshard/wayshard/internal/sandbox"
 )
 
-// toolManager owns ACP terminal/tool processes requested by a harness. Every
-// command runs through the Tool Sandbox (NetworkNone, workspace-scoped,
-// synthetic HOME/TEMP, allowlisted env). Wayshard, not the harness, owns
-// lifecycle: cancellation, timeout and release terminate the whole process tree.
+// toolManager owns ACP terminal/tool processes requested by a harness. Commands
+// run as the Wayshard server OS user in the run workspace with the server
+// environment. Wayshard, not the harness, owns lifecycle: cancellation, timeout
+// and release terminate the process tree best-effort.
 type toolManager struct {
 	mu        sync.Mutex
 	sessions  map[string]*toolSession
 	workspace string
-	home      string
-	token     string
-	readOnly  bool
-	backend   sandbox.Backend
 	timeout   time.Duration
 	outputCap int
 }
@@ -35,7 +31,6 @@ type toolManager struct {
 type toolSession struct {
 	id        string
 	cmd       *exec.Cmd
-	con       sandbox.Constrainer
 	mu        sync.Mutex
 	buf       bytes.Buffer
 	truncated bool
@@ -44,34 +39,16 @@ type toolSession struct {
 	signal    string
 	limit     int
 	cancel    context.CancelFunc
-	// toolToken is a per-session ownership token, distinct from the attempt
-	// token, so a single tool session's detached descendants can be reconciled
-	// without terminating the running harness (which shares the attempt token).
-	toolToken string
-	pgid      int
+	pid       int
 }
 
-func newToolManager(req orchestrator.StageRequest, workspace, home string, backend sandbox.Backend, token string) *toolManager {
-	if backend == nil {
-		backend = sandbox.DefaultBackend()
-	}
+func newToolManager(_ orchestrator.StageRequest, workspace string) *toolManager {
 	return &toolManager{
 		sessions:  map[string]*toolSession{},
 		workspace: workspace,
-		home:      home,
-		token:     token,
-		readOnly:  req.Stage.Kind.ReadOnly(),
-		backend:   backend,
 		timeout:   10 * time.Minute,
 		outputCap: 1 << 20,
 	}
-}
-
-func (m *toolManager) policy() sandbox.Policy {
-	if m.readOnly {
-		return sandbox.ReadOnlyViewPolicy(m.workspace, m.home)
-	}
-	return sandbox.ToolPolicy(m.workspace, m.home, sandbox.NetNone)
 }
 
 func (m *toolManager) Create(ctx context.Context, p acp.CreateTerminalParams) (acp.CreateTerminalResult, error) {
@@ -90,38 +67,17 @@ func (m *toolManager) Create(ctx context.Context, p acp.CreateTerminalParams) (a
 	writer := &boundedWriter{s: s}
 	cmd := exec.Command(p.Command, p.Args...)
 	cmd.Dir = dir
-	scoped := map[string]string{}
-	if m.token != "" {
-		scoped[process.TokenEnv] = m.token
-	}
-	toolToken, terr := process.NewToken()
-	if terr == nil {
-		s.toolToken = toolToken
-		scoped[process.ToolTokenEnv] = toolToken
-	}
-	cmd.Env = sandbox.ToolEnv(m.home, m.home, scoped)
+	cmd.Env = os.Environ()
 	cmd.Stdout = writer
 	cmd.Stderr = writer
+	process.Configure(cmd)
 	s.cmd = cmd
 
-	con := sandbox.AsConstrainer(m.backend)
-	pol := m.policy()
-	if _, err := con.Compile(pol); err != nil {
-		return acp.CreateTerminalResult{}, err
-	}
-	if err := con.Constrain(cmd, pol); err != nil {
-		return acp.CreateTerminalResult{}, err
-	}
-	s.con = con
 	if err := cmd.Start(); err != nil {
 		return acp.CreateTerminalResult{}, err
 	}
 	if cmd.Process != nil {
-		s.pgid = cmd.Process.Pid
-	}
-	if _, err := con.Attach(cmd, pol); err != nil {
-		_ = con.KillTree(cmd)
-		return acp.CreateTerminalResult{}, err
+		s.pid = cmd.Process.Pid
 	}
 
 	cctx, cancel := context.WithTimeout(ctx, m.timeout)
@@ -146,7 +102,7 @@ func (m *toolManager) Create(ctx context.Context, p acp.CreateTerminalParams) (a
 	go func() {
 		select {
 		case <-cctx.Done():
-			_ = con.KillTree(cmd)
+			process.KillTree(cmd)
 		case <-s.done:
 		}
 	}()
@@ -250,10 +206,7 @@ func (m *toolManager) CloseAll() {
 	}
 }
 
-// reap terminates a tool session's process tree, then authoritatively reconciles
-// any descendant that escaped the process group (setsid) using its per-session
-// token. On platforms without authoritative ownership this is just KillTree; the
-// attempt-level owner still reconciles by the attempt token at attempt close.
+// reap terminates a tool session's process tree best-effort.
 func (s *toolSession) reap() {
 	if s == nil {
 		return
@@ -261,10 +214,7 @@ func (s *toolSession) reap() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	if s.cmd != nil && s.con != nil {
-		_ = s.con.KillTree(s.cmd)
-	}
-	if s.toolToken != "" {
-		_, _, _, _ = process.ReconcileEnvToken(process.ToolTokenEnv, process.HashToken(s.toolToken), s.pgid, 3*time.Second)
+	if s.cmd != nil {
+		process.KillTree(s.cmd)
 	}
 }

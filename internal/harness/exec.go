@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -16,21 +15,15 @@ import (
 	"github.com/Wayshard/wayshard/internal/artifacts"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
-	"github.com/Wayshard/wayshard/internal/process"
-	"github.com/Wayshard/wayshard/internal/provider"
-	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
 
-// ACPExec runs a stage against an ACP harness. Validate is not executed here.
+// ACPExec runs a stage against an ACP harness. Validate and Integrate are not
+// executed here. The harness runs as the Wayshard server OS user with its normal
+// configuration, authentication, environment, filesystem and network access.
 type ACPExec struct {
-	Store   *storage.Store
-	Sandbox *sandbox.Manager
-	// ProviderResolver and ProviderDialer are test seams. Production leaves them
-	// nil, which selects the real host resolver and dialer.
-	ProviderResolver provider.Resolver
-	ProviderDialer   provider.Dialer
-	ProviderLog      *slog.Logger
+	Store *storage.Store
+	Log   *slog.Logger
 	// Catalog is the effective harness catalog used to resolve a route's
 	// DefinitionID. When nil it is loaded lazily from the shipped + user catalog.
 	Catalog *Catalog
@@ -64,7 +57,7 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		cwd = req.Workspace.RunPath
 	}
 	// Resolve the harness definition from the effective catalog. A route whose
-	// definition is missing fails closed rather than inventing behavior.
+	// definition is missing cannot be launched and fails as a policy outcome.
 	def, ok := e.definition(req.Route.Harness.DefinitionID)
 	if !ok {
 		err := fmt.Errorf("no harness definition %q in the effective catalog", req.Route.Harness.DefinitionID)
@@ -75,188 +68,32 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 		exe = req.Route.Harness.DisplayName
 	}
 	spec := acp.Spec{Command: exe, Args: definitionACPArgs(def), Dir: cwd}
-
-	sandboxRoot := e.sandboxRoot(req)
-	home := filepath.Join(sandboxRoot, "home")
-	tmp := filepath.Join(sandboxRoot, "tmp")
-	_ = os.MkdirAll(home, 0o700)
-	_ = os.MkdirAll(tmp, 0o700)
-	realHome, _ := os.UserHomeDir()
-
-	// Per-attempt ownership token: inherited by every descendant so startup
-	// reconciliation can terminate stale process trees after a crash without
-	// relying on reused PIDs.
-	token, err := process.NewToken()
-	if err != nil {
-		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-	}
-
-	// The harness keeps its own HOME for provider auth, but Landlock only
-	// permits its owned config dirs plus the workspace and system roots.
-	extras := harnessExtras(req)
-	extras[process.TokenEnv] = token
-	if p := harnessEnvPATH(exe, os.Getenv("PATH")); p != os.Getenv("PATH") {
-		extras["PATH"] = p
-	}
-	spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
-
-	var providerCleanup func()
-	if req.Route.Network == domain.NetworkProvider {
-		// Defense in depth: the harness must declare a transport compatible
-		// with the secure broker, and a valid destination policy must exist.
-		if req.Route.ProviderTransport != domain.TransportHTTPProxy {
-			err := fmt.Errorf("harness incompatible with available provider transport")
-			return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
-		}
-		pcfg := provider.PolicyFromDomains(req.ProviderDestinations)
-		if err := pcfg.CheckConfigured(); err != nil {
-			err = fmt.Errorf("provider destination policy invalid: %w", err)
-			return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
-		}
-		pol := e.policyFor(req, cwd, tmp, realHome, def)
-		pol.Network = sandbox.NetProvider
-		if exe != "" {
-			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(exe))
-		}
-		proxyPort, err := provider.RandomPort()
-		if err != nil {
-			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-		}
-		bearer, err := provider.RandomBearer()
-		if err != nil {
-			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-		}
-		pdir := provider.BrokerDir(e.providerRoot(), req.Run.ID+"/"+req.Attempt.ID)
-		plog := e.ProviderLog
-		if plog == nil {
-			plog = slog.Default()
-		}
-		broker, err := provider.StartBroker(filepath.Join(pdir, "s"), bearer, pcfg, e.ProviderResolver, e.ProviderDialer, plog)
-		if err != nil {
-			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-		}
-		providerCleanup = func() { _ = broker.Close() }
-		proxyAddr := fmt.Sprintf("127.0.0.1:%d", proxyPort)
-		extras["HTTPS_PROXY"] = "http://" + proxyAddr
-		extras["HTTP_PROXY"] = "http://" + proxyAddr
-		// The provider namespace has no host route: "localhost" is the isolated
-		// namespace loopback (the sanctioned shim and the harness's own local
-		// server). Allowing NO_PROXY for loopback does not weaken the boundary,
-		// while forcing loopback through the proxy would break harness-local IPC.
-		extras["NO_PROXY"] = providerNoProxy
-		spec.Env = sandbox.HarnessEnv(realHome, tmp, extras)
-
-		cfg := provider.ShimConfig{
-			BrokerSocket:   broker.SocketPath(),
-			Bearer:         bearer,
-			ProxyPort:      proxyPort,
-			Policy:         pol,
-			HarnessCommand: spec.Command,
-			HarnessArgs:    spec.Args,
-			HarnessDir:     cwd,
-		}
-		cfgPath, err := provider.WriteShimConfig(pdir, cfg)
-		if err != nil {
-			providerCleanup()
-			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-		}
-		self, err := os.Executable()
-		if err != nil {
-			providerCleanup()
-			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-		}
-		// The shim (not the harness) is the direct child; it creates the
-		// user+network namespace, raises loopback, launches the harness under
-		// the compiled policy, and bridges harness TCP to the broker.
-		spec = acp.Spec{
-			Command: self,
-			Args:    []string{provider.ShimArg, cfgPath},
-			Env:     spec.Env,
-			Dir:     cwd,
-			SetupCmd: func(cmd *exec.Cmd) error {
-				attr, aerr := provider.NewUserNetNSAttr()
-				if aerr != nil {
-					return aerr
-				}
-				cmd.SysProcAttr = attr
-				return nil
-			},
-		}
-	} else if e.Sandbox != nil {
-		b := e.Sandbox.Backend
-		if b == nil {
-			b = sandbox.DefaultBackend()
-		}
-		con := sandbox.AsConstrainer(b)
-		pol := e.policyFor(req, cwd, tmp, realHome, def)
-		if _, err := con.Compile(pol); err != nil {
-			// Required isolation that the platform cannot establish is a policy
-			// block, not a transient infrastructure failure: do not retry or fall
-			// back to a route with the same missing containment. No target code
-			// runs.
-			if errors.Is(err, sandbox.ErrRequiredIsolation) {
-				return orchestrator.StageResult{Class: domain.FailPolicy, Err: err}, err
-			}
-			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-		}
-		// The harness executable itself must remain executable/readable.
-		if exe != "" {
-			pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, filepath.Dir(exe))
-		}
-		spec.SetupCmd = func(cmd *exec.Cmd) error { return con.Constrain(cmd, pol) }
-		spec.AfterStart = func(cmd *exec.Cmd) (func(), error) { return con.Attach(cmd, pol) }
-	}
-	if providerCleanup != nil {
-		defer providerCleanup()
-	}
+	spec.Env = mergeEnv(os.Environ(), harnessExtras(req, exe))
 
 	hooks := acp.Hooks{
 		RequestPermission: e.permissionHook(ctx, req),
 		ReadTextFile:      e.readHook(req),
 		WriteTextFile:     e.writeHook(req),
 	}
-	if e.ProviderLog != nil {
+	if e.Log != nil {
 		// Bounded, already-redacted harness diagnostics; debug-level only.
 		hooks.OnDiagnostic = func(d acp.Diagnostic) {
-			e.ProviderLog.Debug("harness diagnostic", "source", d.Source, "text", d.Text)
+			e.Log.Debug("harness diagnostic", "source", d.Source, "text", d.Text)
 		}
 	}
-	var sbe sandbox.Backend
-	if e.Sandbox != nil {
-		sbe = e.Sandbox.Backend
-	}
-	tm := newToolManager(req, cwd, home, sbe, token)
+	tm := newToolManager(req, cwd)
 	hooks.CreateTerminal = tm.Create
 	hooks.TerminalOutput = tm.Output
 	hooks.ReleaseTerminal = tm.Release
 	hooks.WaitTerminalExit = tm.WaitExit
 	hooks.KillTerminal = tm.Kill
-
-	// Persist ownership before launching so a crash cannot orphan a process
-	// without a durable record. The record is registered first so its deferred
-	// reconciliation runs after the harness and tool trees are closed.
-	var owner *domain.ProcessOwner
-	if e.Store != nil {
-		owner = &domain.ProcessOwner{
-			RunID: req.Run.ID, StageID: req.Stage.ID, AttemptID: req.Attempt.ID,
-			TokenHash: process.HashToken(token), State: domain.ProcessOwnerActive,
-		}
-		if err := e.Store.InsertProcessOwner(ctx, owner); err != nil {
-			return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
-		}
-		defer e.finishProcessOwner(ctx, owner, token)
-	}
-
 	defer tm.CloseAll()
+
 	drv, err := acp.Launch(ctx, spec, acp.DefaultClientConfig(), hooks, acp.Limits{})
 	if err != nil {
 		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
 	}
 	defer drv.Close()
-	if owner != nil {
-		owner.PGID = drv.PID()
-		_ = e.Store.SetProcessOwnerPGID(context.WithoutCancel(ctx), owner.ID, owner.PGID)
-	}
 	init, err := drv.Handshake(ctx)
 	if err != nil {
 		return orchestrator.StageResult{Class: domain.FailInfrastructure, Err: err}, err
@@ -270,8 +107,8 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	}
 	if req.Route.ModelID != "" {
 		if merr := selectSessionModel(ctx, drv, sess.SessionID, def, req.Route.ModelID); merr != nil {
-			if e.ProviderLog != nil {
-				e.ProviderLog.Debug("harness model selection", "model", req.Route.ModelID, "err", merr)
+			if e.Log != nil {
+				e.Log.Debug("harness model selection", "model", req.Route.ModelID, "err", merr)
 			}
 		}
 	}
@@ -301,90 +138,9 @@ func (e *ACPExec) Execute(ctx context.Context, req orchestrator.StageRequest) (o
 	return orchestrator.StageResult{ArtifactJSON: text}, nil
 }
 
-// finishProcessOwner reconciles the attempt's process tree after the harness
-// and tool trees have been closed. If any owned process remains, the record
-// stays active so startup reconciliation retries it.
-func (e *ACPExec) finishProcessOwner(ctx context.Context, owner *domain.ProcessOwner, token string) {
-	if e.Store == nil || owner == nil {
-		return
-	}
-	bg := context.WithoutCancel(ctx)
-	_, remaining, supported, _ := process.ReconcileTokenHash(process.HashToken(token), owner.PGID, 3*time.Second)
-	if !supported {
-		// Ownership cannot be verified on this platform, so a setsid descendant
-		// may still be alive. Never erase the only recovery evidence by marking
-		// the owner reconciled: leave it active so startup reconciliation fails
-		// closed instead of proceeding against a possibly-live writer.
-		return
-	}
-	if remaining == 0 {
-		_ = e.Store.MarkProcessOwnerReconciled(bg, owner.ID)
-	}
-}
-
-func (e *ACPExec) sandboxRoot(req orchestrator.StageRequest) string {
-	base := os.TempDir()
-	if e.Store != nil && e.Store.Root != "" {
-		base = e.Store.Root
-	}
-	// Per-attempt synthetic HOME/TEMP so a stale orphan from an earlier attempt
-	// cannot mutate resources reused by a later attempt.
-	dir := filepath.Join(base, "runtime", "sandbox", req.Run.ID, req.Attempt.ID)
-	_ = os.MkdirAll(dir, 0o700)
-	return dir
-}
-
-// providerRoot is the server runtime root used for short per-attempt provider
-// broker directories.
-func (e *ACPExec) providerRoot() string {
-	if e.Store != nil && e.Store.Root != "" {
-		return e.Store.Root
-	}
-	return os.TempDir()
-}
-
-// policyFor builds the harness policy. Read-only stages get a read-only view of
-// the run workspace; write stages may write it. The definition's harness-owned
-// config roots are granted so provider auth keeps working, but nothing else
-// under HOME is.
-func (e *ACPExec) policyFor(req orchestrator.StageRequest, cwd, tmp, realHome string, def Definition) sandbox.Policy {
-	var pol sandbox.Policy
-	if cwd == "" {
-		pol = sandbox.ReadOnlyViewPolicy("", tmp)
-	} else if req.Stage.Kind.ReadOnly() {
-		pol = sandbox.ReadOnlyViewPolicy(cwd, tmp)
-	} else {
-		pol = sandbox.HarnessPolicy(cwd, tmp)
-	}
-	// Config roots are catalog-declared and home-relative. Shipped roots are
-	// trusted product configuration; user-supplied roots are additionally
-	// restricted by the catalog validator. Both are canonicalized here so a
-	// user-controlled symlink cannot escape HOME or resolve onto a sensitive
-	// location before the root is granted.
-	for _, r := range def.ConfigRoots {
-		if realHome == "" {
-			continue
-		}
-		p, err := resolveRootSafe(realHome, r)
-		if err != nil {
-			continue
-		}
-		if _, err := os.Stat(p); err != nil {
-			continue
-		}
-		pol.ReadWriteRoots = append(pol.ReadWriteRoots, p)
-	}
-	// A script/symlink harness needs its package tree and interpreter readable
-	// (read-only) to launch; this is scoped to the harness's own package.
-	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessClosureFor(req.Route.Harness.Executable).Roots...)
-	pol.ReadOnlyRoots = append(pol.ReadOnlyRoots, harnessProcRoots()...)
-	if extra := os.Getenv("WAYSHARD_HARNESS_EXTRA_ROOTS"); extra != "" {
-		pol.ReadWriteRoots = append(pol.ReadWriteRoots, filepath.SplitList(extra)...)
-	}
-	return pol
-}
-
-func harnessExtras(req orchestrator.StageRequest) map[string]string {
+// harnessExtras builds the extra environment for a harness launch: the fake
+// harness knobs (test fixtures) and any required interpreter PATH directories.
+func harnessExtras(req orchestrator.StageRequest, exe string) map[string]string {
 	m := map[string]string{
 		"WAYSHARD_STAGE": fmt.Sprintf("%d", req.Stage.Ordinal),
 	}
@@ -401,6 +157,9 @@ func harnessExtras(req orchestrator.StageRequest) map[string]string {
 		}
 	}
 	m["WAYSHARD_FAKE_STAGE"] = fakeStage(req.Stage.Kind)
+	if p := harnessEnvPATH(exe, os.Getenv("PATH")); p != os.Getenv("PATH") {
+		m["PATH"] = p
+	}
 	return m
 }
 
@@ -572,10 +331,6 @@ func fakeStage(k domain.StageKind) string {
 // Compile-time assertion that storage is referenced (kept for API clarity).
 var _ = storage.ErrNotFound
 
-// providerNoProxy keeps harness-local loopback IPC off the proxy. The provider
-// namespace has no host route, so this does not restore host/localhost access.
-const providerNoProxy = "127.0.0.1,localhost,::1"
-
 // selectSessionModel applies the route's model to a freshly created session
 // using the catalog-declared model selection method. OpenCode exposes a "model"
 // config option while Codex uses session/set_model.
@@ -591,8 +346,8 @@ func selectSessionModel(ctx context.Context, drv *acp.Driver, sessionID string, 
 }
 
 // artifactInstruction is the universal structured final-response contract for a
-// real harness that has no native structured submission channel. The server
-// still validates the artifact schema.
+// harness that has no native structured submission channel. The server still
+// validates the artifact schema.
 func artifactInstruction(kind domain.StageKind) string {
 	switch kind {
 	case domain.StagePlan, domain.StageReplan:

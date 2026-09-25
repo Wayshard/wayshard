@@ -119,7 +119,6 @@ type RouteDecision struct {
 	ModelID       string         `json:"modelId"`
 	Effort        string         `json:"effort,omitempty"`
 	Profile       RoutingProfile `json:"profile"`
-	Isolation     IsolationMode  `json:"isolation"`
 	FallbacksJSON string         `json:"fallbacks"`
 	PolicyVersion string         `json:"policyVersion"`
 	Reason        string         `json:"reason"`
@@ -225,7 +224,6 @@ type HarnessInstallation struct {
 	Adapter          string             `json:"adapter"`
 	Health           HarnessHealth      `json:"health"`
 	Compatibility    CompatibilityClass `json:"compatibility"`
-	Isolation        IsolationMode      `json:"isolation"`
 	AuthStatus       string             `json:"authStatus"`
 	CapabilitiesJSON string             `json:"capabilities"`
 	ModelsJSON       string             `json:"models"`
@@ -233,15 +231,13 @@ type HarnessInstallation struct {
 	Notes            string             `json:"notes"`
 
 	// Catalog discovery diagnostics.
-	DefinitionSource        string            `json:"definitionSource,omitempty"`
-	DefinitionFingerprint   string            `json:"definitionFingerprint,omitempty"`
-	BridgeExecutable        string            `json:"bridgeExecutable,omitempty"`
-	BridgePresent           bool              `json:"bridgePresent"`
-	ACPStatus               string            `json:"acpStatus,omitempty"`
-	BlockingReason          string            `json:"blockingReason,omitempty"`
-	ProviderTransport       ProviderTransport `json:"providerTransport,omitempty"`
-	ModelSelection          string            `json:"modelSelection,omitempty"`
-	RequiresProviderNetwork bool              `json:"requiresProviderNetwork"`
+	DefinitionSource      string `json:"definitionSource,omitempty"`
+	DefinitionFingerprint string `json:"definitionFingerprint,omitempty"`
+	BridgeExecutable      string `json:"bridgeExecutable,omitempty"`
+	BridgePresent         bool   `json:"bridgePresent"`
+	ACPStatus             string `json:"acpStatus,omitempty"`
+	BlockingReason        string `json:"blockingReason,omitempty"`
+	ModelSelection        string `json:"modelSelection,omitempty"`
 }
 
 type WorkspaceRecord struct {

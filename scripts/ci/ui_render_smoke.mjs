@@ -158,7 +158,7 @@ const SEED = `(() => {
     if (p === "/v1/harnesses") return [{ definitionId: "opencode", executable: "/usr/bin/opencode", bridgeExecutable: "", acpStatus: "routable", health: "healthy", providerTransport: "http_proxy" }];
     if (p === "/v1/harness-definitions") return { definitions: [{ id: "opencode", source: "shipped", enabled: true, acp: "native", executables: ["opencode"], bridges: [] }], diagnostics: [] };
     if (p === "/v1/storage") return { databaseBytes: 1, objectsBytes: 2, workspacesBytes: 3, lowDisk: false };
-    if (p === "/v1/sandbox") return { confinement: "landlock", network: "none", providerNetwork: { available: true }, loopback: true };
+    if (p === "/v1/sandbox") return { trustModel: "trusted_local", isolation: "os_user", sandboxing: false };
     return {};
   };
   const real = window.fetch ? window.fetch.bind(window) : null;

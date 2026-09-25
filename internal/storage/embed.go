@@ -22,3 +22,6 @@ var migration006 string
 
 //go:embed migrations/007_harness_fingerprint.sql
 var migration007 string
+
+//go:embed migrations/008_drop_process_probe_owners.sql
+var migration008 string

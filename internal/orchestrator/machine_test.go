@@ -45,7 +45,7 @@ func TestFullSyntheticRunArtifactOnly(t *testing.T) {
 		Router: &routing.Router{Engine: jev.DeterministicEngine{}},
 		Exec:   stubExec{},
 		Candidates: candidateList{{
-			Harness: domain.HarnessInstallation{ID: "fake", DisplayName: "fake", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable, Isolation: domain.IsolationOuterOnly},
+			Harness: domain.HarnessInstallation{ID: "fake", DisplayName: "fake", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable},
 			ModelID: "fake",
 		}},
 	}

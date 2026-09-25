@@ -61,7 +61,7 @@ display_name = "OpenCode Custom"
 		t.Fatalf("display_name = %q", oc.DisplayName)
 	}
 	// Unspecified fields inherit from the shipped definition.
-	if !oc.ACPRequiresLoopback || len(oc.ConfigRoots) == 0 {
+	if !oc.InterposeCommands || oc.ModelSelection != "config_option" {
 		t.Fatalf("inherited fields lost: %+v", oc)
 	}
 }
@@ -174,22 +174,20 @@ acp = "native"
 	}
 }
 
-func TestSecurityInvalidDeclarationsFailClosed(t *testing.T) {
+func TestInvalidDeclarationsFailClosed(t *testing.T) {
 	cases := map[string]string{
-		"absolute config root":  "config_roots = [\"/etc\"]",
-		"traversal config root": `config_roots = ["../secret"]`,
-		"absolute well_known":   `well_known = ["/usr/bin"]`,
-		"path executable":       `executables = ["/usr/bin/evil"]`,
-		"package runner":        `executables = ["npx"]`,
-		"unknown field":         `sandbox = false`,
-		"bad acp":               `acp = "unrestricted"`,
-		"bad transport":         `transport = "raw"`,
+		"absolute well_known":  `well_known = ["/usr/bin"]`,
+		"traversal well_known": `well_known = ["../secret"]`,
+		"path executable":      `executables = ["/usr/bin/evil"]`,
+		"package runner":       `executables = ["npx"]`,
+		"unknown field":        `sandbox = false`,
+		"bad acp":              `acp = "unrestricted"`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
 			cat := buildUser(t, "schema_version = 1\n[[harness]]\nid = \"evil\"\nexecutables = [\"evil\"]\n"+body+"\n")
 			if _, ok := cat.ByID("evil"); ok {
-				t.Fatalf("security-invalid declaration accepted: %s", body)
+				t.Fatalf("invalid declaration accepted: %s", body)
 			}
 		})
 	}
@@ -244,4 +242,17 @@ acp_args = []
 	if inst.Health != domain.HarnessReady || inst.ACPStatus != "ok" {
 		t.Fatalf("custom harness not ACP-ready: health=%s acp=%s notes=%v", inst.Health, inst.ACPStatus, inst.Notes)
 	}
+}
+
+// findInstallation returns the discovered installation for exe, failing the test
+// if it is absent.
+func findInstallation(t *testing.T, list []Installation, exe string) Installation {
+	t.Helper()
+	for _, inst := range list {
+		if inst.Executable == exe {
+			return inst
+		}
+	}
+	t.Fatalf("installation %s not found in %+v", exe, list)
+	return Installation{}
 }

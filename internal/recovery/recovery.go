@@ -7,27 +7,47 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
-	"github.com/Wayshard/wayshard/internal/process"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
 )
 
-// probeOwnershipReconciled is true when startup reconciliation could account for
-// every prior discovery-probe process tree. When it is false the platform cannot
-// verify probe ownership, so discovery must not execute new probes: racing an
-// unreconciled descendant is not acceptable.
-var probeOwnershipReconciled atomic.Bool
-
-func init() { probeOwnershipReconciled.Store(true) }
-
-// ProbeOwnershipReconciled reports whether prior discovery-probe process trees
-// were safely reconciled at startup. False means probe execution must fail
-// closed for this server lifetime.
-func ProbeOwnershipReconciled() bool { return probeOwnershipReconciled.Load() }
+// reconcileTerminalRuns repairs durable state for terminal runs that still have
+// a running or pending attempt, which can be left by a crash during
+// cancellation or completion. A CANCELLED run's attempts become CANCELLED; other
+// terminal runs' attempts become INTERRUPTED. Nothing is resumed.
+func reconcileTerminalRuns(ctx context.Context, st *storage.Store, log *slog.Logger) {
+	runs, err := st.TerminalRunsWithRunningAttempts(ctx)
+	if err != nil {
+		log.Error("list terminal runs with running attempts", "err", err)
+		return
+	}
+	for _, r := range runs {
+		status := domain.AttemptInterrupted
+		class := domain.FailInfrastructure
+		detail := "terminal run reconciliation"
+		if r.Status == domain.RunCancelled {
+			status = domain.AttemptCancelled
+			class = domain.FailUser
+			detail = "cancelled"
+		}
+		stages, _ := st.ListStages(ctx, r.ID)
+		for _, stg := range stages {
+			atts, _ := st.ListAttempts(ctx, stg.ID)
+			for _, a := range atts {
+				if a.Status != domain.AttemptRunning && a.Status != domain.AttemptPending {
+					continue
+				}
+				_ = st.UpdateAttemptStatus(ctx, a.ID, status, class, detail)
+			}
+			if stg.Status == domain.AttemptRunning {
+				_ = st.UpdateStageStatus(ctx, stg.ID, domain.AttemptInterrupted, domain.FailInfrastructure, detail)
+			}
+		}
+		log.Info("reconciled terminal run attempts", "run", r.ID, "status", r.Status)
+	}
+}
 
 // validateCheckpointPath proves a persisted checkpoint tree belongs to the
 // expected run and stage. Ownership is established from path components after
@@ -124,148 +144,9 @@ func restoreWriteCheckpoint(ctx context.Context, st *storage.Store, r domain.Run
 	return nil
 }
 
-// reconcileProcesses terminates stale process trees owned by previous server
-// instances before any workspace is restored or scheduled. It returns the set
-// of runs whose stale processes could not be reconciled; those runs are blocked
-// and must not be restored against.
-func reconcileProcesses(ctx context.Context, st *storage.Store, log *slog.Logger) (map[string]bool, error) {
-	unsafe := map[string]bool{}
-	owners, err := st.ListActiveProcessOwners(ctx)
-	if err != nil {
-		// Ownership is unknown, so a stale writer cannot be ruled out. Fail
-		// closed rather than restore or schedule against a possible writer.
-		log.Error("list process owners", "err", err)
-		return unsafe, err
-	}
-	for _, o := range owners {
-		observed, remaining, supported, _ := process.ReconcileTokenHash(o.TokenHash, o.PGID, 3*time.Second)
-		run, runErr := st.GetRun(ctx, o.RunID)
-		activeRun := runErr == nil && !run.Status.Terminal()
-
-		if !supported {
-			// Ownership cannot be verified on this platform: fail closed for a
-			// live run rather than restore against a possible stale writer.
-			if activeRun {
-				blockForStaleProcesses(ctx, st, log, o, "process ownership cannot be verified on this platform")
-				unsafe[o.RunID] = true
-				continue
-			}
-			_ = st.MarkProcessOwnerReconciled(ctx, o.ID)
-			continue
-		}
-		if remaining == 0 {
-			_ = st.MarkProcessOwnerReconciled(ctx, o.ID)
-			if observed > 0 {
-				_ = st.EmitEvent(ctx, "execution.orphan_reconciled", o.RunID, map[string]any{
-					"stageId": o.StageID, "attemptId": o.AttemptID, "terminated": observed,
-				})
-				log.Info("reconciled stale process tree", "run", o.RunID, "attempt", o.AttemptID, "terminated", observed)
-			}
-			continue
-		}
-		if activeRun {
-			blockForStaleProcesses(ctx, st, log, o, "stale process tree could not be reconciled")
-			unsafe[o.RunID] = true
-		}
-	}
-	return unsafe, nil
-}
-
-// blockForStaleProcesses marks a run BLOCKED/RECOVERY and closes out its
-// running attempts so nothing restores or schedules against a workspace that a
-// stale process may still be writing.
-func blockForStaleProcesses(ctx context.Context, st *storage.Store, log *slog.Logger, o domain.ProcessOwner, reason string) {
-	log.Error("orphan reconciliation failed", "run", o.RunID, "attempt", o.AttemptID, "reason", reason)
-	_ = st.UpdateRunStatus(ctx, o.RunID, domain.RunBlocked, domain.BlockedRecovery, reason)
-	stages, _ := st.ListStages(ctx, o.RunID)
-	for _, stg := range stages {
-		atts, _ := st.ListAttempts(ctx, stg.ID)
-		for _, a := range atts {
-			if a.Status == domain.AttemptRunning || a.Status == domain.AttemptPending {
-				_ = st.UpdateAttemptStatus(ctx, a.ID, domain.AttemptInterrupted, domain.FailInfrastructure, reason)
-			}
-		}
-		if stg.Status == domain.AttemptRunning {
-			_ = st.UpdateStageStatus(ctx, stg.ID, domain.AttemptInterrupted, domain.FailInfrastructure, reason)
-		}
-	}
-	_ = st.EmitEvent(ctx, "recovery.blocked", o.RunID, map[string]any{"stageId": o.StageID, "attemptId": o.AttemptID, "reason": reason})
-}
-
-// reconcileTerminalRuns repairs durable state for terminal runs that still have
-// a running or pending attempt, which can be left by a crash during
-// cancellation or completion. A CANCELLED run's attempts become CANCELLED; other
-// terminal runs' attempts become INTERRUPTED. Nothing is resumed.
-func reconcileTerminalRuns(ctx context.Context, st *storage.Store, log *slog.Logger) {
-	runs, err := st.TerminalRunsWithRunningAttempts(ctx)
-	if err != nil {
-		log.Error("list terminal runs with running attempts", "err", err)
-		return
-	}
-	for _, r := range runs {
-		status := domain.AttemptInterrupted
-		class := domain.FailInfrastructure
-		detail := "terminal run reconciliation"
-		if r.Status == domain.RunCancelled {
-			status = domain.AttemptCancelled
-			class = domain.FailUser
-			detail = "cancelled"
-		}
-		stages, _ := st.ListStages(ctx, r.ID)
-		for _, stg := range stages {
-			atts, _ := st.ListAttempts(ctx, stg.ID)
-			for _, a := range atts {
-				if a.Status != domain.AttemptRunning && a.Status != domain.AttemptPending {
-					continue
-				}
-				_ = st.UpdateAttemptStatus(ctx, a.ID, status, class, detail)
-			}
-			if stg.Status == domain.AttemptRunning {
-				_ = st.UpdateStageStatus(ctx, stg.ID, domain.AttemptInterrupted, domain.FailInfrastructure, detail)
-			}
-		}
-		log.Info("reconciled terminal run attempts", "run", r.ID, "status", r.Status)
-	}
-}
-
-// reconcileProbeOwners terminates surviving discovery-probe process trees left
-// by a previous server. Probes are server-owned but not tied to a run, so they
-// have their own ownership records. Any descendant that daemonized/setsid away
-// from the direct child is still found by token hash and killed before
-// discovery runs again.
-func reconcileProbeOwners(ctx context.Context, st *storage.Store, log *slog.Logger) {
-	owners, err := st.ListActiveProbeOwners(ctx)
-	if err != nil {
-		log.Error("list probe owners", "err", err)
-		return
-	}
-	for _, o := range owners {
-		observed, remaining, supported, _ := process.ReconcileTokenHash(o.TokenHash, o.PGID, 3*time.Second)
-		if !supported {
-			// Ownership cannot be verified on this platform. A probe descendant
-			// may still be alive, so fail closed: do not execute new probes this
-			// server lifetime rather than race an unreconciled process.
-			probeOwnershipReconciled.Store(false)
-			log.Error("probe ownership cannot be verified on this platform; discovery probes will fail closed", "kind", o.Kind)
-			_ = st.EmitEvent(ctx, "recovery.probe_ownership_unreconciled", "", map[string]any{"kind": o.Kind, "reason": "ownership unsupported on this platform"})
-			continue
-		}
-		if remaining == 0 {
-			_ = st.MarkProbeOwnerReconciled(ctx, o.ID)
-			if observed > 0 {
-				_ = st.EmitEvent(ctx, "discovery.probe_reconciled", "", map[string]any{"kind": o.Kind, "terminated": observed})
-				log.Info("reconciled stale probe process tree", "kind", o.Kind, "terminated", observed)
-			}
-			continue
-		}
-		log.Error("probe descendant could not be terminated", "kind", o.Kind, "remaining", remaining)
-	}
-}
-
-// Reconcile runs at startup before the scheduler accepts new work. Ordering is
-// deliberate: stale process trees (including discovery probes) are terminated
-// before any workspace restore, then interrupted attempts are recovered, then
-// reclaimable checkpoint material and debris are cleaned.
+// Reconcile runs at startup before the scheduler accepts new work. Interrupted
+// attempts are recovered, then reclaimable checkpoint material and debris are
+// cleaned.
 func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 	if log == nil {
 		log = slog.Default()
@@ -275,36 +156,21 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 		return err
 	}
 
-	// 1. Terminate stale discovery-probe descendants from a previous server
-	//    before anything else, so a daemonized probe cannot race new discovery.
-	reconcileProbeOwners(ctx, st, log)
-
-	// 1b. Terminate stale process trees from a previous server before touching
-	//     any workspace, so an old writer cannot race a restore.
-	unsafe, err := reconcileProcesses(ctx, st, log)
-	if err != nil {
-		return fmt.Errorf("process reconciliation: %w", err)
-	}
-
-	// 2. Repair durable attempt state on terminal runs (cancellation crash
+	// 1. Repair durable attempt state on terminal runs (cancellation crash
 	//    window).
 	reconcileTerminalRuns(ctx, st, log)
 
-	// 3. Remove unreferenced recovery debris (staging, orphan checkpoint dirs).
+	// 2. Remove unreferenced recovery debris (staging, orphan checkpoint dirs).
 	if n, err := st.CleanupCheckpointDebris(ctx); err == nil && n > 0 {
 		log.Info("cleaned recovery debris", "removed", n)
 	}
 
-	// 4. Restore interrupted write attempts. Runs whose stale processes could
-	//    not be reconciled are skipped and remain blocked.
+	// 3. Restore interrupted write attempts.
 	runs, err := st.ListActiveRuns(ctx)
 	if err != nil {
 		return err
 	}
 	for _, r := range runs {
-		if unsafe[r.ID] {
-			continue
-		}
 		stages, _ := st.ListStages(ctx, r.ID)
 		for _, stg := range stages {
 			atts, _ := st.ListAttempts(ctx, stg.ID)
@@ -344,7 +210,6 @@ func Reconcile(ctx context.Context, st *storage.Store, log *slog.Logger) error {
 
 	reconcileJournals(ctx, st, log)
 	cleanupValidationWorkspaces(st, log)
-	cleanupProviderDirs(st, log)
 
 	// 5. Reclaim checkpoint material for terminal runs past retention. Active
 	//    and recoverable checkpoints are pinned by the query.
@@ -371,23 +236,6 @@ func cleanupValidationWorkspaces(st *storage.Store, log *slog.Logger) {
 			if err := os.RemoveAll(vdir); err != nil {
 				log.Warn("cleanup validation workspace", "dir", vdir, "err", err)
 			}
-		}
-	}
-}
-
-// cleanupProviderDirs removes per-attempt provider broker sockets and shim
-// configs left by an interrupted run. The broker itself is in-process and dies
-// with the server; only its private directory and socket file can remain.
-func cleanupProviderDirs(st *storage.Store, log *slog.Logger) {
-	root := filepath.Join(st.Root, "runtime", "p")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		pdir := filepath.Join(root, e.Name())
-		if err := os.RemoveAll(pdir); err != nil {
-			log.Warn("cleanup provider dir", "dir", pdir, "err", err)
 		}
 	}
 }

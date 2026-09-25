@@ -270,15 +270,14 @@ type sqlExecer interface {
 }
 
 func insertHarnessInstallation(ctx context.Context, ex sqlExecer, h *domain.HarnessInstallation) error {
-	_, err := ex.ExecContext(ctx, `INSERT INTO harness_installations(id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network, definition_fingerprint)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	_, err := ex.ExecContext(ctx, `INSERT INTO harness_installations(id, definition_id, display_name, executable, version, adapter, health, compatibility, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, model_selection, definition_fingerprint)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(executable) DO UPDATE SET
 			display_name = excluded.display_name,
 			version = excluded.version,
 			adapter = excluded.adapter,
 			health = excluded.health,
 			compatibility = excluded.compatibility,
-			isolation = excluded.isolation,
 			auth_status = excluded.auth_status,
 			capabilities_json = excluded.capabilities_json,
 			models_json = excluded.models_json,
@@ -289,12 +288,10 @@ func insertHarnessInstallation(ctx context.Context, ex sqlExecer, h *domain.Harn
 			bridge_present = excluded.bridge_present,
 			acp_status = excluded.acp_status,
 			blocking_reason = excluded.blocking_reason,
-			provider_transport = excluded.provider_transport,
 			model_selection = excluded.model_selection,
-			requires_provider_network = excluded.requires_provider_network,
 			definition_fingerprint = excluded.definition_fingerprint`,
-		h.ID, h.DefinitionID, h.DisplayName, h.Executable, h.Version, h.Adapter, string(h.Health), string(h.Compatibility), string(h.Isolation), h.AuthStatus, h.CapabilitiesJSON, h.ModelsJSON, h.LastProbedAt.Format(time.RFC3339Nano), h.Notes,
-		h.DefinitionSource, h.BridgeExecutable, boolInt(h.BridgePresent), h.ACPStatus, h.BlockingReason, string(h.ProviderTransport), h.ModelSelection, boolInt(h.RequiresProviderNetwork), h.DefinitionFingerprint)
+		h.ID, h.DefinitionID, h.DisplayName, h.Executable, h.Version, h.Adapter, string(h.Health), string(h.Compatibility), h.AuthStatus, h.CapabilitiesJSON, h.ModelsJSON, h.LastProbedAt.Format(time.RFC3339Nano), h.Notes,
+		h.DefinitionSource, h.BridgeExecutable, boolInt(h.BridgePresent), h.ACPStatus, h.BlockingReason, h.ModelSelection, h.DefinitionFingerprint)
 	return err
 }
 
@@ -306,7 +303,7 @@ func boolInt(b bool) int {
 }
 
 func (s *Store) ListHarnessInstallations(ctx context.Context) ([]domain.HarnessInstallation, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, definition_id, display_name, executable, version, adapter, health, compatibility, isolation, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, provider_transport, model_selection, requires_provider_network, definition_fingerprint FROM harness_installations ORDER BY display_name`)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, definition_id, display_name, executable, version, adapter, health, compatibility, auth_status, capabilities_json, models_json, last_probed_at, notes, definition_source, bridge_executable, bridge_present, acp_status, blocking_reason, model_selection, definition_fingerprint FROM harness_installations ORDER BY display_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -314,18 +311,16 @@ func (s *Store) ListHarnessInstallations(ctx context.Context) ([]domain.HarnessI
 	var out []domain.HarnessInstallation
 	for rows.Next() {
 		var h domain.HarnessInstallation
-		var health, compat, iso, probed string
-		var bridgePresent, requiresProvider int
-		if err := rows.Scan(&h.ID, &h.DefinitionID, &h.DisplayName, &h.Executable, &h.Version, &h.Adapter, &health, &compat, &iso, &h.AuthStatus, &h.CapabilitiesJSON, &h.ModelsJSON, &probed, &h.Notes,
-			&h.DefinitionSource, &h.BridgeExecutable, &bridgePresent, &h.ACPStatus, &h.BlockingReason, &h.ProviderTransport, &h.ModelSelection, &requiresProvider, &h.DefinitionFingerprint); err != nil {
+		var health, compat, probed string
+		var bridgePresent int
+		if err := rows.Scan(&h.ID, &h.DefinitionID, &h.DisplayName, &h.Executable, &h.Version, &h.Adapter, &health, &compat, &h.AuthStatus, &h.CapabilitiesJSON, &h.ModelsJSON, &probed, &h.Notes,
+			&h.DefinitionSource, &h.BridgeExecutable, &bridgePresent, &h.ACPStatus, &h.BlockingReason, &h.ModelSelection, &h.DefinitionFingerprint); err != nil {
 			return nil, err
 		}
 		h.Health = domain.HarnessHealth(health)
 		h.Compatibility = domain.CompatibilityClass(compat)
-		h.Isolation = domain.IsolationMode(iso)
 		h.LastProbedAt = parseTime(probed)
 		h.BridgePresent = bridgePresent != 0
-		h.RequiresProviderNetwork = requiresProvider != 0
 		out = append(out, h)
 	}
 	return out, rows.Err()
@@ -577,7 +572,7 @@ func (s *Store) GetTask(ctx context.Context, id string) (*domain.Task, error) {
 }
 
 func (s *Store) ListRouteDecisions(ctx context.Context, runID string) ([]domain.RouteDecision, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, run_id, stage_id, assessment_id, harness_id, model_id, effort, profile, isolation, fallbacks_json, policy_version, reason, degraded, created_at FROM route_decisions WHERE run_id = ? ORDER BY created_at`, runID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, run_id, stage_id, assessment_id, harness_id, model_id, effort, profile, fallbacks_json, policy_version, reason, degraded, created_at FROM route_decisions WHERE run_id = ? ORDER BY created_at`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -585,13 +580,12 @@ func (s *Store) ListRouteDecisions(ctx context.Context, runID string) ([]domain.
 	var out []domain.RouteDecision
 	for rows.Next() {
 		var d domain.RouteDecision
-		var profile, iso, created string
+		var profile, created string
 		var deg int
-		if err := rows.Scan(&d.ID, &d.RunID, &d.StageID, &d.AssessmentID, &d.HarnessID, &d.ModelID, &d.Effort, &profile, &iso, &d.FallbacksJSON, &d.PolicyVersion, &d.Reason, &deg, &created); err != nil {
+		if err := rows.Scan(&d.ID, &d.RunID, &d.StageID, &d.AssessmentID, &d.HarnessID, &d.ModelID, &d.Effort, &profile, &d.FallbacksJSON, &d.PolicyVersion, &d.Reason, &deg, &created); err != nil {
 			return nil, err
 		}
 		d.Profile = domain.RoutingProfile(profile)
-		d.Isolation = domain.IsolationMode(iso)
 		d.Degraded = deg == 1
 		d.CreatedAt = parseTime(created)
 		out = append(out, d)

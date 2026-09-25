@@ -20,9 +20,8 @@ import (
 func newTestToolManager(t *testing.T, kind domain.StageKind) (*toolManager, string) {
 	t.Helper()
 	ws := t.TempDir()
-	home := t.TempDir()
 	req := orchestrator.StageRequest{Stage: domain.Stage{Kind: kind}}
-	return newToolManager(req, ws, home, nil, ""), ws
+	return newToolManager(req, ws), ws
 }
 
 func runTool(t *testing.T, tm *toolManager, cmd string, args ...string) string {
@@ -42,45 +41,32 @@ func runTool(t *testing.T, tm *toolManager, cmd string, args ...string) string {
 	return out.Output
 }
 
-// TestToolRunsInSandbox proves ACP tool commands execute in the run workspace
-// under NetworkNone with an allowlisted environment.
-func TestToolRunsInSandbox(t *testing.T) {
-	t.Setenv("AWS_ACCESS_KEY_ID_CANARY", "secret-canary")
+// TestToolRunsInWorkspace proves ACP tool commands execute in the run workspace
+// as the server OS user with the server environment.
+func TestToolRunsInWorkspace(t *testing.T) {
+	t.Setenv("WAYSHARD_TOOL_CANARY", "inherited")
 	tm, ws := newTestToolManager(t, domain.StageExecute)
 
-	out := runTool(t, tm, "/bin/sh", "-c", "echo hello; pwd; echo X=$AWS_ACCESS_KEY_ID_CANARY")
+	out := runTool(t, tm, "/bin/sh", "-c", "echo hello; pwd; echo X=$WAYSHARD_TOOL_CANARY")
 	if !strings.Contains(out, "hello") {
 		t.Fatalf("tool did not run: %q", out)
 	}
 	if !strings.Contains(out, ws) {
 		t.Fatalf("tool cwd not run workspace: %q (want %s)", out, ws)
 	}
-	if strings.Contains(out, "secret-canary") {
-		t.Fatalf("ambient secret leaked into tool env: %q", out)
-	}
-
-	net := runTool(t, tm, "/usr/bin/python3", "-c", `import socket
-try:
- socket.socket(socket.AF_INET, socket.SOCK_STREAM); print("NET=OK")
-except OSError as e: print("NET=ERRNO%d"%e.errno)`)
-	if !strings.Contains(net, "NET=ERRNO1") {
-		t.Fatalf("tool network not denied: %q", net)
+	if !strings.Contains(out, "X=inherited") {
+		t.Fatalf("tool did not inherit the server environment: %q", out)
 	}
 }
 
-// TestToolWritePermission proves read-only stages reject tool writes and write
-// stages allow workspace writes.
-func TestToolWritePermission(t *testing.T) {
-	ro, _ := newTestToolManager(t, domain.StageReview)
-	writeTool := runTool(t, ro, "/bin/sh", "-c", "echo x > blocked.txt 2>&1; echo done")
-	if !strings.Contains(writeTool, "Permission denied") {
-		t.Fatalf("read-only stage tool write was not denied: %q", writeTool)
-	}
-
+// TestToolWritesWorkspace proves a tool command can write inside the run
+// workspace. Tool commands run as the server OS user; read-only stage intent is
+// enforced at the ACP file-callback layer, not by an OS sandbox.
+func TestToolWritesWorkspace(t *testing.T) {
 	rw, ws := newTestToolManager(t, domain.StageExecute)
 	runTool(t, rw, "/bin/sh", "-c", "echo x > allowed.txt")
 	if _, err := os.Stat(filepath.Join(ws, "allowed.txt")); err != nil {
-		t.Fatalf("write-stage tool could not write workspace: %v", err)
+		t.Fatalf("tool could not write workspace: %v", err)
 	}
 }
 

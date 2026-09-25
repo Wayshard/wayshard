@@ -362,7 +362,6 @@ func (f fixtureEnv) serverEnv() []string {
 		"WAYSHARD_FAKE_PARTIAL_FILE=" + f.partialFile,
 		"WAYSHARD_FAKE_SIGNAL_FILE=" + f.signalFile,
 		"WAYSHARD_FAKE_SUCCESS_MARKER=" + f.markerFile,
-		"WAYSHARD_HARNESS_EXTRA_ROOTS=" + f.signalDir,
 	}
 	if f.reviewReject {
 		env = append(env, "WAYSHARD_FAKE_REVIEW_REJECT=1")
@@ -964,4 +963,30 @@ func TestProcessBoundaryCancelledNeverResumes(t *testing.T) {
 			}
 		}
 	})
+}
+
+// mergeEnv merges extra VAR=VALUE entries over a base environment, with extra
+// taking precedence by key.
+func mergeEnv(base, extra []string) []string {
+	key := func(kv string) string {
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			return kv[:i]
+		}
+		return kv
+	}
+	idx := map[string]int{}
+	out := make([]string, 0, len(base)+len(extra))
+	for _, kv := range base {
+		idx[key(kv)] = len(out)
+		out = append(out, kv)
+	}
+	for _, kv := range extra {
+		if j, ok := idx[key(kv)]; ok {
+			out[j] = kv
+			continue
+		}
+		idx[key(kv)] = len(out)
+		out = append(out, kv)
+	}
+	return out
 }

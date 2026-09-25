@@ -49,9 +49,8 @@ internal/
   harness/
   acp/
   validation/
-  sandbox/
   process/
-  secrets/
+  credentials/
   auth/
   events/
   storage/
@@ -100,8 +99,6 @@ attachments
 workspaces
 workspace_snapshots
 workspace_checkpoints
-process_owners
-probe_owners
 run_deltas
 integrations
 approvals
@@ -255,7 +252,7 @@ The server stores credential verifiers/hashes only.
 
 ### 10.3 Client storage
 
-Native clients use platform secure storage. Web uses authenticated server sessions/cookies suitable to the externally exposed transport.
+Native clients store their device credential in a restricted user config file (directory `0700`, file `0600`; user-profile ACL on Windows) or an environment credential. Web uses authenticated server sessions/cookies suitable to the externally exposed transport.
 
 Device revocation invalidates future API/WebSocket access but does not cancel server-owned runs.
 
@@ -276,33 +273,25 @@ Users expose the loopback service through infrastructure they control. An advert
 
 Tailscale Serve is a documented deployment example, not an architectural dependency.
 
-## 12. SecretVault
+## 12. Wayshard credentials
 
-Wayshard-owned secrets use a versioned encrypted vault separate from ordinary SQLite fields.
-
-Conceptual structure:
+Wayshard-owned credentials (the server identity private key, Jev/control-plane credentials, device material) are stored in restricted user config files, not in an encrypted vault and not in ordinary SQLite fields.
 
 ```text
-SecretVault
-  -> encrypted secret values
-  -> Vault Data Key
-  -> wrapped by VaultKeyProvider
+Credential store (server data dir)
+  credentials/            directory 0700
+    server_identity_private   file 0600
 ```
 
-VaultKeyProvider implementations may include:
+- The credential directory is created `0700` and each file is written `0600` (the user-profile ACL on Windows).
+- Environment variables (for example `TYPESAFE_API_KEY` for Jev) are accepted and take precedence where applicable.
+- No OS keyring or vault unlock is required, so the server runs on headless, container, and minimal systems.
+- Normal APIs expose credential status/metadata, never plaintext values.
+- Plaintext secrets are never written to ordinary SQLite fields, logs, artifacts, or diagnostics.
 
-- macOS native secure storage;
-- Windows native protected storage;
-- Linux desktop Secret Service when available;
-- external credential material for headless/service deployments;
-- manual passphrase unlock;
-- explicitly protected local key-file fallback.
+Harness-owned provider credentials stay with the harness. Wayshard does not read, scrape, or duplicate them.
 
-Envelope encryption allows wrapping-key/provider migration without re-encrypting every stored secret.
-
-The vault stores server identity private material, Jev/control-plane credentials, and other Wayshard-owned secrets. Harness-owned provider credentials stay with the harness.
-
-If the vault cannot be unlocked, the server enters a restricted locked/recovery state rather than replacing the vault.
+Backups exclude Wayshard credentials by default: they are local config, not control-plane backup content.
 
 ## 13. Harness catalog and discovery
 
@@ -312,32 +301,27 @@ The supported-harness inventory is configuration, not code. Two levels are kept 
 HarnessDefinition (declarative catalog knowledge; never asserts an installation exists)
   identity:  id, display name, homepage, enabled, platforms
   discovery: executable aliases, bridge aliases, well-known home-relative dirs, version args
-  ACP:       native|bridge, acp args, bridge args, loopback requirement,
-             command interposition, model selection
-  config:    harness-owned home-relative config roots
-  provider:  whether provider network is required, declared transport requirement
+  ACP:       native|bridge, acp args, bridge args, command interposition, model selection
 
 HarnessInstallation (an actual discovered installation)
   definition id + source (shipped|user|overridden)
   resolved executable path(s), bridge path and presence
   version + version-probe result
-  ACP result, negotiated capabilities, auth status, isolation, resume
-  provider transport (Wayshard-verified), route viability, blocking reason
+  ACP result, negotiated capabilities, auth status, resume
+  route viability, blocking reason
 ```
 
 A versioned TOML catalog ships embedded in the binaries (`internal/harness/harnesses.toml`, `schema_version = 1`). A user catalog at the platform config path (`$XDG_CONFIG_HOME/wayshard/harnesses.toml`, with the normal per-platform fallbacks) overrides or extends it. Merge is by stable `id`: user fields override shipped fields by key (arrays replace), `enabled = false` disables a shipped definition, deleting the override restores it, a user-only id creates a custom definition, and duplicate ids within one source are rejected. One invalid entry is isolated so it cannot destroy otherwise-valid definitions; malformed TOML and unsupported future schema versions are rejected with diagnostics. The catalog is loaded at server startup; a restart applies changes (there is no file-watcher subsystem).
 
-**Provider trust is bound to the execution identity, not the id.** Every definition has a deterministic SHA-256 *execution fingerprint* over the fields that materially change what is launched or how it behaves (executables, bridges, well-known discovery, version/ACP/bridge args, native-vs-bridge mode, loopback and command-interposition behavior, model selection, config roots, platforms, provider requirement and declared transport). Cosmetic metadata (display name, homepage) and `enabled` are excluded. A definition receives the empirically verified provider transport only when its fingerprint equals the trusted shipped definition's fingerprint. A user override that keeps `id = "opencode"`/`"codex"` but changes any execution-relevant field loses verified transport and fails closed; an override that changes only cosmetic metadata retains it.
+**The catalog is a discovery/launch declaration, not a containment policy.** Discovered harnesses run as the Wayshard server OS user with their normal configuration, authentication, environment, filesystem, and network access. There is no field to request a sandbox because there is no sandbox. Executable aliases must be bare names and never package-runner launchers (`npx`, `npm`, `bunx`, …); well-known discovery dirs must be home-relative with no traversal; unknown fields or unsupported enum values fail the entry closed. A generous, bounded limit caps catalog bytes, definition count, per-definition list/argument counts and glob matches.
 
-**Installations are reconciled, not accumulated.** Each discovered installation persists the effective definition's fingerprint and is only routable while the current effective catalog still has an enabled definition with that fingerprint. Refresh atomically replaces the persisted installation set with the latest discovery result, so a disabled, removed or materially changed definition (or a disappeared executable/bridge) cannot leave a stale routable candidate.
+**Installations are reconciled, not accumulated.** Each discovered installation persists the effective definition's *execution fingerprint* (a deterministic SHA-256 over the fields that materially change what is launched: executables, bridges, well-known discovery, version/ACP/bridge args, native-vs-bridge mode, command-interposition behavior, model selection, platforms). A discovered installation is only routable while the current effective catalog still has an enabled definition with that fingerprint. Refresh atomically replaces the persisted installation set with the latest discovery result, so a disabled, removed or materially changed definition (or a disappeared executable/bridge) cannot leave a stale routable candidate.
 
-The catalog describes harness *requirements* and cannot weaken Wayshard containment. There is no field to disable the sandbox, request host networking, inherit arbitrary environment, grant arbitrary host filesystem roots, bypass approvals, bypass Tool/validation `NetworkNone`, or mark an unverified provider transport as trusted. Paths must be home-relative with no traversal. Shipped roots are trusted product configuration; a root introduced or expanded by the user catalog is an untrusted capability request that must live beneath a platform config/data/state/cache directory or a dot-directory, must not be a sensitive location (`.ssh`, `.aws`, `.gnupg`, `.kube`, …), HOME or a platform base itself, and must not reach those through a symlink: roots are canonicalized with component-safe `Lstat` checks and a symlink that escapes HOME or resolves onto a sensitive location is dropped. Executable aliases must be bare names and never package-runner launchers (`npx`, `npm`, `bunx`, …), and unknown fields or unsupported enum values fail the entry closed. A generous, bounded limit caps catalog bytes, definition count, per-definition list/argument counts and glob matches. Wayshard remains the authority for security; the catalog only declares what a harness needs.
+Discovery searches the daemon PATH, safely obtained login-shell PATH, Wayshard's well-known bin dirs plus each definition's declared home-relative well-known dirs, and explicit configured paths. It never searches arbitrary project-controlled paths, never installs or updates a harness or bridge, and resolves symlinks and deduplicates physical installations. A well-known search root that is a symlink escaping HOME is dropped, while a resolved executable that is a symlink (for example an NVM shim) is still discovered. Adding an ordinary compatible ACP harness is a TOML addition, not a Go change. For a bridge definition the CLI and bridge are reported independently: a present CLI whose bridge is missing is reported as present with a specific blocking reason, not "harness not installed".
 
-Discovery searches the daemon PATH, safely obtained login-shell PATH, Wayshard's well-known bin dirs plus each definition's declared home-relative well-known dirs, and explicit configured paths. It never searches arbitrary project-controlled paths, never installs or updates a harness or bridge, and resolves symlinks and deduplicates physical installations. A well-known search root that is a symlink escaping HOME is dropped, while a resolved executable that is a symlink (for example an NVM shim) is still discovered. Adding an ordinary compatible ACP harness is a TOML addition, not a Go change: behavioral differences are declarative (`acp`, `interpose_commands`, `model_selection`, `acp_requires_loopback`). For a bridge definition the CLI and bridge are reported independently: a present CLI whose bridge is missing is reported as present with a specific blocking reason, not "harness not installed".
+Executable name alone is insufficient. A usable installation must pass launch/version and ACP initialization/capability probing. When a harness is a script/symlink, discovery resolves a narrow launch closure (its package tree plus a PATH-resolved interpreter) so Node-based ACP adapters start with the interpreter on PATH; this is an environment convenience, not a filesystem boundary.
 
-Executable name alone is insufficient. A usable installation must pass launch/version and ACP initialization/capability probing.
-
-Version and ACP-initialize probes execute under a dedicated `ProbePolicy`, not the writable HarnessPolicy: NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system roots plus the resolved executable directory, bounded output, and descendant cleanup. The ACP-initialize probe may instead use a distinct **loopback-only** capability: a private network namespace with only `lo`, TCP stream only, and no host/LAN/public route or host IPC, so a harness whose ACP server needs local IPC can be probed without weakening ordinary NetworkNone probing (version probes stay NetworkNone). Script/symlink harnesses additionally receive a narrow read-only launch closure (their package tree plus a PATH-resolved interpreter) so Node-based ACP adapters can start. Probes are denied project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display, and D-Bus access; a platform that cannot enforce the policy reports the probe unavailable rather than running unrestricted. The login-shell PATH probe is a narrower exception: it reads only the shell executable directory and the specific per-shell startup files required to compute PATH (never the home directory or a blanket `/etc`), and its output is validated as an absolute-only, deduplicated, bounded PATH. Discovery/probing runs only after startup recovery, and every probe runs under the trusted PID-namespace supervisor and is registered in `probe_owners` (auxiliary token hash persisted before launch) so startup reconciliation finds a surviving supervisor before discovery runs again. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
+Version and ACP-initialize probes are ordinary local execution as the server OS user: a timeout, bounded combined output, and best-effort process-tree cleanup. Login-shell PATH discovery reads only the shell's required startup files and validates the returned PATH as an absolute-only, deduplicated, bounded list; it is never executed as a command. Discovery/probing runs only after startup recovery completes. A probe does not attempt to resolve harness-owned authentication, so an auth state that cannot be determined is reported honestly rather than assumed.
 
 Filesystem state is authoritative; discovered state is cached in SQLite for UI/history.
 
@@ -356,7 +340,7 @@ Orchestrator
 
 The protocol driver owns JSON-RPC framing, initialize negotiation, session lifecycle, cancellation, permissions, filesystem/terminal callbacks, and extension-safe parsing.
 
-Harness behavior is resolved from the catalog definition (`acp`, `interpose_commands`, `model_selection`) rather than from per-name Go adapters; a route whose definition is missing from the effective catalog fails closed. The protocol driver remains the only ACP-speaking component.
+Harness behavior is resolved from the catalog definition (`acp`, `interpose_commands`, `model_selection`) rather than from per-name Go adapters; a route whose definition is missing from the effective catalog is not routable. The protocol driver remains the only ACP-speaking component.
 
 ### 14.2 Compatibility
 
@@ -372,9 +356,9 @@ A simple default is one ACP process per logical harness session. Process pooling
 
 ACP stdout is protocol-only; stderr is diagnostic. Frame size, pending request count, and buffer limits prevent unbounded memory use.
 
-ACP terminal/tool callbacks (`terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release`) are interposed by Wayshard: a harness never executes model-generated commands directly. The Tool manager runs each command in the Tool Sandbox (NetworkNone, run-workspace scoped, synthetic HOME/TEMP, allowlisted environment) and owns the resulting process tree.
+ACP terminal/tool callbacks (`terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release`) are interposed by Wayshard: a harness never executes model-generated commands directly. The Tool manager runs each command as the server OS user with the server environment, defaulting the working directory to the run workspace and owning the resulting process tree.
 
-On Linux each required launch runs under the trusted PID-namespace supervisor, which is the termination authority: killing the supervisor tears the whole namespace down, so a surviving descendant cannot outlive it. A per-attempt ownership token is inherited by the harness and Tool descendants as an auxiliary recovery hint: only its hash is persisted before launch, and startup reconciliation uses it to find a surviving supervisor (never matching by PID alone) without treating the token as proof of ownership of a hostile process. Synthetic HOME/TEMP is per attempt so a stale process from one attempt cannot mutate resources reused by another.
+The ACP process runs in its own process group so cancellation, timeout, and shutdown terminate the process tree best-effort (SIGTERM then SIGKILL on Unix; direct kill on Windows). Cleanup is executor hygiene, not a containment boundary: a hostile process that deliberately daemonizes can outlive a crash, and Wayshard does not build a service manager. Durable correctness never depends on killing a process.
 
 Unknown extension metadata/methods are tolerated according to ACP semantics. Known useful extensions may be adapter-specific but are not required by core orchestration.
 
@@ -426,7 +410,7 @@ Routing flow:
 resolve config
 -> derive stage requirements
 -> enumerate harness/model candidates
--> hard capability/security/budget/health filtering
+-> hard capability/budget/health filtering
 -> policy preferences
 -> optional Jev semantic comparison
 -> select route
@@ -535,7 +519,7 @@ Graphical terminal sessions are server-owned PTYs associated with project/source
 
 PTY identity and lifecycle are durable enough for reconnect while the server process remains alive, but server restart is not required to preserve a live PTY.
 
-Agent/tool processes are separate from user terminals and follow run/stage cancellation/sandbox rules.
+Agent/tool processes are separate from user terminals and follow run/stage cancellation and lifecycle rules.
 
 ## 25. Validation architecture
 
@@ -559,88 +543,35 @@ CompletionPolicy is deterministic Go logic over TaskContract, ValidationArtifact
 
 Hard deterministic gates cannot be overridden by model prose.
 
-## 27. Sandbox architecture
+## 27. Execution trust model
 
-### 27.1 Trust model
+### 27.1 Trust boundary
 
-Trust the Wayshard server/sandbox implementation and installed harness executable within enforced limits. Do not trust model-generated actions, repository text, tool output, or external content.
+Wayshard trusts the OS user running the server. Discovered ACP harnesses, the tools they request, validation commands, and discovery probes all run as that user with their normal configuration, authentication, environment, filesystem, and network access. There is no sandbox, no PID-namespace supervisor, no provider broker, and no fail-closed platform gate.
 
-### 27.2 Two security domains
+Model-generated actions, repository text, tool output, and external content remain untrusted *decision inputs*: the server owns approvals, validation, review, and completion policy. An agent saying it is done is never evidence of completion.
 
-```text
-Outer Harness Sandbox
-  ACP harness
-  harness config/auth
-  provider/model control network
+### 27.2 Approvals are policy, not containment
 
-Tool Sandbox
-  model-generated commands
-  run workspace
-  approved caches/toolchains
-  denied/brokered network
-  scoped secret leases
-```
+Approvals pause a requested server operation until a client resolves it. A denied approval means the protected operation does not execute. Approvals do not describe an OS sandbox outcome and are not a security boundary against the harness itself (the harness already has the server OS user's full authority).
 
-Adapters report tool-execution isolation mode:
+### 27.3 What Wayshard still controls
 
-- `native` — harness provides enforceable inner tool sandboxing configurable/verified by Wayshard;
-- `adapter_bridge` — Wayshard interposes command execution and runs it in ToolSandbox;
-- `outer_only` — no separate inner command domain; effective capability is weaker and reported honestly.
+- **Isolated run workspaces.** Every run executes against a run workspace materialized from the exact task-start snapshot; agents never experiment directly in the source working tree.
+- **Server-owned validation and completion.** Mandatory project checks are discovered passively, run as the server OS user, and cannot be removed by an agent. Validation records command, working directory, exit status, duration, and durable evidence.
+- **Run-delta provenance and conflict-safe integration.** Integration uses the immutable run start as merge base and the current source state as the third side; pre-existing user changes are baseline, never agent output.
+- **Best-effort process cleanup.** ACP processes and ACP-requested tool commands run in their own process group and are terminated best-effort on cancellation, timeout, and shutdown.
+- **Approvals, budgets, and routing.** These are server policy controls and remain authoritative.
 
-No failed setup silently becomes unsandboxed execution.
-
-### 27.3 Common SandboxPolicy
-
-Platform-neutral policy describes:
-
-- read-only/read-write/denied roots;
-- synthetic HOME/TEMP and allowed environment;
-- network none/allowlist/unrestricted as policy permits;
-- process/IPC/GUI restrictions;
-- memory/CPU/wall-time/process/output/disk limits;
-- scoped secret leases.
-
-Platform backends compile the policy.
-
-### 27.4 Platform backends
-
-Implementation should use appropriate supported OS primitives and runtime capability probing.
-
-Linux combines Landlock filesystem confinement, seccomp communication-socket confinement, process groups and a trusted **PID-namespace supervisor**: required execution runs under an in-binary supervisor that remains namespace init, so killing it tears the namespace (and every descendant, including setsid/double-forked processes) down. A death pipe held by the parent tears the namespace down on server death. A scoped procfs is mounted when a policy requests `ProcIsolation`. `FeatureProcessTree` is advertised only when the PID-namespace capability is runtime-probed as available; otherwise required execution fails closed.
-
-macOS uses `sandbox-exec`/Seatbelt with a compiled profile (filesystem read/write confinement and network denial), passed inline via `-p`; `sandbox-exec` absence fails closed. macOS has no non-removable OS-backed process-tree ownership boundary: a process group is escaped by `setsid`, and an environment ownership token can be stripped by the untrusted process before it execs a child. `FeatureProcessTree` is therefore not advertised on macOS; `Report()` reports the required sandbox unavailable and required harness/tool/probe/validation execution fails closed before untrusted code runs. macOS remains a full Desktop/TUI/CLI/server platform. Native tests prove fail-before-exec on macOS arm64 and Intel (`TestNativeRequiredPoliciesFailBeforeExec`, `TestNativeFailClosedBeforeExec`, `TestNativeValidationFailsClosed`).
-
-Windows uses Job Objects for process/resource management only. Because filesystem confinement, network denial and race-free process-tree containment are not enforced, `Report()` reports the required sandbox unavailable and required harness/tool/probe policies fail closed with `ErrRequiredIsolation` before any untrusted code runs (AppContainer is not implemented). Windows remains a full server/client platform; only local protected execution fails closed.
-
-A `Required` policy carries typed feature requirements (`RequiredFeatures`); a backend must declare every required feature (`validateRequiredFeatures`) or the policy is refused. A backend may never claim a feature it does not enforce.
-
-The architecture intentionally avoids requiring Docker.
-
-### 27.5 External inputs
+### 27.4 External inputs
 
 Approved external files normally become immutable read-only snapshots inside the run workspace/object store. Direct external writes should be rare server-controlled publication operations.
 
-### 27.6 Discovery probe sandbox
-
-Harness discovery is itself untrusted execution and does not reuse the writable HarnessPolicy. Version, ACP-initialize and login-shell PATH probes run under a distinct `ProbePolicy`: NetworkNone, synthetic HOME/TEMP, an allowlisted environment, read-only system roots plus the resolved executable directory, bounded output, and descendant cleanup. Probes have no project/SourceWorkspace, Wayshard runtime/database/vault, SSH-agent, display or D-Bus access. The policy is Required: if the platform cannot enforce it, the probe is reported unavailable rather than run unrestricted. A probe cannot read real harness configuration, so an auth state that cannot be determined is reported honestly rather than assumed.
-
-The login-shell PATH probe additionally narrows filesystem access to the shell executable directory and the specific per-shell startup files needed to compute PATH, and validates the returned PATH before use. Each probe runs under the trusted PID-namespace supervisor (its death tears the probe tree down) and is durably registered (`probe_owners`) before launch so the auxiliary token lets startup reconciliation find a surviving supervisor before discovery runs again.
-
-### 27.7 Provider-only network capability
-
-A provider-capable harness may be given model/provider connectivity only through a real enforcement mechanism, never raw host networking.
-
-On Linux the mechanism is a per-attempt user+network namespace. The attempt's harness is launched by a small shim that raises loopback in the namespace, listens on a loopback port, and bridges harness TCP to a per-attempt Wayshard broker over a private filesystem Unix socket. The broker speaks HTTPS `CONNECT` only (TLS stays end-to-end; no MITM CA is installed), authorizes the requested `host:port` against the run's configured destination policy, resolves the hostname on the trusted side, and revalidates every resolved address on every connection. Loopback, private, link-local, multicast, unspecified, broadcast, IPv4-mapped, 6to4 and Teredo addresses are refused, which closes DNS rebinding and SSRF. Because the namespace, not the proxy variables, is the boundary, direct sockets from the harness (including children and setsid grandchildren) cannot reach localhost, the LAN, the Internet, `AF_UNIX`/Docker, `AF_NETLINK` or `AF_PACKET`; only the broker is reachable. Each attempt has its own namespace, broker socket, destination policy and bearer capability, so runs are isolated from one another. Tool callbacks and validation continue to run under the Tool Sandbox with `NetworkNone`.
-
-A provider route is viable only when user/policy permission, actual runtime-probed platform capability, harness transport compatibility, and a valid destination policy all hold. Unsupported platforms and unverified transports fail closed. The broker bounds the CONNECT/bearer header phase (oversized headers are refused) and applies a finite timeout to destination resolve/dial, so it cannot be turned into an unbounded memory or goroutine sink.
-
-Harness and probe processes that require `/proc` (for example a Bun-based adapter) run in a private PID + mount namespace with a procfs scoped to that namespace; the mount is capability-probed and best-effort, and `/proc` is granted only when the scoped mount succeeded, so host process information is never exposed. Tool and validation processes never receive `/proc`.
-
 ## 28. Network separation
 
-Harness control-plane network (for example OpenCode -> provider) is distinct from tool-command network (for example `npm` -> registry).
+Wayshard adds no network policy layer. A discovered harness uses the server OS user's normal network for model/provider control traffic. ACP-requested tool commands and validation commands run with the same network access as the server OS user.
 
-Tool network is denied by default or mediated through a broker/policy that can grant destinations/scopes after approval. Network activity can be audited by stage/attempt/approval.
+There is no provider broker, destination policy, or provider-only capability. Users who want to bound which hosts a harness or tool can reach do so with their own OS/network controls (firewall, container, Tailscale ACLs), not with a Wayshard feature.
 
 ## 29. Recovery architecture
 
@@ -648,39 +579,37 @@ Every write-stage attempt starts from a durable pre-attempt checkpoint. Interrup
 
 Default recovery of an interrupted write attempt:
 
-1. terminate any surviving process tree owned by the attempt — on Linux the trusted PID-namespace supervisor is the authority, with the auxiliary ownership token used only to locate a surviving supervisor — before touching the workspace;
-2. preserve enough interrupted state for diagnostics;
-3. restore the verified pre-attempt checkpoint (attempt-scoped, verify-then-use staging);
-4. create a new StageAttempt.
+1. preserve enough interrupted state for diagnostics;
+2. restore the verified pre-attempt checkpoint (attempt-scoped, verify-then-use staging);
+3. create a new StageAttempt.
 
 Read-only stages generally restart. Validation reruns. Native harness session resume is used only when explicitly supported and safe.
 
 Server startup RecoveryManager:
 
 1. open/verify storage and apply migrations;
-2. reconcile stale discovery-probe trees (`probe_owners`) and stale server-owned run process trees — Linux authority is the PID-namespace supervisor (its death tears the tree down), with the auxiliary token used to locate a surviving supervisor and never matching by PID alone — waiting for them to terminate; a live run whose tree cannot be terminated is blocked with a recovery reason and is never restored against;
-3. repair terminal-run consistency (a cancelled run's running attempts become cancelled; a terminal run's leftover pending approvals are invalidated);
-4. remove unreferenced checkpoint debris, restore-staging leftovers and per-attempt provider broker directories;
-5. restore interrupted write attempts from their verified pre-attempt checkpoint;
-6. reconcile publication journals (recognize already-published targets, resume the safe remainder, or block on unexpected source state) and finalize run/integration state;
-7. clean disposable validation workspaces;
-8. reclaim checkpoint material for terminal runs past retention.
+2. repair terminal-run consistency (a cancelled run's running attempts become cancelled; a terminal run's leftover pending approvals are invalidated);
+3. remove unreferenced checkpoint debris and restore-staging leftovers;
+4. restore interrupted write attempts from their verified pre-attempt checkpoint;
+5. reconcile publication journals (recognize already-published targets, resume the safe remainder, or block on unexpected source state) and finalize run/integration state;
+6. clean disposable validation workspaces;
+7. reclaim checkpoint material for terminal runs past retention.
 
-The scheduler starts only after this recovery completes. Harness discovery/probing runs only after recovery and is sandboxed by ProbePolicy, so it cannot read or mutate recovery state and any stale probe descendant has already been terminated; no run is scheduled before recovery finishes.
+The scheduler starts only after this recovery completes. Harness discovery/probing runs only after recovery; no run is scheduled before recovery finishes.
 
-## 30. Process supervision
+## 30. Process lifecycle
 
-Launched harness/tool/probe/validation processes are associated with run/stage/attempt identity. On Linux each required launch runs under a trusted in-binary **PID-namespace supervisor** that remains namespace init; the target and all descendants live in that namespace, a process cannot leave its PID namespace, and killing namespace init (the direct child) tears every descendant down — including setsid/double-forked processes. A **death pipe** whose write end the parent holds tears the namespace down when the server (or provider shim) dies, so a crash does not leave an orphan. A scoped procfs is mounted only when a policy requests `ProcIsolation`.
+Launched harness/tool/validation/probe processes run as the server OS user. On Unix they run in their own process group so the whole group can be terminated together; on Windows the direct child is terminated. Cancellation, timeout, and shutdown terminate processes best-effort.
 
-The per-attempt ownership token remains as a cooperative/diagnostic hint (and lets Linux recovery find a surviving supervisor); the token hash is persisted before launch. The token is never treated as proof of ownership of a hostile process, because an untrusted process controls its children's environment. macOS and Windows cannot establish a non-removable ownership boundary, so they do not advertise `FeatureProcessTree` and required local execution fails closed before untrusted code runs.
+Cleanup is best-effort by design. A deliberately daemonizing process can outlive a server crash; Wayshard does not attempt to be a service manager, and durable correctness never depends on killing a process. Recovery reconciles durable state (attempts, checkpoints, runs, journals) rather than process trees.
 
-Graceful shutdown stops new work, drains/checkpoints active runs where practical, marks interrupted attempts accurately, and then terminates managed processes.
+Graceful shutdown stops new work, drains/checkpoints active runs where practical, marks interrupted attempts accurately, and then terminates managed processes best-effort.
 
 ## 31. Failure taxonomy
 
 Representative categories:
 
-- infrastructure: harness crash, provider error, rate limit, network error, server restart, sandbox failure, timeout, disk full;
+- infrastructure: harness crash, provider error, rate limit, network error, server restart, timeout, disk full;
 - task: validation failure, review rejection, impossible requirement, unresolved integration conflict;
 - policy: permission denied, budget exceeded, forbidden action;
 - user: cancellation, changed requirements;
@@ -707,7 +636,7 @@ The server derives durable notifications/attention from domain state/events. Cli
 
 ## 34. Backups and storage GC
 
-A backup captures a consistent SQLite snapshot plus all object-store content referenced by that snapshot and relevant configuration. Repositories are excluded by default.
+A backup captures a consistent SQLite snapshot plus all object-store content referenced by that snapshot and relevant configuration. Repositories are excluded by default. Wayshard credentials live in restricted config files and are excluded from a control-plane backup by default.
 
 Object GC is mark-and-sweep based on durable references plus active run/backup pins. Workspace cleanup follows explicit retention policy rather than object age alone.
 

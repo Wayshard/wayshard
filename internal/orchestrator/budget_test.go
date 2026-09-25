@@ -15,9 +15,8 @@ type budgetCandidates struct{}
 
 func (budgetCandidates) Candidates(context.Context) ([]routing.Candidate, error) {
 	return []routing.Candidate{{
-		Harness:   domain.HarnessInstallation{ID: "h1", DisplayName: "stub", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable, Isolation: domain.IsolationOuterOnly},
-		ModelID:   "m1",
-		Isolation: domain.IsolationOuterOnly,
+		Harness: domain.HarnessInstallation{ID: "h1", DisplayName: "stub", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable},
+		ModelID: "m1",
 	}}, nil
 }
 

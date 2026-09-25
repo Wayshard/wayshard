@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Wayshard/wayshard/internal/credentials"
 	"github.com/Wayshard/wayshard/internal/crypto"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/id"
-	"github.com/Wayshard/wayshard/internal/secrets"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
 
@@ -32,9 +32,9 @@ var (
 )
 
 type Service struct {
-	Store  *storage.Store
-	Vault  *secrets.Vault
-	Listen string
+	Store       *storage.Store
+	Credentials *credentials.Store
+	Listen      string
 }
 
 type PairingResult struct {
@@ -72,7 +72,7 @@ type Principal struct {
 func (s *Service) EnsureIdentity(ctx context.Context) (*domain.ServerIdentity, ed25519.PrivateKey, error) {
 	ident, err := s.Store.GetServerIdentity(ctx)
 	if err == nil {
-		priv, err := s.Vault.Get(ctx, "server.identity.private")
+		priv, err := s.Credentials.Get(ctx, "server.identity.private")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -91,7 +91,7 @@ func (s *Service) EnsureIdentity(ctx context.Context) (*domain.ServerIdentity, e
 		DisplayName: "Wayshard",
 		CreatedAt:   time.Now().UTC(),
 	}
-	if err := s.Vault.Put(ctx, "server.identity.private", priv); err != nil {
+	if err := s.Credentials.Put(ctx, "server.identity.private", priv); err != nil {
 		return nil, nil, err
 	}
 	if err := s.Store.UpsertServerIdentity(ctx, *ident); err != nil {

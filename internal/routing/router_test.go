@@ -21,7 +21,7 @@ func TestHardFilterImpossible(t *testing.T) {
 func TestForcedImpossibleRejected(t *testing.T) {
 	r := Router{}
 	cands := []Candidate{{
-		Harness: domain.HarnessInstallation{ID: "open", DisplayName: "OpenCode", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable, Isolation: domain.IsolationAdapterBridge},
+		Harness: domain.HarnessInstallation{ID: "open", DisplayName: "OpenCode", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable},
 		ModelID: "gpt",
 	}}
 	d := r.Route(context.Background(), domain.StagePlan, Config{ForceModel: "nope"}, cands, nil)
@@ -42,7 +42,7 @@ func TestUnauthNotRoutable(t *testing.T) {
 
 func TestJevNeverChoosesImpossible(t *testing.T) {
 	r := Router{Engine: jev.DeterministicEngine{}}
-	good := Candidate{Harness: domain.HarnessInstallation{ID: "ok", DisplayName: "ok", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable, Isolation: domain.IsolationNative}, ModelID: "m"}
+	good := Candidate{Harness: domain.HarnessInstallation{ID: "ok", DisplayName: "ok", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable}, ModelID: "m"}
 	bad := Candidate{Harness: domain.HarnessInstallation{ID: "bad", Health: domain.HarnessUnavailable, Compatibility: domain.CompatIncompatible}}
 	d := r.Route(context.Background(), domain.StagePlan, Config{Profile: domain.ProfileAuto}, []Candidate{bad, good}, &jev.Assessment{Degraded: true})
 	if d.Blocked != "" {

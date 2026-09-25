@@ -17,7 +17,6 @@ import (
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/harness"
 	"github.com/Wayshard/wayshard/internal/knowledge"
-	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/workspace"
 	"github.com/coder/websocket"
@@ -158,17 +157,16 @@ func (s *Server) createBackup(w http.ResponseWriter, r *http.Request, _ *auth.Pr
 	writeJSON(w, 200, map[string]any{"ok": true, "dest": body.Dest, "includesRepos": false, "includesSecrets": body.IncludeSecrets})
 }
 
-func (s *Server) sandboxInfo(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
+// runtimeInfo reports the Wayshard execution trust model. Discovered harnesses
+// and tools run as the Wayshard server OS user with their normal configuration,
+// environment, filesystem and network access; there is no OS-level sandbox.
+func (s *Server) runtimeInfo(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
 	_ = r
-	report := sandbox.Probe()
 	writeJSON(w, 200, map[string]any{
-		"backend":         report.Backend,
-		"available":       report.Available,
-		"mode":            report.Mode,
-		"features":        report.Features,
-		"missing":         report.Missing,
-		"detail":          report.Detail,
-		"providerNetwork": s.ProviderNet,
+		"trustModel":    "trusted_local",
+		"executionUser": "wayshard server OS user",
+		"sandboxing":    false,
+		"isolation":     "os_user",
 	})
 }
 
@@ -178,16 +176,14 @@ func (s *Server) sandboxInfo(w http.ResponseWriter, r *http.Request, _ *auth.Pri
 func (s *Server) harnessDefinitions(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
 	_ = r
 	type row struct {
-		ID                      string   `json:"id"`
-		DisplayName             string   `json:"displayName"`
-		Source                  string   `json:"source"`
-		Enabled                 bool     `json:"enabled"`
-		ACP                     string   `json:"acp"`
-		Executables             []string `json:"executables,omitempty"`
-		Bridges                 []string `json:"bridges,omitempty"`
-		Platforms               []string `json:"platforms,omitempty"`
-		RequiresProviderNetwork bool     `json:"requiresProviderNetwork"`
-		DeclaredTransport       string   `json:"declaredTransport"`
+		ID          string   `json:"id"`
+		DisplayName string   `json:"displayName"`
+		Source      string   `json:"source"`
+		Enabled     bool     `json:"enabled"`
+		ACP         string   `json:"acp"`
+		Executables []string `json:"executables,omitempty"`
+		Bridges     []string `json:"bridges,omitempty"`
+		Platforms   []string `json:"platforms,omitempty"`
 	}
 	defs := []row{}
 	var diags []harness.CatalogDiagnostic
@@ -197,7 +193,6 @@ func (s *Server) harnessDefinitions(w http.ResponseWriter, r *http.Request, _ *a
 			defs = append(defs, row{
 				ID: d.ID, DisplayName: d.DisplayName, Source: string(d.Source), Enabled: d.Enabled,
 				ACP: d.ACP, Executables: d.Executables, Bridges: d.Bridges, Platforms: d.Platforms,
-				RequiresProviderNetwork: d.RequiresProviderNetwork, DeclaredTransport: d.DeclaredTransport,
 			})
 		}
 	}

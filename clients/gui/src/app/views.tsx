@@ -202,14 +202,14 @@ export function RoutingView() {
       <h3>Harness inventory</h3>
       <Show when={!harnesses.loading} fallback={<Loading />}>
         <Table
-          columns={["definition", "executable", "bridge", "acp", "health", "transport"]}
+          columns={["definition", "executable", "bridge", "acp", "health", "model"]}
           rows={((harnesses() ?? []) as Array<Record<string, unknown>>).map((h) => [
             String(h.definitionId ?? ""),
             String(h.executable ?? ""),
             String(h.bridgeExecutable ?? ""),
             String(h.acpStatus ?? ""),
             String(h.health ?? ""),
-            String(h.providerTransport ?? ""),
+            String(h.modelSelection ?? ""),
           ])}
         />
       </Show>
@@ -284,7 +284,7 @@ export function HarnessesView() {
       <h3>Installations</h3>
       <Show when={!installations.loading} fallback={<Loading />}>
         <Table
-          columns={["definition", "source", "executable", "bridge", "version", "acp", "auth", "transport", "blocking"]}
+          columns={["definition", "source", "executable", "bridge", "version", "acp", "auth", "model", "blocking"]}
           rows={((installations() ?? []) as Array<Record<string, unknown>>).map((h) => [
             String(h.definitionId ?? ""),
             String(h.definitionSource ?? ""),
@@ -293,7 +293,7 @@ export function HarnessesView() {
             String(h.version ?? ""),
             String(h.acpStatus ?? ""),
             String(h.authStatus ?? ""),
-            String(h.providerTransport ?? ""),
+            String(h.modelSelection ?? ""),
             String(h.blockingReason ?? ""),
           ])}
         />
@@ -338,7 +338,7 @@ export function RecoveryView() {
 export function ApprovalsView() {
   const ws = useWayshard()
   return (
-    <Panel title="Approvals" hint="Durable server-owned approvals. Approving is policy, not a sandbox bypass.">
+    <Panel title="Approvals" hint="Durable server-owned approvals. Approving is policy, not OS containment.">
       <Show when={ws.state.approvals.length} fallback={<EmptyState title="No pending approvals" />}>
         <ul class="wh-file-list">
           <For each={ws.state.approvals}>

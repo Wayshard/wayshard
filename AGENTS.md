@@ -32,7 +32,7 @@ If an intentional implementation change materially alters a canonical decision, 
 7. **Agents never experiment directly in the user's source working tree.** Every run uses an isolated run workspace created from the exact meaningful source state captured at task intake.
 8. **Pre-existing user changes are baseline, never agent output.** Run delta is `starting snapshot -> run final`, not `HEAD -> run final`.
 9. **The server owns final validation and completion decisions.** An agent saying “done” is not evidence of completion.
-10. **Permissions are policy/UX; OS containment is security.** Never silently downgrade a requested sandbox into unrestricted execution.
+10. **Harnesses and tools run as the server OS user.** Discovered ACP harnesses run with their normal configuration, authentication, environment, filesystem, and network access. Approvals are policy/UX, not OS containment. There is no separate sandbox layer.
 11. **Wayshard networking is localhost-first and intentionally simple.** The server binds to `127.0.0.1` by default and serves local HTTP/WebSocket. Secure remote exposure, TLS, DNS, VPNs, tunnels, and proxies are handled by the user's networking layer, such as Tailscale Serve. Do not add a built-in certificate-management or remote-networking product.
 12. **Authentication uses pairing and per-device credentials, not shared username/password authentication.** Pairing invitations are short-lived; each device credential is independently revocable.
 13. **Repository discovery is passive.** Opening or indexing a project must not execute project code or silently modify project files.
@@ -122,7 +122,7 @@ When a harness lacks a native structured submission mechanism, use the universal
 
 ## Harness and routing rules
 
-- Discover installed harness executables; probe actual ACP behavior before marking them routable, always under the discovery ProbePolicy.
+- Discover installed harness executables; probe actual ACP behavior before marking them routable.
 - Capability negotiation is authoritative. Never assume optional ACP features from a harness name.
 - Separate protocol driver code from known-harness adapter code.
 - Generic ACP harnesses must remain usable when they satisfy the minimum core contract.
@@ -133,19 +133,14 @@ When a harness lacks a native structured submission mechanism, use the universal
 
 ## Security rules
 
-- Platform secrets such as the TypeSafe/Jev key never enter run workspaces or harness context.
-- Harness-owned credentials stay in the harness trust domain.
-- Separate outer Harness Sandbox and stricter Tool Sandbox where the integration supports it.
-- Known adapters may provide native or adapter-mediated tool isolation; generic harnesses may be outer-only. Report effective isolation honestly.
-- ACP terminal/tool callbacks are interposed by the server; a harness never executes model-generated commands directly.
-- Harness discovery, version, ACP-initialize, and login-shell PATH probes are untrusted execution and run under a dedicated ProbePolicy. If the platform cannot enforce it, report the probe unavailable rather than run unrestricted. Login-shell PATH discovery reads only required per-shell startup files. Probes run only after startup recovery and each probe tree is durably owned for reconciliation.
-- Startup reconciliation terminates stale server-owned process trees by ownership token before restoring any workspace; never match or kill by PID alone.
+- Wayshard trusts the OS user running the server. Discovered ACP harnesses run with their normal configuration, authentication, environment, filesystem, and network access; there is no sandbox or containment layer.
+- Harness discovery, version/ACP-initialize probes, harness execution, ACP terminal/tool callbacks, and validation commands are all ordinary local execution as the server OS user. ACP terminal/tool callbacks are still interposed by the server (a harness does not execute model-generated commands itself), and process-tree cleanup is best-effort.
+- Platform secrets such as the TypeSafe/Jev key never enter run workspaces or harness context. Wayshard-owned credentials live in restricted config files (directory 0700, file 0600; user-profile ACL on Windows) or environment variables, never in ordinary SQLite fields, logs, or artifacts.
+- Harness-owned credentials stay in the harness trust domain; Wayshard does not scrape provider credentials.
 - External file approvals should normally import immutable read-only inputs rather than widen host filesystem access.
-- Network for model/provider control traffic is distinct from tool-command network access.
-- A provider-capable harness must receive provider-only network capability where the platform can enforce it (isolated network environment plus a Wayshard-controlled broker that admits only authorized, validated provider destinations); never raw host networking. Provider routes require permission, real capability, harness transport compatibility, and a destination policy. Tool and validation network remain denied by default.
-- Tool network is denied or brokered according to policy; server-owned credentials must not leak through network or process environment.
+- Model/provider control traffic is harness-owned; tool and validation commands use the server OS user's network.
 - Symlinks must not bypass filesystem boundaries.
-- Resource limits and process-tree cleanup are part of execution safety.
+- Resource limits and best-effort process-tree cleanup are part of execution safety.
 - Never persist plaintext secrets in ordinary SQLite fields, logs, artifacts, or diagnostics.
 
 ## Git and workspace rules
@@ -178,15 +173,14 @@ Every change must maintain tests appropriate to the affected layer. The intended
 - SQLite/storage integration tests including migration behavior and atomic state/event transactions.
 - Workspace/Git integration tests including dirty baselines, branch movement, concurrent source edits, conflict handling, rollback, and interrupted publication recovery.
 - Checkpoint integrity and lifecycle tests: canonical v3 tree hash, verify-then-use restore staging, attempt-scoped lineage, component-based path ownership, retention/pinning, debris cleanup, and fail-closed corruption/version/reclaimed handling.
-- Real process-boundary recovery tests that launch a compiled server as an OS subprocess, SIGKILL it, and verify a different server process recovers the same durable state for Executor, Repair, orphan reconciliation, and publication; record distinct PIDs.
+- Real process-boundary recovery tests that launch a compiled server as an OS subprocess, SIGKILL it, and verify a different server process recovers the same durable state for Executor, Repair, and publication; record distinct PIDs.
 - Publication crash-point tests: prepared-only, partial add/modify/delete, all-written/pre-final, user-edit conflict on processed and unprocessed targets, path/symlink escape, identity mismatch, and idempotent reconcile.
-- Discovery probe sandbox tests: a malicious version fixture and ACP-initialize fixture proving host/project/Wayshard-data/secret/network denial, timeout descendant cleanup, and bounded output.
+- Harness discovery tests: version/ACP-initialize probing, timeout descendant cleanup, bounded output, and deterministic catalog isolation so tests do not depend on ambient installed harnesses.
 - Approval approve, deny, cancel-while-pending, and unauthenticated-resolution tests through the real ACP permission path, asserting a denied protected operation never executes.
 - Deterministic fake ACP harnesses covering successful runs, permissions, crashes, cancellation failures, malformed frames, invalid stage output, capability violations, auth-required states, and model/config disappearance.
 - Real harness compatibility tests only in deliberately provisioned environments; normal CI must not install those harnesses.
 - Client tests for API state, reconnect/resume, multi-device transitions, run timeline, approvals, and change provenance.
 - End-to-end tests that exercise intake through integration using fake/test harnesses and no paid model dependencies.
-- Platform sandbox conformance tests appropriate to Linux, macOS, and Windows.
 
 Before declaring a task complete, run the repository-defined mandatory validation for the affected areas.
 

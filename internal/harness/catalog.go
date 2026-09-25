@@ -11,11 +11,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
-	"sync"
 
 	"github.com/BurntSushi/toml"
-
-	"github.com/Wayshard/wayshard/internal/domain"
 )
 
 //go:embed harnesses.toml
@@ -62,26 +59,13 @@ type Definition struct {
 	WellKnown   []string
 	VersionArgs []string
 
-	ACP                 string // native|bridge
-	ACPArgs             []string
-	BridgeArgs          []string
-	ACPRequiresLoopback bool
-	InterposeCommands   bool
-	ModelSelection      string // none|config_option|set_model
-
-	ConfigRoots []string
-
-	RequiresProviderNetwork bool
-	DeclaredTransport       string // none|http_proxy|unknown (declared requirement)
+	ACP               string // native|bridge
+	ACPArgs           []string
+	BridgeArgs        []string
+	InterposeCommands bool
+	ModelSelection    string // none|config_option|set_model
 
 	Source DefinitionSource
-
-	// configRootsUser/wellKnownUser record whether the user catalog supplied
-	// these fields. Shipped definitions are trusted product configuration; a
-	// user-supplied value is an untrusted capability request and must satisfy a
-	// stricter policy.
-	configRootsUser bool
-	wellKnownUser   bool
 }
 
 // executionIdentity is the canonical, versioned serialization of the fields
@@ -89,21 +73,17 @@ type Definition struct {
 // metadata (display_name, homepage) and bookkeeping (enabled, source) are
 // excluded.
 type executionIdentity struct {
-	Version                 string   `json:"version"`
-	Executables             []string `json:"executables"`
-	Bridges                 []string `json:"bridges"`
-	WellKnown               []string `json:"well_known"`
-	VersionArgs             []string `json:"version_args"`
-	ACP                     string   `json:"acp"`
-	ACPArgs                 []string `json:"acp_args"`
-	BridgeArgs              []string `json:"bridge_args"`
-	ACPRequiresLoopback     bool     `json:"acp_requires_loopback"`
-	InterposeCommands       bool     `json:"interpose_commands"`
-	ModelSelection          string   `json:"model_selection"`
-	ConfigRoots             []string `json:"config_roots"`
-	Platforms               []string `json:"platforms"`
-	RequiresProviderNetwork bool     `json:"requires_provider_network"`
-	DeclaredTransport       string   `json:"transport"`
+	Version           string   `json:"version"`
+	Executables       []string `json:"executables"`
+	Bridges           []string `json:"bridges"`
+	WellKnown         []string `json:"well_known"`
+	VersionArgs       []string `json:"version_args"`
+	ACP               string   `json:"acp"`
+	ACPArgs           []string `json:"acp_args"`
+	BridgeArgs        []string `json:"bridge_args"`
+	InterposeCommands bool     `json:"interpose_commands"`
+	ModelSelection    string   `json:"model_selection"`
+	Platforms         []string `json:"platforms"`
 }
 
 // ExecutionFingerprint returns a deterministic SHA-256 over the definition's
@@ -112,21 +92,17 @@ type executionIdentity struct {
 // change produces a different one.
 func (d Definition) ExecutionFingerprint() string {
 	ident := executionIdentity{
-		Version:                 executionIdentityVersion,
-		Executables:             d.Executables,
-		Bridges:                 d.Bridges,
-		WellKnown:               d.WellKnown,
-		VersionArgs:             d.VersionArgs,
-		ACP:                     d.ACP,
-		ACPArgs:                 d.ACPArgs,
-		BridgeArgs:              d.BridgeArgs,
-		ACPRequiresLoopback:     d.ACPRequiresLoopback,
-		InterposeCommands:       d.InterposeCommands,
-		ModelSelection:          d.ModelSelection,
-		ConfigRoots:             d.ConfigRoots,
-		Platforms:               d.Platforms,
-		RequiresProviderNetwork: d.RequiresProviderNetwork,
-		DeclaredTransport:       d.DeclaredTransport,
+		Version:           executionIdentityVersion,
+		Executables:       d.Executables,
+		Bridges:           d.Bridges,
+		WellKnown:         d.WellKnown,
+		VersionArgs:       d.VersionArgs,
+		ACP:               d.ACP,
+		ACPArgs:           d.ACPArgs,
+		BridgeArgs:        d.BridgeArgs,
+		InterposeCommands: d.InterposeCommands,
+		ModelSelection:    d.ModelSelection,
+		Platforms:         d.Platforms,
 	}
 	b, err := json.Marshal(ident)
 	if err != nil {
@@ -238,51 +214,6 @@ func ShippedCatalog() *Catalog {
 		return &Catalog{SchemaVersion: CatalogSchemaVersion}
 	}
 	return cat
-}
-
-var (
-	shippedOnce sync.Once
-	shippedVal  *Catalog
-)
-
-// shippedCatalog returns the parsed shipped catalog, cached. It is the trusted
-// reference used for provider-transport verification.
-func shippedCatalog() *Catalog {
-	shippedOnce.Do(func() { shippedVal = ShippedCatalog() })
-	return shippedVal
-}
-
-// VerifiedTransport returns Wayshard's evidence-based provider transport for an
-// effective definition. Verification binds to the definition's execution
-// fingerprint: the id is only an identity label. A definition receives verified
-// transport only when its execution identity matches the trusted shipped
-// definition exactly, so a user override that changes the executable, ACP mode,
-// args, loopback/interposition behavior, config roots or discovery data loses
-// trust and fails closed (TransportUnknown).
-func VerifiedTransport(def Definition) domain.ProviderTransport {
-	t, ok := verifiedProviderTransports[def.ID]
-	if !ok {
-		return domain.TransportUnknown
-	}
-	shipped, ok := shippedCatalog().ByID(def.ID)
-	if !ok {
-		return domain.TransportUnknown
-	}
-	if def.ExecutionFingerprint() == "" || def.ExecutionFingerprint() != shipped.ExecutionFingerprint() {
-		return domain.TransportUnknown
-	}
-	return t
-}
-
-// verifiedProviderTransports lists shipped harness definitions whose real
-// provider traffic has been observed traversing the secure broker. It is a
-// verification record, not a discovery catalog: adding a harness to the
-// discovery catalog does not grant it provider transport trust, and a user
-// override does not inherit trust merely by reusing an id.
-var verifiedProviderTransports = map[string]domain.ProviderTransport{
-	"opencode":          domain.TransportHTTPProxy,
-	"codex":             domain.TransportHTTPProxy,
-	"wayshard-fake-acp": domain.TransportHTTPProxy, // deterministic fixture
 }
 
 func buildCatalog(shippedText, userText string) (*Catalog, error) {
@@ -413,12 +344,11 @@ var (
 	forbidden   = map[string]struct{}{"npx": {}, "npm": {}, "yarn": {}, "pnpm": {}, "bun": {}, "bunx": {}, "deno": {}, "pipx": {}, "uvx": {}}
 	validACP    = map[string]struct{}{"native": {}, "bridge": {}}
 	validModel  = map[string]struct{}{"none": {}, "config_option": {}, "set_model": {}}
-	validTrans  = map[string]struct{}{"none": {}, "http_proxy": {}, "unknown": {}}
 	validPlatfs = map[string]struct{}{"linux": {}, "darwin": {}, "windows": {}}
 )
 
 func decodeDefinition(id string, m map[string]any, source DefinitionSource, userKeys map[string]bool) (Definition, []CatalogDiagnostic) {
-	d := Definition{ID: id, Enabled: true, Source: source, ModelSelection: "none", DeclaredTransport: "unknown"}
+	d := Definition{ID: id, Enabled: true, Source: source, ModelSelection: "none"}
 	var diags []CatalogDiagnostic
 	fail := func(field, msg string) {
 		diags = append(diags, CatalogDiagnostic{Source: string(source), ID: id, Field: field, Message: msg})
@@ -426,8 +356,6 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource, user
 	if !idRe.MatchString(id) {
 		fail("id", "must match ^[a-z0-9][a-z0-9-]*$")
 	}
-	d.configRootsUser = userKeys["config_roots"]
-	d.wellKnownUser = userKeys["well_known"]
 	for k, v := range m {
 		switch k {
 		case "id":
@@ -459,18 +387,10 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource, user
 			d.ACPArgs = asStringList(v, k, fail)
 		case "bridge_args":
 			d.BridgeArgs = asStringList(v, k, fail)
-		case "acp_requires_loopback":
-			d.ACPRequiresLoopback = asBool(v, k, fail)
 		case "interpose_commands":
 			d.InterposeCommands = asBool(v, k, fail)
 		case "model_selection":
 			d.ModelSelection = asString(v, k, fail)
-		case "config_roots":
-			d.ConfigRoots = asStringList(v, k, fail)
-		case "requires_provider_network":
-			d.RequiresProviderNetwork = asBool(v, k, fail)
-		case "transport":
-			d.DeclaredTransport = asString(v, k, fail)
 		default:
 			fail(k, "unknown field")
 		}
@@ -490,14 +410,14 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource, user
 		{"version_args", maxListEntries, d.VersionArgs},
 		{"acp_args", maxArgEntries, d.ACPArgs},
 		{"bridge_args", maxArgEntries, d.BridgeArgs},
-		{"config_roots", maxListEntries, d.ConfigRoots},
 		{"platforms", maxListEntries, d.Platforms},
 	} {
 		if len(l.list) > l.lim {
 			fail(l.field, fmt.Sprintf("has %d entries, exceeding the %d limit", len(l.list), l.lim))
 		}
 	}
-	// Security and consistency validation.
+	// Executable validation: bare names only, never package-runner launchers
+	// (Wayshard never installs harnesses).
 	for _, name := range append(append([]string{}, d.Executables...), d.Bridges...) {
 		if !execNameRe.MatchString(name) {
 			fail("executables", fmt.Sprintf("invalid executable name %q", name))
@@ -506,22 +426,10 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource, user
 			fail("executables", fmt.Sprintf("refusing package-runner launcher %q (Wayshard never installs harnesses)", name))
 		}
 	}
+	// Well-known discovery dirs must be home-relative and contain no traversal.
 	for _, root := range d.WellKnown {
 		if err := validateRootSyntax(root); err != nil {
 			fail("well_known", err.Error())
-			continue
-		}
-		if err := validateRootPolicy(root, d.wellKnownUser); err != nil {
-			fail("well_known", err.Error())
-		}
-	}
-	for _, root := range d.ConfigRoots {
-		if err := validateRootSyntax(root); err != nil {
-			fail("config_roots", err.Error())
-			continue
-		}
-		if err := validateRootPolicy(root, d.configRootsUser); err != nil {
-			fail("config_roots", err.Error())
 		}
 	}
 	if d.ACP == "" {
@@ -536,9 +444,6 @@ func decodeDefinition(id string, m map[string]any, source DefinitionSource, user
 	}
 	if _, ok := validModel[d.ModelSelection]; !ok {
 		fail("model_selection", fmt.Sprintf("must be one of none|config_option|set_model (got %q)", d.ModelSelection))
-	}
-	if _, ok := validTrans[d.DeclaredTransport]; !ok {
-		fail("transport", fmt.Sprintf("must be one of none|http_proxy|unknown (got %q)", d.DeclaredTransport))
 	}
 	for _, p := range d.Platforms {
 		if _, ok := validPlatfs[p]; !ok {
@@ -606,45 +511,16 @@ var sensitiveRootComponents = map[string]struct{}{
 	".bashrc": {}, ".bash_profile": {}, ".profile": {}, ".zshrc": {}, ".bash_history": {},
 }
 
-// platformConfigBases returns the home-relative platform configuration/state
-// directories a user-supplied root may live beneath.
-func platformConfigBases() []string {
-	switch runtime.GOOS {
-	case "windows":
-		return []string{"AppData/Roaming", "AppData/Local", "AppData/LocalLow"}
-	case "darwin":
-		return []string{"Library/Application Support", "Library/Caches", "Library/Logs", "Library/Preferences"}
-	default:
-		return []string{".config", ".local/share", ".local/state", ".cache", ".local"}
-	}
-}
+// platformConfigBases and the sensitive-root policy were part of the removed
+// containment model. Only the home-relative syntax check remains, because
+// discovery search directories must stay inside HOME.
 
 func firstComponent(p string) string {
 	return strings.Split(filepath.ToSlash(p), "/")[0]
 }
 
-func isPlatformBase(p string) bool {
-	pc := filepath.ToSlash(filepath.Clean(p))
-	for _, b := range platformConfigBases() {
-		if pc == b {
-			return true
-		}
-	}
-	return false
-}
-
-func beneathPlatformBase(p string) bool {
-	pc := filepath.ToSlash(filepath.Clean(p))
-	for _, b := range platformConfigBases() {
-		if strings.HasPrefix(pc, b+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-func isSensitiveRoot(p string) bool {
-	_, bad := sensitiveRootComponents[firstComponent(p)]
+func sensitiveRel(rel string) bool {
+	_, bad := sensitiveRootComponents[firstComponent(rel)]
 	return bad
 }
 
@@ -671,37 +547,10 @@ func validateRootSyntax(p string) error {
 	return nil
 }
 
-// validateRootPolicy applies the trusted/untrusted distinction. Shipped roots
-// are trusted product configuration (already narrow). User-supplied roots are
-// untrusted capability requests and must live beneath a platform
-// config/data/state/cache directory or a dot-directory, and must never be a
-// sensitive location, HOME or a platform base itself.
-func validateRootPolicy(p string, userProvided bool) error {
-	if err := validateRootSyntax(p); err != nil {
-		return err
-	}
-	if isPlatformBase(p) {
-		return fmt.Errorf("root %q is a platform directory, not a harness-specific directory", p)
-	}
-	if !userProvided {
-		return nil
-	}
-	if beneathPlatformBase(p) {
-		return nil
-	}
-	if isSensitiveRoot(p) {
-		return fmt.Errorf("user root %q is a sensitive location and is not permitted", p)
-	}
-	if strings.HasPrefix(firstComponent(p), ".") {
-		return nil
-	}
-	return fmt.Errorf("user root %q must be beneath a platform config/data/state/cache directory or a dot-directory", p)
-}
-
 // resolveRootSafe canonicalizes a home-relative root without following a
-// user-controlled symlink out of the home directory, and without resolving onto
-// a sensitive location. It returns the resolved absolute path. Non-existent
-// components are permitted (a harness may create them later).
+// user-controlled symlink out of the home directory. It returns the resolved
+// absolute path. Non-existent components are permitted (a harness may create
+// them later).
 func resolveRootSafe(home, r string) (string, error) {
 	if home == "" {
 		return "", fmt.Errorf("home is unknown")
@@ -751,11 +600,6 @@ func resolveRootSafe(home, r string) (string, error) {
 		return "", fmt.Errorf("root %q resolves to a sensitive location", r)
 	}
 	return cur, nil
-}
-
-func sensitiveRel(rel string) bool {
-	_, bad := sensitiveRootComponents[firstComponent(rel)]
-	return bad
 }
 
 func platformAllowed(platforms []string, goos string) bool {

@@ -159,14 +159,3 @@ func harnessEnvPATH(exePath, ambient string) string {
 	}
 	return prefix + sep + ambient
 }
-
-// harnessProcRoots returns the /proc root some runtimes (for example Bun/JSC)
-// require at startup. For harness/probe policies this is safe because
-// ProcIsolation gives the process a private procfs scoped to its own PID
-// namespace; tools and validation never receive it.
-func harnessProcRoots() []string {
-	if st, err := os.Stat("/proc"); err == nil && st.IsDir() {
-		return []string{"/proc"}
-	}
-	return nil
-}

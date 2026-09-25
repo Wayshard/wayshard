@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/domain"
-	"github.com/Wayshard/wayshard/internal/testutil"
 )
 
 // TestCancellationInterruptsActiveHarness proves cancellation propagates to the
@@ -18,7 +17,6 @@ import (
 func TestCancellationInterruptsActiveHarness(t *testing.T) {
 	// Cancellation propagates through an actually-running harness, so it needs a
 	// platform that can launch one under required isolation (Linux).
-	testutil.RequireNativeIsolation(t)
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "timeout")

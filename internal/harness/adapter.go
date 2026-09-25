@@ -1,8 +1,10 @@
 // Package harness discovers installed coding harnesses from the effective
-// harness catalog and maps them onto ACP launch and honestly reported
-// isolation/resume capabilities.
+// harness catalog and maps them onto ACP launch and negotiated resume
+// capabilities.
 //
 // Wayshard never installs, downloads, or bootstraps harnesses or ACP bridges.
+// Discovered harnesses run as the Wayshard server OS user with their normal
+// configuration, authentication, environment, filesystem and network access.
 // Capability negotiation is authoritative; optional ACP features are never
 // inferred from an executable name. Harness behavior is described declaratively
 // by the catalog (internal/harness/harnesses.toml and the user catalog), not by
@@ -42,65 +44,36 @@ type Installation struct {
 	VersionError string
 
 	// ACPStatus is a structured discovery outcome:
-	// ok | incompatible | bridge_missing | probe_unavailable | loopback_unavailable | disabled.
+	// ok | incompatible | bridge_missing | disabled.
 	ACPStatus      string
 	ACPError       string
 	BlockingReason string
 
-	Dir             string
-	Health          domain.HarnessHealth
-	Compatibility   domain.CompatibilityClass
-	Isolation       domain.IsolationMode
-	IsolationDetail string
-	Resume          domain.SessionResumeCapability
-	AuthStatus      string
-	Capabilities    acp.AgentCapabilities
-	AgentInfo       acp.Implementation
-	AuthMethods     []acp.AuthMethod
-	Notes           []string
+	Dir           string
+	Health        domain.HarnessHealth
+	Compatibility domain.CompatibilityClass
+	Resume        domain.SessionResumeCapability
+	AuthStatus    string
+	Capabilities  acp.AgentCapabilities
+	AgentInfo     acp.Implementation
+	AuthMethods   []acp.AuthMethod
+	Notes         []string
 
 	// Catalog-derived behavior carried to the executor.
-	InterposeCommands       bool
-	ModelSelection          string
-	RequiresProviderNetwork bool
-	DeclaredTransport       string
-	ConfigRoots             []string
-	ACPRequiresLoopback     bool
+	InterposeCommands bool
+	ModelSelection    string
 	// DefinitionFingerprint is the execution fingerprint of the effective
 	// definition that produced this installation. A persisted installation is
 	// only current while the fingerprint still matches the effective catalog.
 	DefinitionFingerprint string
-	// ProviderTransport is the verified provider transport for the effective
-	// definition (fingerprint-bound, not id-bound).
-	ProviderTransport domain.ProviderTransport
 }
 
-// ACPArgs returns the argv used to speak ACP for this installation.
+// definitionACPArgs returns the argv used to speak ACP for this installation.
 func definitionACPArgs(def Definition) []string {
 	if def.ACP == "bridge" {
 		return append([]string{}, def.BridgeArgs...)
 	}
 	return append([]string{}, def.ACPArgs...)
-}
-
-func definitionIsolation(def Definition, caps acp.AgentCapabilities) domain.IsolationMode {
-	if caps.NativeSandboxAdvertised() {
-		return domain.IsolationNative
-	}
-	if def.InterposeCommands {
-		return domain.IsolationAdapterBridge
-	}
-	return domain.IsolationOuterOnly
-}
-
-func definitionIsolationDetail(def Definition, caps acp.AgentCapabilities) string {
-	if caps.NativeSandboxAdvertised() {
-		return "harness advertised native tool sandbox"
-	}
-	if def.InterposeCommands {
-		return "adapter_bridge: Wayshard interposes ACP terminal/fs; inner harness tools are not independently verified"
-	}
-	return "outer_only: no inner tool sandbox verified; outer harness process only"
 }
 
 func normalizeExecName(path string) string {

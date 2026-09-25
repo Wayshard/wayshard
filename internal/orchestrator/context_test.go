@@ -80,9 +80,8 @@ func TestStageContextIsInjected(t *testing.T) {
 		Context:       nil,
 		ContextBudget: 12000,
 		Candidates: candidateList{{
-			Harness: domain.HarnessInstallation{ID: "fake", DisplayName: "fake", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable, Isolation: domain.IsolationOuterOnly},
+			Harness: domain.HarnessInstallation{ID: "fake", DisplayName: "fake", Health: domain.HarnessReady, Compatibility: domain.CompatRoutable},
 			ModelID: "fake",
-			Network: domain.NetworkNone,
 		}},
 	}
 	if err := eng.ProcessRun(ctx, run.ID); err != nil {

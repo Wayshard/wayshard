@@ -522,9 +522,9 @@ func (s *Store) InsertRouteDecision(ctx context.Context, d *domain.RouteDecision
 		deg = 1
 	}
 	return s.WithTx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO route_decisions(id, run_id, stage_id, assessment_id, harness_id, model_id, effort, profile, isolation, fallbacks_json, policy_version, reason, degraded, created_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			d.ID, d.RunID, d.StageID, d.AssessmentID, d.HarnessID, d.ModelID, d.Effort, string(d.Profile), string(d.Isolation), d.FallbacksJSON, d.PolicyVersion, d.Reason, deg, d.CreatedAt.Format(time.RFC3339Nano)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO route_decisions(id, run_id, stage_id, assessment_id, harness_id, model_id, effort, profile, fallbacks_json, policy_version, reason, degraded, created_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			d.ID, d.RunID, d.StageID, d.AssessmentID, d.HarnessID, d.ModelID, d.Effort, string(d.Profile), d.FallbacksJSON, d.PolicyVersion, d.Reason, deg, d.CreatedAt.Format(time.RFC3339Nano)); err != nil {
 			return err
 		}
 		_, err := InsertEventJSON(ctx, tx, "route.decided", "", "", d.RunID, map[string]any{

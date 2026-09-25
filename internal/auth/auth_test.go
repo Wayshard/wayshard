@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Wayshard/wayshard/internal/secrets"
+	"github.com/Wayshard/wayshard/internal/credentials"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
 
@@ -16,11 +16,11 @@ func TestPairingRoundTripAndRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	v, err := secrets.Open(dir+"/vault", secrets.FileProvider{Path: dir + "/vault.key"})
+	creds, err := credentials.Open(dir + "/credentials")
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{Store: st, Vault: v, Listen: "http://127.0.0.1:7420"}
+	svc := &Service{Store: st, Credentials: creds, Listen: "http://127.0.0.1:7420"}
 	inv, err := svc.CreateInvitation(ctx, "https://host.ts.net", "test")
 	if err != nil {
 		t.Fatal(err)
@@ -55,8 +55,8 @@ func TestWrongFingerprintRejected(t *testing.T) {
 	dir := t.TempDir()
 	st, _ := storage.Open(ctx, dir)
 	defer st.Close()
-	v, _ := secrets.Open(dir+"/vault", secrets.FileProvider{Path: dir + "/vault.key"})
-	svc := &Service{Store: st, Vault: v, Listen: "http://127.0.0.1:7420"}
+	creds, _ := credentials.Open(dir + "/credentials")
+	svc := &Service{Store: st, Credentials: creds, Listen: "http://127.0.0.1:7420"}
 	inv, err := svc.CreateInvitation(ctx, "", "t")
 	if err != nil {
 		t.Fatal(err)

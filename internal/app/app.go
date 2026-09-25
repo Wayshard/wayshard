@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/api"
 	"github.com/Wayshard/wayshard/internal/auth"
+	"github.com/Wayshard/wayshard/internal/credentials"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/events"
 	"github.com/Wayshard/wayshard/internal/harness"
@@ -21,13 +22,10 @@ import (
 	"github.com/Wayshard/wayshard/internal/notifications"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/paths"
-	"github.com/Wayshard/wayshard/internal/provider"
 	"github.com/Wayshard/wayshard/internal/pty"
 	"github.com/Wayshard/wayshard/internal/recovery"
 	"github.com/Wayshard/wayshard/internal/routing"
-	"github.com/Wayshard/wayshard/internal/sandbox"
 	"github.com/Wayshard/wayshard/internal/scheduler"
-	"github.com/Wayshard/wayshard/internal/secrets"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/validation"
 )
@@ -50,28 +48,20 @@ type Config struct {
 	JevKey    string
 	JevModel  string
 	Log       *slog.Logger
-	// AllowProviderNetwork is user/policy permission for provider-backed
-	// harness routes. It defaults to false (fail closed).
-	AllowProviderNetwork bool
-	// ProviderDestinations is the authorized provider endpoint policy.
-	ProviderDestinations []domain.ProviderDestination
-	// ProviderModel is the default model id applied to provider-backed
-	// candidates that do not advertise models themselves.
-	ProviderModel string
 	// HarnessCatalogPath overrides the user harness catalog path. Empty uses the
 	// platform config location.
 	HarnessCatalogPath string
 }
 
 type App struct {
-	Store  *storage.Store
-	Vault  *secrets.Vault
-	Auth   *auth.Service
-	Hub    *events.Hub
-	Engine *orchestrator.Engine
-	Sched  *scheduler.Scheduler
-	API    *api.Server
-	Log    *slog.Logger
+	Store       *storage.Store
+	Credentials *credentials.Store
+	Auth        *auth.Service
+	Hub         *events.Hub
+	Engine      *orchestrator.Engine
+	Sched       *scheduler.Scheduler
+	API         *api.Server
+	Log         *slog.Logger
 }
 
 func Open(ctx context.Context, cfg Config) (*App, error) {
@@ -94,13 +84,12 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 	if err := st.IntegrityCheck(ctx); err != nil {
 		return nil, err
 	}
-	prov := secrets.DefaultProvider(cfg.DataDir)
-	vault, err := secrets.Open(filepath.Join(cfg.DataDir, "vault"), prov)
-	if err != nil && vault == nil {
+	creds, err := credentials.Open(filepath.Join(cfg.DataDir, "credentials"))
+	if err != nil {
 		_ = st.Close()
 		return nil, err
 	}
-	authSvc := &auth.Service{Store: st, Vault: vault, Listen: "http://" + cfg.Listen}
+	authSvc := &auth.Service{Store: st, Credentials: creds, Listen: "http://" + cfg.Listen}
 	if _, _, err := authSvc.EnsureIdentity(ctx); err != nil {
 		cfg.Log.Warn("identity", "err", err)
 	}
@@ -119,29 +108,24 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		engine = jev.NewHTTP(cfg.JevURL, key, cfg.JevModel)
 	}
 	ptym := pty.New(st)
-	providerCap := provider.Detect()
-	cfg.Log.Info("provider network capability", "available", providerCap.Available, "mode", providerCap.Mode, "reason", providerCap.Reason)
 	cat := loadHarnessCatalog(cfg.Log, cfg.HarnessCatalogPath)
-	exec := &harness.ACPExec{Store: st, Sandbox: &sandbox.Manager{Backend: sandbox.DefaultBackend()}, ProviderLog: cfg.Log, Catalog: cat}
+	exec := &harness.ACPExec{Store: st, Log: cfg.Log, Catalog: cat}
 	orch := &orchestrator.Engine{
-		Store:                st,
-		Jev:                  engine,
-		Router:               &routing.Router{Engine: engine},
-		Exec:                 exec,
-		Workspace:            &orchestrator.WorkspaceAdapter{Store: st, DataDir: cfg.DataDir},
-		Integrate:            &orchestrator.IntegrateAdapter{Store: st},
-		Validate:             &validation.Runner{Store: st, DataDir: cfg.DataDir},
-		Budget:               orchestrator.DefaultBudgets(),
-		Log:                  cfg.Log,
-		AllowProviderNetwork: cfg.AllowProviderNetwork,
-		ProviderNet:          providerCap,
-		ProviderDestinations: cfg.ProviderDestinations,
+		Store:     st,
+		Jev:       engine,
+		Router:    &routing.Router{Engine: engine},
+		Exec:      exec,
+		Workspace: &orchestrator.WorkspaceAdapter{Store: st, DataDir: cfg.DataDir},
+		Integrate: &orchestrator.IntegrateAdapter{Store: st},
+		Validate:  &validation.Runner{Store: st},
+		Budget:    orchestrator.DefaultBudgets(),
+		Log:       cfg.Log,
 	}
 	if os.Getenv("WAYSHARD_SYNTHETIC_ROUTE") == "1" {
 		orch.Candidates = syntheticCandidates{}
 		orch.Exec = nil // deterministic in-process artifacts
 	} else {
-		orch.Candidates = &storeCandidates{Store: st, Catalog: cat, Model: cfg.ProviderModel}
+		orch.Candidates = &storeCandidates{Store: st, Catalog: cat}
 	}
 	sched := scheduler.New(st, orch, cfg.Log)
 	apiSrv := &api.Server{
@@ -149,16 +133,15 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		Auth:        authSvc,
 		Hub:         hub,
 		Sched:       sched,
-		Vault:       vault,
+		Credentials: creds,
 		PTY:         ptym,
 		Log:         cfg.Log,
 		Listen:      cfg.Listen,
 		Advertise:   cfg.Advertise,
 		DataDir:     cfg.DataDir,
-		ProviderNet: providerCap,
 		Catalog:     cat,
 	}
-	a := &App{Store: st, Vault: vault, Auth: authSvc, Hub: hub, Engine: orch, Sched: sched, API: apiSrv, Log: cfg.Log}
+	a := &App{Store: st, Credentials: creds, Auth: authSvc, Hub: hub, Engine: orch, Sched: sched, API: apiSrv, Log: cfg.Log}
 	// Startup recovery is a hard gate: the scheduler must never dispatch work
 	// before interrupted runs/workspaces are reconciled. A failure here leaves
 	// the server unopened rather than running against unrecovered state.
@@ -168,10 +151,8 @@ func Open(ctx context.Context, cfg Config) (*App, error) {
 		return nil, fmt.Errorf("startup recovery: %w", err)
 	}
 	observeStartup("recovery")
-	// Harness discovery and probing run only after recovery: startup
-	// reconciliation must first terminate any stale probe descendant left by a
-	// previous server, and a probe is untrusted execution that must never run
-	// before recovery state is consistent.
+	// Harness discovery runs after recovery so interrupted state is consistent
+	// before probing executes installed executables.
 	if src, ok := orch.Candidates.(*storeCandidates); ok {
 		observeStartup("discovery.start")
 		if err := src.Refresh(ctx); err != nil {
@@ -197,9 +178,6 @@ func (a *App) Handler() http.Handler { return a.API.Handler() }
 type storeCandidates struct {
 	Store   *storage.Store
 	Catalog *harness.Catalog
-	// Model is a configured default model id applied to provider-backed
-	// candidates that do not advertise their own models.
-	Model string
 }
 
 func (s *storeCandidates) Refresh(ctx context.Context) error {
@@ -209,12 +187,6 @@ func (s *storeCandidates) Refresh(ctx context.Context) error {
 	}
 	opts := harness.DefaultDiscoverOptions()
 	opts.Probe = true
-	// If startup reconciliation could not verify prior probe ownership, do not
-	// execute new probes: fail closed rather than race a possibly-live descendant.
-	if !recovery.ProbeOwnershipReconciled() {
-		opts.Probe = false
-	}
-	opts.Owners = harness.StoreProbeOwnerSink{Store: s.Store}
 	opts.Definitions = defs
 	found, err := harness.Discover(ctx, opts)
 	if err != nil {
@@ -226,18 +198,16 @@ func (s *storeCandidates) Refresh(ctx context.Context) error {
 		next = append(next, domain.HarnessInstallation{
 			ID: inst.ID, DefinitionID: inst.DefinitionID, DisplayName: inst.DisplayName,
 			Executable: inst.Executable, Version: inst.Version, Adapter: "generic",
-			Health: inst.Health, Compatibility: inst.Compatibility, Isolation: inst.Isolation,
+			Health: inst.Health, Compatibility: inst.Compatibility,
 			AuthStatus: inst.AuthStatus, CapabilitiesJSON: string(caps),
-			Notes:                   strings.Join(inst.Notes, "; "),
-			DefinitionSource:        string(inst.DefinitionSource),
-			DefinitionFingerprint:   inst.DefinitionFingerprint,
-			BridgeExecutable:        inst.BridgeExecutable,
-			BridgePresent:           inst.BridgePresent,
-			ACPStatus:               inst.ACPStatus,
-			BlockingReason:          inst.BlockingReason,
-			ProviderTransport:       inst.ProviderTransport,
-			ModelSelection:          inst.ModelSelection,
-			RequiresProviderNetwork: inst.RequiresProviderNetwork,
+			Notes:                 strings.Join(inst.Notes, "; "),
+			DefinitionSource:      string(inst.DefinitionSource),
+			DefinitionFingerprint: inst.DefinitionFingerprint,
+			BridgeExecutable:      inst.BridgeExecutable,
+			BridgePresent:         inst.BridgePresent,
+			ACPStatus:             inst.ACPStatus,
+			BlockingReason:        inst.BlockingReason,
+			ModelSelection:        inst.ModelSelection,
 		})
 	}
 	// Replace the persisted set atomically so routing can never observe an
@@ -260,24 +230,8 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 			if !ok || !def.Enabled || def.ExecutionFingerprint() == "" || def.ExecutionFingerprint() != h.DefinitionFingerprint {
 				continue
 			}
-			// Provider transport trust is derived from the current effective
-			// definition, never from the persisted row.
-			h.ProviderTransport = harness.VerifiedTransport(def)
 		}
-		network := domain.NetworkNone
-		if h.RequiresProviderNetwork {
-			network = domain.NetworkProvider
-		}
-		cand := routing.Candidate{
-			Harness:           h,
-			Isolation:         h.Isolation,
-			Network:           network,
-			ProviderTransport: h.ProviderTransport,
-		}
-		if cand.Network == domain.NetworkProvider && cand.ModelID == "" {
-			cand.ModelID = s.Model
-		}
-		out = append(out, cand)
+		out = append(out, routing.Candidate{Harness: h})
 	}
 	return out, nil
 }
@@ -286,6 +240,11 @@ func (s *storeCandidates) Candidates(ctx context.Context) ([]routing.Candidate, 
 // malformed user catalog is reported and the shipped defaults are used so a
 // bad user file cannot make the server unusable.
 func loadHarnessCatalog(log *slog.Logger, path string) *harness.Catalog {
+	if path == "" {
+		// Environment equivalent of --harness-catalog; also lets tests pin a
+		// deterministic catalog regardless of ambient installed harnesses.
+		path = os.Getenv("WAYSHARD_HARNESS_CATALOG")
+	}
 	cat, err := harness.LoadCatalog(path)
 	if err != nil {
 		if log != nil {
@@ -316,9 +275,7 @@ func (syntheticCandidates) Candidates(context.Context) ([]routing.Candidate, err
 			DisplayName:   "synthetic",
 			Health:        domain.HarnessReady,
 			Compatibility: domain.CompatRoutable,
-			Isolation:     domain.IsolationOuterOnly,
 		},
 		ModelID: "synthetic",
-		Network: domain.NetworkNone,
 	}}, nil
 }

@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/Wayshard/wayshard/internal/auth"
+	"github.com/Wayshard/wayshard/internal/credentials"
 	"github.com/Wayshard/wayshard/internal/events"
-	"github.com/Wayshard/wayshard/internal/secrets"
 	"github.com/Wayshard/wayshard/internal/storage"
 )
 
@@ -25,13 +25,13 @@ func testAPI(t *testing.T) (*Server, *httptest.Server) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	v, err := secrets.Open(filepath.Join(dir, "vault"), secrets.FileProvider{Path: filepath.Join(dir, "vault.key")})
+	creds, err := credentials.Open(filepath.Join(dir, "credentials"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{
 		Store:  st,
-		Auth:   &auth.Service{Store: st, Vault: v, Listen: "http://127.0.0.1:7420"},
+		Auth:   &auth.Service{Store: st, Credentials: creds, Listen: "http://127.0.0.1:7420"},
 		Hub:    events.NewHub(st),
 		Listen: "127.0.0.1:7420",
 	}

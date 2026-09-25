@@ -39,8 +39,7 @@ func readyRow(id, defID, exe, fingerprint string) domain.HarnessInstallation {
 	return domain.HarnessInstallation{
 		ID: id, DefinitionID: defID, DisplayName: defID, Executable: exe, Adapter: "generic",
 		Health: domain.HarnessReady, Compatibility: domain.CompatEnhanced,
-		Isolation: domain.IsolationAdapterBridge, AuthStatus: "unknown",
-		ProviderTransport: domain.TransportHTTPProxy, RequiresProviderNetwork: true,
+		AuthStatus:            "unknown",
 		DefinitionFingerprint: fingerprint,
 	}
 }
@@ -105,25 +104,6 @@ func TestReconcileRemovedCustomDefinitionNotRoutable(t *testing.T) {
 	}
 	if _, ok := candidateFor(t, &storeCandidates{Store: st, Catalog: harness.ShippedCatalog()}, "my-harness"); ok {
 		t.Fatal("removed custom definition kept the stale installation routable")
-	}
-}
-
-func TestReconcileTransportDerivedFromCatalogNotRow(t *testing.T) {
-	ctx := context.Background()
-	st := openAuditStore(t)
-	shipped := harness.ShippedCatalog()
-	oc, _ := shipped.ByID("opencode")
-	row := readyRow("i1", "opencode", "/tmp/oc", oc.ExecutionFingerprint())
-	row.ProviderTransport = domain.TransportUnknown // a stale/incorrect persisted value
-	if err := st.UpsertHarnessInstallation(ctx, ptrRow(row)); err != nil {
-		t.Fatal(err)
-	}
-	got, ok := candidateFor(t, &storeCandidates{Store: st, Catalog: shipped}, "opencode")
-	if !ok {
-		t.Fatal("expected current opencode candidate")
-	}
-	if got.ProviderTransport != domain.TransportHTTPProxy {
-		t.Fatalf("transport = %s, want http_proxy re-derived from the effective definition", got.ProviderTransport)
 	}
 }
 

@@ -90,15 +90,6 @@ const (
 	CheckNotVerified CheckStatus = "not_verified"
 )
 
-// IsolationMode is the effective tool-execution isolation of a harness route.
-type IsolationMode string
-
-const (
-	IsolationNative        IsolationMode = "native"
-	IsolationAdapterBridge IsolationMode = "adapter_bridge"
-	IsolationOuterOnly     IsolationMode = "outer_only"
-)
-
 // HarnessHealth is the discovered installation state.
 type HarnessHealth string
 
@@ -136,9 +127,7 @@ const (
 	BlockedNoViableRoute BlockedReason = "NO_VIABLE_ROUTE"
 	BlockedPermission    BlockedReason = "PERMISSION"
 	BlockedBudget        BlockedReason = "BUDGET"
-	BlockedSandbox       BlockedReason = "SANDBOX"
 	BlockedHarnessAuth   BlockedReason = "HARNESS_AUTH"
-	BlockedVaultLocked   BlockedReason = "VAULT_LOCKED"
 	BlockedStorage       BlockedReason = "STORAGE"
 	BlockedIntegration   BlockedReason = "INTEGRATION"
 	BlockedUser          BlockedReason = "USER"
@@ -207,45 +196,6 @@ const (
 	ArtifactRecovery        ArtifactKind = "recovery"
 	ArtifactContextManifest ArtifactKind = "context_manifest"
 )
-
-// NetworkCapability is the network access a harness route requires.
-type NetworkCapability string
-
-const (
-	// NetworkNone means the harness needs no external network.
-	NetworkNone NetworkCapability = "none"
-	// NetworkProvider means the harness needs model/provider network access.
-	NetworkProvider NetworkCapability = "provider"
-)
-
-// ProviderTransport is how a harness can be given provider connectivity. Only an
-// explicitly compatible transport may be used for a provider route; an unknown
-// transport keeps the route unavailable rather than assuming proxy support.
-type ProviderTransport string
-
-const (
-	TransportUnknown   ProviderTransport = "unknown"
-	TransportHTTPProxy ProviderTransport = "http_proxy"
-	TransportDirect    ProviderTransport = "direct"
-)
-
-// ProviderNetworkCapability reports whether the platform can enforce
-// provider-only networking and, if not, why. It is engine capability, distinct
-// from user permission and from harness transport compatibility.
-type ProviderNetworkCapability struct {
-	Available bool   `json:"available"`
-	Mode      string `json:"mode,omitempty"`
-	Platform  string `json:"platform,omitempty"`
-	Transport string `json:"transport,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-}
-
-// ProviderDestination is one authorized provider endpoint (host plus explicit
-// port). Destination policy is separate from permission and capability.
-type ProviderDestination struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
-}
 
 // NotificationKind is derived from durable domain events.
 type NotificationKind string

@@ -41,7 +41,7 @@ func Create(ctx context.Context, st *storage.Store, dest string, includeSecrets 
 		Note:            "Source repositories are not included. Restore does not replace project working trees.",
 	}
 	if includeSecrets {
-		man.Note += " Secrets are re-encrypted under backup-specific protection when a vault key is supplied."
+		man.Note += " Wayshard credentials live in a restricted config file and are not copied into a control-plane backup."
 	}
 	b, _ := json.MarshalIndent(man, "", "  ")
 	return os.WriteFile(filepath.Join(dest, "manifest.json"), b, 0o600)

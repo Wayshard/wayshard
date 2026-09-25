@@ -20,13 +20,13 @@ import (
 	"time"
 
 	"github.com/Wayshard/wayshard/internal/auth"
+	"github.com/Wayshard/wayshard/internal/credentials"
 	"github.com/Wayshard/wayshard/internal/domain"
 	"github.com/Wayshard/wayshard/internal/events"
 	"github.com/Wayshard/wayshard/internal/harness"
 	"github.com/Wayshard/wayshard/internal/orchestrator"
 	"github.com/Wayshard/wayshard/internal/pty"
 	"github.com/Wayshard/wayshard/internal/scheduler"
-	"github.com/Wayshard/wayshard/internal/secrets"
 	"github.com/Wayshard/wayshard/internal/storage"
 	"github.com/Wayshard/wayshard/internal/version"
 	"github.com/Wayshard/wayshard/internal/webembed"
@@ -34,19 +34,16 @@ import (
 )
 
 type Server struct {
-	Store     *storage.Store
-	Auth      *auth.Service
-	Hub       *events.Hub
-	Sched     *scheduler.Scheduler
-	Vault     *secrets.Vault
-	PTY       *pty.Manager
-	Log       *slog.Logger
-	Listen    string
-	Advertise string
-	DataDir   string
-	// ProviderNet is the runtime-probed provider networking capability,
-	// resolved once at startup for diagnostics.
-	ProviderNet domain.ProviderNetworkCapability
+	Store       *storage.Store
+	Auth        *auth.Service
+	Hub         *events.Hub
+	Sched       *scheduler.Scheduler
+	Credentials *credentials.Store
+	PTY         *pty.Manager
+	Log         *slog.Logger
+	Listen      string
+	Advertise   string
+	DataDir     string
 	// Catalog is the effective harness catalog for discovery diagnostics.
 	Catalog *harness.Catalog
 	http    *http.Server
@@ -112,7 +109,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/storage", s.requireAuth(s.storageInfo))
 	mux.HandleFunc("POST /v1/storage/gc", s.requireAuth(s.storageGC))
 	mux.HandleFunc("POST /v1/backups", s.requireAuth(s.createBackup))
-	mux.HandleFunc("GET /v1/sandbox", s.requireAuth(s.sandboxInfo))
+	mux.HandleFunc("GET /v1/sandbox", s.requireAuth(s.runtimeInfo))
 	mux.HandleFunc("GET /v1/projects/{id}/terminals", s.requireAuth(s.listTerminals))
 	mux.HandleFunc("POST /v1/projects/{id}/terminals", s.requireAuth(s.startTerminal))
 	mux.HandleFunc("DELETE /v1/projects/{id}/terminals/{tid}", s.requireAuth(s.closeTerminal))
@@ -271,7 +268,7 @@ func (s *Server) getServer(w http.ResponseWriter, r *http.Request, p *auth.Princ
 	}
 	writeJSON(w, 200, map[string]any{
 		"serverId": ident.ServerID, "displayName": ident.DisplayName, "listen": s.Listen, "advertise": s.Advertise,
-		"vaultLocked": s.Vault != nil && s.Vault.Locked(), "device": p,
+		"credentialStorage": "config_file", "device": p,
 		"compatibility": version.Current(),
 	})
 }
