@@ -134,9 +134,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Install minisign (throwaway key self-test only)
-        run: sudo apt-get update && sudo apt-get install -y minisign
+      - name: Install minisign and nsis (throwaway/self-test tooling only)
+        run: sudo apt-get update && sudo apt-get install -y minisign nsis
       - name: Checksum uniqueness and script self-tests
+        env:
+          WAYSHARD_REQUIRE_NSIS: "1"
         run: make release-scripts-test
 
   native-security:

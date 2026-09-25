@@ -238,6 +238,13 @@ jobs:
         if: always() && matrix.target == 'windows'
         shell: bash
         run: bash scripts/release/windows-cleanup.sh
+      - name: Verify Windows installer icon
+        if: matrix.target == 'windows'
+        shell: bash
+        run: |
+          if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+          "$PY" scripts/release/verify-windows-installer-icon.py \
+            "dist/desktop/wayshard-desktop-${GITHUB_REF_NAME}-windows-x64-setup.exe"
       - name: Checksums (desktop, single-runner targets)
         if: matrix.target != 'macos'
         shell: bash

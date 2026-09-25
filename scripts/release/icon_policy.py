@@ -171,6 +171,128 @@ def check_desktop_icons(root: Path) -> None:
             check_png_size(path, expected)
 
 
+# --- Windows installer icon ------------------------------------------------- #
+
+BRANDING_ICO = "assets/branding/wayshard.ico"
+REQUIRED_ICO_FRAMES = {16, 32, 48, 256}
+# The 16x16 frame is too coarse for a tight pixel comparison (each 8x8 grid cell
+# covers only 2x2 pixels), so it gets a looser bound than the larger frames.
+ICO_FRAME_DIFF = 10.0
+ICO_SMALL_FRAME_DIFF = 22.0
+
+
+def _decode_bmp_dib(data: bytes) -> tuple[int, int, bytes]:
+    """Decode a 32-bit BI_RGB BMP DIB (an ICO frame) into RGBA bytes."""
+    bi_size = struct.unpack_from("<I", data, 0)[0]
+    width = struct.unpack_from("<i", data, 4)[0]
+    height = struct.unpack_from("<i", data, 8)[0]
+    bitcount = struct.unpack_from("<H", data, 14)[0]
+    compression = struct.unpack_from("<I", data, 16)[0]
+    if bitcount != 32 or compression != 0 or width <= 0 or height <= 0:
+        raise ValueError(f"unsupported ICO frame (bpp={bitcount}, compression={compression})")
+    h = height // 2  # the DIB height doubles the visible height (XOR + AND bitmaps)
+    stride = width * 4
+    off = bi_size
+    out = bytearray(width * h * 4)
+    for y in range(h):
+        src = off + (h - 1 - y) * stride  # BMP rows are bottom-up
+        for x in range(width):
+            b, g, r, a = data[src + x * 4 : src + x * 4 + 4]
+            o = (y * width + x) * 4
+            out[o : o + 4] = bytes((r, g, b, a))
+    return width, h, bytes(out)
+
+
+def ico_frames(path: Path) -> list[tuple[int, int, bytes]]:
+    """Return (width, height, rgba_bytes) for every frame of a BMP-based ICO."""
+    data = path.read_bytes()
+    reserved, icon_type, count = struct.unpack_from("<HHH", data, 0)
+    if reserved != 0 or icon_type != 1 or count < 1:
+        raise ValueError(f"{path}: not a valid ICO")
+    frames = []
+    for i in range(count):
+        _w, _h, _c, _r, _p, _bpp, size, offset = struct.unpack_from(
+            "<BBBBHHII", data, 6 + 16 * i
+        )
+        blob = data[offset : offset + size]
+        if blob[:8] == b"\x89PNG\r\n\x1a\n":
+            raise ValueError(f"{path}: PNG-compressed ICO frames are not supported here")
+        fw, fh, rgba = _decode_bmp_dib(blob)
+        frames.append((fw, fh, rgba))
+    return frames
+
+
+def _box_grid(px: bytes, w: int, h: int, n: int = 8) -> list[float]:
+    """Box-average an RGBA image into an n*n grid (resampling-robust fingerprint)."""
+    out: list[float] = []
+    for gy in range(n):
+        y0, y1 = gy * h // n, (gy + 1) * h // n
+        for gx in range(n):
+            x0, x1 = gx * w // n, (gx + 1) * w // n
+            acc = [0, 0, 0, 0]
+            count = 0
+            for y in range(y0, y1):
+                row = y * w * 4
+                for x in range(x0, x1):
+                    o = row + x * 4
+                    acc[0] += px[o]
+                    acc[1] += px[o + 1]
+                    acc[2] += px[o + 2]
+                    acc[3] += px[o + 3]
+                    count += 1
+            out.extend(v / count for v in acc)
+    return out
+
+
+def check_branding_ico(root: Path) -> None:
+    """The Windows installer icon must be the canonical mark at Windows sizes."""
+    ico = root / BRANDING_ICO
+    if not ico.is_file():
+        raise SystemExit(f"missing Windows installer icon {ico}")
+    frames = ico_frames(ico)
+    sizes = {w for w, _h, _px in frames}
+    missing = REQUIRED_ICO_FRAMES - sizes
+    if missing:
+        raise SystemExit(f"{ico}: missing required Windows frames {sorted(missing)}")
+    for w, _h, rgba in frames:
+        if all(rgba[i] == 255 for i in range(3, len(rgba), 4)):
+            raise SystemExit(f"{ico}: {w}x{w} frame has no transparency")
+
+    cw, ch, cchan, cpx = read_png(root / "assets/branding/wayshard.png")
+    if cchan != 4:
+        raise SystemExit("canonical mark must be 8-bit RGBA")
+    canonical = _box_grid(cpx, cw, ch)
+    for w, h, rgba in frames:
+        grid = _box_grid(rgba, w, h)
+        diff = sum(abs(a - b) for a, b in zip(canonical, grid)) / len(canonical)
+        bound = ICO_SMALL_FRAME_DIFF if w <= 16 else ICO_FRAME_DIFF
+        if diff > bound:
+            raise SystemExit(
+                f"{ico}: {w}x{h} frame is not derived from the canonical mark (diff {diff:.1f} > {bound})"
+            )
+
+
+def check_tauri_nsis_icon(root: Path) -> None:
+    """The Tauri NSIS config must name the Wayshard installer icon explicitly."""
+    conf_path = root / "clients/desktop/src-tauri/tauri.conf.json"
+    conf = json.loads(conf_path.read_text(encoding="utf-8"))
+    nsis = (((conf.get("bundle") or {}).get("windows") or {}).get("nsis")) or {}
+    icon = nsis.get("installerIcon")
+    if not icon:
+        raise SystemExit(
+            f"{conf_path}: bundle.windows.nsis.installerIcon must be set "
+            "(NSIS would otherwise fall back to the default Tauri/NSIS installer icon)"
+        )
+    resolved = (conf_path.parent / icon).resolve()
+    expected = (root / BRANDING_ICO).resolve()
+    if resolved != expected:
+        raise SystemExit(
+            f"{conf_path}: installerIcon must point at {BRANDING_ICO}, got {icon!r}"
+        )
+    if not resolved.is_file():
+        raise SystemExit(f"{conf_path}: installerIcon does not exist: {icon}")
+
+
 def parse_icon_cli_version(script: str) -> tuple[int, int, int]:
     patterns = (
         r"WAYSHARD_ICON_CLI_VERSION:-(\d+)\.(\d+)\.(\d+)",
@@ -235,9 +357,13 @@ def main() -> None:
     if "tauri icon src-tauri/app-icon.json" in workflow:
         raise SystemExit("release.yml must not invoke the pinned 2.5.0 CLI on the icon manifest")
 
+    check_branding_ico(root)
+    check_tauri_nsis_icon(root)
+
     print(
         "icon policy ok: canonical mark, adaptive safe-area foreground, "
-        f"desktop/Web derivatives, tauri-cli {'.'.join(map(str, version))} icon generator"
+        f"desktop/Web derivatives, Windows installer icon, "
+        f"tauri-cli {'.'.join(map(str, version))} icon generator"
     )
 
 

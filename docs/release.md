@@ -71,6 +71,18 @@ this step runs the pinned manifest-capable generator; the build toolchain is
 unchanged. `icon_policy_test.sh` guards the manifest, the committed derivative
 sizes, and the safe-area padding.
 
+### Windows installer icon
+
+`assets/branding/wayshard.ico` (the canonical mark at Windows sizes, 16-256px,
+32-bit with alpha) is set as `bundle.windows.nsis.installerIcon` in
+`clients/desktop/src-tauri/tauri.conf.json`. Without it NSIS falls back to its
+default installer icon. NSIS compiles the ICO frames into the installer's PE
+resources byte-for-byte, so the Windows desktop job runs
+`scripts/release/verify-windows-installer-icon.py` against the built
+`wayshard-desktop-<tag>-windows-x64-setup.exe` and fails if any Wayshard frame
+is absent. `icon_policy_test.sh` validates the ICO frames and derivation, and
+`release_policy_test.sh` fails if `installerIcon` is unset.
+
 ### CLI+TUI bundle layout
 
 The `tui` matrix builds a native `wayshard` CLI and a self-contained

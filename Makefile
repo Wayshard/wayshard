@@ -114,6 +114,7 @@ release-scripts-test:
 	bash scripts/release/android_jks_test.sh
 	bash scripts/release/android_version_properties_test.sh
 	bash scripts/release/icon_policy_test.sh
+	bash scripts/release/windows_installer_icon_test.sh
 	bash scripts/release/desktop_macos_checksums_test.sh
 	bash scripts/release/package_go_test.sh
 	bash scripts/release/package_cli_tui_test.sh

@@ -264,4 +264,34 @@ grep -q '"default": "../../../assets/branding/wayshard.png"' \
   || fail "the icon manifest default must be the canonical mark"
 echo "branding icon policy ok"
 
+# --- Windows installer branding ----------------------------------------------
+test -s "$ROOT/assets/branding/wayshard.ico" \
+  || fail "missing the Wayshard Windows installer icon assets/branding/wayshard.ico"
+test -s "$ROOT/scripts/release/verify-windows-installer-icon.py" \
+  || fail "missing scripts/release/verify-windows-installer-icon.py"
+# The NSIS installer icon must be set explicitly, or NSIS falls back to the
+# default Tauri/NSIS installer icon.
+python3 - "$ROOT/clients/desktop/src-tauri/tauri.conf.json" "$ROOT" <<'PY'
+import json, sys
+from pathlib import Path
+conf, root = Path(sys.argv[1]), Path(sys.argv[2])
+cfg = json.loads(conf.read_text(encoding="utf-8"))
+nsis = (((cfg.get("bundle") or {}).get("windows") or {}).get("nsis")) or {}
+icon = nsis.get("installerIcon")
+if not icon:
+    raise SystemExit("tauri.conf.json must set bundle.windows.nsis.installerIcon")
+resolved = (conf.parent / icon).resolve()
+expected = (root / "assets/branding/wayshard.ico").resolve()
+if resolved != expected:
+    raise SystemExit(f"installerIcon must point at assets/branding/wayshard.ico, got {icon!r}")
+print("nsis installerIcon ->", icon)
+PY
+grep -q 'verify-windows-installer-icon.py' "$REL" \
+  || fail "release.yml must verify the built Windows installer icon"
+grep -q 'wayshard-desktop-${GITHUB_REF_NAME}-windows-x64-setup.exe' "$REL" \
+  || fail "release.yml must run the installer icon gate on the -setup.exe"
+grep -q 'windows_installer_icon_test.sh' "$ROOT/Makefile" \
+  || fail "Makefile release-scripts-test must run the Windows installer icon test"
+echo "windows installer branding ok"
+
 echo "release policy test ok"

@@ -114,7 +114,7 @@ Status is `done` when code and tests exist in this repository. External-only ite
 | Desktop macOS ad-hoc sign (identity `-`, no Apple account) | `tauri.conf.json` `bundle.macOS.signingIdentity`, `APPLE_SIGNING_IDENTITY=-`, `scripts/release/macos-verify-adhoc.sh` | `release_policy_test.sh`; live `codesign` on macOS runners only; Gatekeeper warnings expected | done |
 | Desktop Windows self-signed Authenticode | `scripts/release/windows-sign.ps1`; secrets `WAYSHARD_WINDOWS_PFX_*` | `windows_pfx_test.sh`; live `signtool` on Windows runners only; SmartScreen/untrusted publisher expected | done |
 | Android Tauri APK, maintainer JKS, no Play | job `android`, `scripts/release/android-sign.sh`, `clients/desktop/android/WayshardKeystore.{kt,pro}` | `android_jks_test.sh`, `android_patch_test.sh`, `android_keystore_patch_test.sh`, `android_keystore_verify_test.sh` (real R8); APK verified; unsigned not published as signed | done |
-| Canonical branding mark → all platform icons | `assets/branding/wayshard.{png}`, `clients/desktop/src-tauri/icons`, `clients/web/public`, `scripts/release/android-icons.sh` | `icon_policy_test.sh`, `release_policy_test.sh`; transparent derivatives match the mark exactly and the Android foreground fits the adaptive safe circle | done |
+| Canonical branding mark → all platform icons | `assets/branding/wayshard.{png,ico}`, `clients/desktop/src-tauri/icons`, `clients/web/public`, `scripts/release/android-icons.sh`, NSIS `installerIcon` | `icon_policy_test.sh`, `windows_installer_icon_test.sh`, `release_policy_test.sh`; transparent derivatives match the mark exactly, the Android foreground fits the adaptive safe circle, and the built `-setup.exe` embeds the Wayshard installer icon | done |
 | Minisign on combined SHA256SUMS.txt | `scripts/release/minisign-sign.sh`; secrets `WAYSHARD_RELEASE_MINISIGN_*`; public key `keys/wayshard-release.minisign.pub` | `minisign_test.sh`; checksums job verifies before upload | done |
 | Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`desktop-macos-checksums`/`android`/`checksums` | `make release-scripts-test` (overlapping globs cannot duplicate server rows); `desktop_macos_checksums_test.sh` proves both macOS DMGs appear exactly once, order-independent | done |
 | CycloneDX SBOM (not `go version -m`) | `scripts/release/sbom.sh` | fails the release job on generator/validation error | done |
@@ -671,3 +671,34 @@ shipped paths.
   (`clients/ui/src/assets/images/social-share*.png`) are OpenCode-branded and are
   not imported or shipped. The unused `clients/ui/src/assets/favicon/` directory
   (including the `-v3` duplicates) is dead but canonical-consistent.
+
+## rc.14 release-defect remediation: Windows installer icon
+
+The rc.13 audit found the Windows NSIS `-setup.exe` still showed Tauri/NSIS's
+default installer icon (the installed app exe and the MSI were correctly
+branded). Root cause: `bundle.windows.nsis.installerIcon` was never set, so
+Tauri's NSIS template left `MUI_ICON` empty.
+
+- **Icon source.** `assets/branding/wayshard.ico` is derived from the canonical
+  mark: 9 BMP frames (16/24/32/48/64/72/96/128/256), all 32-bit with
+  transparency, each matching the canonical mark's 8x8 average (the largest
+  frame to within 0.4/255).
+- **Config.** `clients/desktop/src-tauri/tauri.conf.json` sets
+  `bundle.windows.nsis.installerIcon` to
+  `../../../assets/branding/wayshard.ico` (resolved by `tauri build`, which
+  chdirs to `src-tauri`). Tauri's template emits `!define MUI_ICON` from it.
+- **Config/policy test.** `icon_policy.py` validates the ICO frames and their
+  derivation from the canonical mark and that `installerIcon` is set and
+  resolves to that file; `release_policy_test.sh` fails if `installerIcon` is
+  unset or points elsewhere, and asserts the release workflow runs the artifact
+  gate.
+- **Artifact gate.** `scripts/release/verify-windows-installer-icon.py` fails
+  closed unless every `wayshard.ico` frame is embedded byte-for-byte in the
+  built `-setup.exe` (NSIS copies the frames verbatim; independently confirmed
+  with a `makensis` build). It runs in the Windows desktop release leg.
+  `windows_installer_icon_test.sh` builds a branded and a default `makensis`
+  installer and proves the gate passes only the branded one.
+
+Out of scope for this change (recorded from the rc.13 audit): Linux x86-64
+dynamic linkage, the `/social-share.png` dangling reference, Android v1 signing,
+dead `-v3` favicon duplicates, and Tauri CLI/crate version alignment.

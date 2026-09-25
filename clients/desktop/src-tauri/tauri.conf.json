@@ -25,6 +25,11 @@
     "macOS": {
       "signingIdentity": "-"
     },
+    "windows": {
+      "nsis": {
+        "installerIcon": "../../../assets/branding/wayshard.ico"
+      }
+    },
     "android": {
       "minSdkVersion": 26
     }
