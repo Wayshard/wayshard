@@ -168,7 +168,7 @@ When a harness lacks a native structured submission mechanism, use the universal
 - The CLI/TUI is a full Wayshard client, but presentation may be terminal-appropriate. Do not build a nested IDE, terminal, or editor purely to match graphical clients.
 - Web/Desktop/Android should share graphical client logic where practical; CLI/TUI uses its terminal foundation.
 - All clients talk to Wayshard domain HTTP/JSON and WebSocket APIs, never ACP directly.
-- `wayshard.png` is the canonical raster application mark. Platform app icons must be derived from it without changing the mark; platform-required backgrounds, masks, sizes, and container formats are adaptations of that source, not separate branding.
+- `assets/branding/wayshard.png` is the canonical raster application mark. Platform app icons must be derived from it without changing the mark; platform-required backgrounds, masks, sizes, and container formats are adaptations of that source, not separate branding.
 
 ## Testing and quality gates
 
