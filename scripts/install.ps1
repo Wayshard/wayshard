@@ -133,7 +133,7 @@ function Main {
     else { Write-Info "skipping PATH modification (WAYSHARD_NO_MODIFY_PATH=1)" }
 
     Write-Info ""
-    Write-Info "Wayshard $Version installed to $InstallDir:"
+    Write-Info "Wayshard $Version installed to ${InstallDir}:"
     Write-Info "  $InstallDir\wayshard.exe        start the interactive client"
     Write-Info "  $InstallDir\wayshard-tui.exe    terminal client companion"
     Write-Info "  $InstallDir\wayshard-server.exe local server daemon"
