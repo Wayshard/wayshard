@@ -89,7 +89,7 @@ try {
   Write-Host "==> checksum failure is rejected and installs nothing"
   $bad = Join-Path $Work "bad"
   Make-Release $bad $Version
-  Add-Content -Path (Join-Path $bad "download/wayshard-$Version-windows-amd64.zip") -Value "corrupt"
+  Add-Content -Path (Join-Path $bad "download/$Version/wayshard-$Version-windows-amd64.zip") -Value "corrupt"
   $badDir = Join-Path $Work "badbin"
   $code = Invoke-Installer $bad $badDir $false $Version
   if ($code -eq 0) { throw "installer accepted a corrupted archive" }
