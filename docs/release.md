@@ -133,6 +133,60 @@ Windows uses the same layout in `wayshard-vX-windows-amd64.zip` with `.exe`
 suffixes. The raw CLI/TUI binaries remain published for advanced users, but the
 raw `wayshard` binary alone is not a functional interactive client.
 
+## Reproducible builds
+
+Release builds are reproducible and self-consistent:
+
+- The build date stamped into every Go binary (`internal/version.Date`) is
+  derived from the tagged commit, never from wall-clock time, and
+  `SOURCE_DATE_EPOCH` is pinned to the same commit in the `Makefile`.
+- Go binaries are built with `-trimpath` and one shared `LDFLAGS` definition, so
+  rebuilding the same commit yields byte-identical output.
+- The CLI is built exactly once, in the `release` job. The CLI+TUI bundles fetch
+  that published artifact instead of rebuilding it, so the standalone CLI and
+  the CLI inside every archive are byte-identical on every platform.
+- The `reproducible` job (`scripts/release/verify-reproducible.sh`) proves both
+  claims in CI: standalone `wayshard` equals the bundled `wayshard` for each
+  platform, and a fresh same-commit rebuild of the host CLI equals the published
+  standalone binary.
+
+## TUI version identity
+
+`wayshard-tui --version` prints the release version and commit. The values are
+compiled into the executable by `clients/tui/build.ts` (`WAYSHARD_TUI_VERSION`
+and `WAYSHARD_TUI_COMMIT`); a source build reports the `0.0.0-dev` fallback. The
+`tui` CI job builds with a fixture version and asserts the output, and the
+release `tui` job stamps the real tag and commit.
+
+## Installing a release
+
+`scripts/install.sh` (Linux/macOS) and `scripts/install.ps1` (Windows) resolve
+the latest stable release, detect the host OS/architecture, verify the downloads
+against `SHA256SUMS.txt` (and the minisign signature when the tool is present),
+install atomically into a user-owned bin directory (`~/.local/bin` on
+Linux/macOS, `%LOCALAPPDATA%\Wayshard\bin` on Windows), and add that directory
+to the user `PATH` idempotently. Both honor `WAYSHARD_VERSION`,
+`WAYSHARD_INSTALL_DIR`, `WAYSHARD_NO_MODIFY_PATH`, `WAYSHARD_MINISIGN`, and the
+`WAYSHARD_*_BASE` overrides used by tests.
+
+Their fixture-backed tests (`scripts/release/install_sh_test.sh` and
+`scripts/release/install_ps1_test.ps1`) exercise latest-release resolution,
+checksum verification, signature verification, atomic install, clean re-install,
+idempotent PATH updates, and failure handling without contacting the live
+release. The `installers` CI job runs them on Linux, macOS, and Windows.
+
+## SBOM license metadata
+
+The CycloneDX SBOM asserts a license only when cyclonedx-gomod detects one from
+a dependency's real license file. If any component's license cannot be detected
+the release fails instead of fabricating a license.
+
+## CI runner and action hygiene
+
+The CI and release workflows pin Linux jobs to `ubuntu-24.04` and use action
+versions that run on the current Node runtime (no Node 20-era majors), so runner
+image drift and deprecated action runtimes are handled explicitly.
+
 ## Trust vs cryptography
 
 | | Wayshard signed | Apple/Microsoft/Google trusted |
@@ -154,7 +208,7 @@ raw `wayshard` binary alone is not a functional interactive client.
 
 Exact name: **`release`**.
 
-Jobs: `release`, `tui`, `desktop`, `desktop-macos-checksums`, `android`, `checksums` in `.github/workflows/release.yml`.
+Jobs: `release`, `tui`, `reproducible`, `desktop`, `desktop-macos-checksums`, `android`, `checksums` in `.github/workflows/release.yml`.
 
 Recommended: required reviewers; restrict to tags `v*`.
 

@@ -18,14 +18,14 @@ env:
 jobs:
   release:
     name: Official GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.repository == 'Wayshard/wayshard'
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - uses: oven-sh/setup-bun@v2
@@ -70,7 +70,7 @@ jobs:
         run: |
           python3 scripts/release/checksums.py --out dist/go/SHA256SUMS-go.txt dist/go/*
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Wayshard ${{ github.ref_name }}
           body: |
@@ -102,7 +102,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: bun-linux-x64
             goos: linux
             goarch: amd64
@@ -131,34 +131,41 @@ jobs:
             asset: windows-amd64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
       - name: Install client workspace
         run: bun install --frozen-lockfile
         working-directory: clients
-      - name: Build native CLI
+      # The standalone CLI is built exactly once, in the `release` job, with the
+      # canonical flags and a commit-derived build date. Bundling that artifact
+      # (rather than rebuilding it here with different flags) is what makes the
+      # standalone and bundled CLI byte-identical on every platform; the
+      # `reproducible` job proves it.
+      - name: Fetch the published standalone CLI
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
           mkdir -p dist/cli-tui/stage dist/cli-tui/out
-          CGO_ENABLED=0 go build -ldflags "-s -w \
-            -X github.com/Wayshard/wayshard/internal/version.Version=${GITHUB_REF_NAME} \
-            -X github.com/Wayshard/wayshard/internal/version.Commit=${GITHUB_SHA} \
-            -X github.com/Wayshard/wayshard/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o "dist/cli-tui/stage/wayshard${ext}" ./cmd/wayshard
+          asset="wayshard-${GITHUB_REF_NAME}-${{ matrix.asset }}${ext}"
+          gh release download "${GITHUB_REF_NAME}" -p "$asset" -D dist/cli-tui/stage
+          mv "dist/cli-tui/stage/$asset" "dist/cli-tui/stage/wayshard${ext}"
+          chmod +x "dist/cli-tui/stage/wayshard${ext}" 2>/dev/null || true
+          test -s "dist/cli-tui/stage/wayshard${ext}"
       - name: Build packaged TUI companion
         shell: bash
         run: |
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
           cd clients/tui
-          TUI_TARGET=${{ matrix.target }} TUI_OUTFILE="$GITHUB_WORKSPACE/dist/cli-tui/stage/wayshard-tui${ext}" bun run build.ts
+          WAYSHARD_TUI_VERSION="${GITHUB_REF_NAME}" WAYSHARD_TUI_COMMIT="${GITHUB_SHA}" \
+            TUI_TARGET=${{ matrix.target }} \
+            TUI_OUTFILE="$GITHUB_WORKSPACE/dist/cli-tui/stage/wayshard-tui${ext}" \
+            bun run build.ts
       - name: Package CLI+TUI distribution unit
         shell: bash
         run: |
@@ -170,7 +177,7 @@ jobs:
           cp "dist/cli-tui/stage/wayshard-tui${ext}" \
             "dist/cli-tui/out/wayshard-tui-${GITHUB_REF_NAME}-${{ matrix.asset }}${ext}"
       - name: Publish CLI+TUI bundle
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           prerelease: ${{ env.IS_PRERELEASE }}
@@ -188,7 +195,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: linux
           - os: macos-latest
             target: macos
@@ -201,7 +208,7 @@ jobs:
             target: windows
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
@@ -263,7 +270,7 @@ jobs:
           if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
           "$PY" scripts/release/checksums.py --out "dist/desktop/SHA256SUMS-desktop-${{ matrix.target }}.txt" dist/desktop/*
       - name: Upload desktop artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.IS_PRERELEASE == 'false' }}
@@ -280,9 +287,9 @@ jobs:
     name: Desktop macOS checksums (both architectures)
     needs: desktop
     if: github.repository == 'Wayshard/wayshard'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download macOS desktop installers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -295,7 +302,7 @@ jobs:
           bash scripts/release/desktop-macos-checksums.sh \
             "${GITHUB_REF_NAME}" desktop-macos SHA256SUMS-desktop-macos.txt
       - name: Upload macOS checksums
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.IS_PRERELEASE == 'false' }}
@@ -308,14 +315,14 @@ jobs:
     needs: release
     if: github.repository == 'Wayshard/wayshard'
     environment: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           # The aligned tauri-cli (2.11.x) template compiles against SDK 36.
           packages: platform-tools platforms;android-36 build-tools;36.0.0
@@ -380,7 +387,7 @@ jobs:
         if: always()
         run: bash scripts/release/android-cleanup.sh
       - name: Upload Android artifacts
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.IS_PRERELEASE == 'false' }}
@@ -388,14 +395,37 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  reproducible:
+    name: Reproducible + CLI parity
+    needs: [release, tui]
+    if: github.repository == 'Wayshard/wayshard'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p all-assets
+          gh release download "${GITHUB_REF_NAME}" -D all-assets
+      - name: Standalone CLI == bundled CLI, and same-commit rebuild matches
+        run: |
+          chmod +x scripts/release/verify-reproducible.sh
+          bash scripts/release/verify-reproducible.sh "${GITHUB_REF_NAME}" "${GITHUB_SHA}" all-assets
+
   checksums:
     name: Combined SHA256SUMS
-    needs: [release, tui, desktop, desktop-macos-checksums, android]
+    needs: [release, tui, reproducible, desktop, desktop-macos-checksums, android]
     if: github.repository == 'Wayshard/wayshard'
     environment: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -427,7 +457,7 @@ jobs:
           bash scripts/release/minisign-sign.sh SHA256SUMS.txt
           bash scripts/release/minisign-verify.sh SHA256SUMS.txt keys/wayshard-release.minisign.pub
       - name: Upload combined checksums
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           prerelease: ${{ env.IS_PRERELEASE }}
           make_latest: ${{ env.IS_PRERELEASE == 'false' }}

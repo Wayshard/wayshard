@@ -6,14 +6,23 @@ GOFLAGS   ?=
 # Release binaries are CGO-free so Linux artifacts are statically linked and run
 # on any distro (musl/Alpine, minimal containers) without glibc coupling. The
 # server uses the pure-Go modernc.org/sqlite, so nothing requires cgo.
-GOBUILD   := CGO_ENABLED=0 $(GO) build
+#
+# -trimpath removes absolute build paths, and the version date plus
+# SOURCE_DATE_EPOCH are derived from the commit (not wall-clock time), so
+# rebuilding the same commit yields byte-identical binaries. The release
+# workflow proves this with `make build-cli` against the published artifact.
+GOBUILD   := CGO_ENABLED=0 $(GO) build -trimpath
 BINDIR    ?= bin
 HOSTOS    ?= $(shell $(GO) env GOOS)
 HOSTARCH  ?= $(shell $(GO) env GOARCH)
 EXE       ?= $(if $(filter windows,$(HOSTOS)),.exe,)
+COMMIT    ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+# One canonical build date for every artifact, derived from the commit itself.
+DATE      ?= $(shell git show -s --format=%cI $(COMMIT) 2>/dev/null || echo unknown)
+# Go honors SOURCE_DATE_EPOCH for reproducible builds; pin it to the same commit.
+SOURCE_DATE_EPOCH := $(shell git show -s --format=%ct $(COMMIT) 2>/dev/null || echo 0)
+export SOURCE_DATE_EPOCH
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
-COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-DATE      ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS   := -s -w -X github.com/Wayshard/wayshard/internal/version.Version=$(VERSION) -X github.com/Wayshard/wayshard/internal/version.Commit=$(COMMIT) -X github.com/Wayshard/wayshard/internal/version.Date=$(DATE)
 
 .PHONY: all help fmt vet test test-race build build-server build-cli build-fake-acp build-tui build-tui-versioned build-cross build-all tidy ci web desktop android ui-render-smoke clean
@@ -49,11 +58,13 @@ build-cli:
 	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BINDIR)/wayshard$(EXE) ./cmd/wayshard
 
 # Build the interactive companion under its canonical runtime name so that
-# bin/wayshard finds bin/wayshard-tui directly (no rename, no override).
+# bin/wayshard finds bin/wayshard-tui directly (no rename, no override). The
+# release version/commit are compiled into the TUI so `wayshard-tui --version`
+# reports them.
 build-tui:
 	mkdir -p $(BINDIR)
 	cd clients && bun install --frozen-lockfile
-	cd clients/tui && TUI_OUTFILE=$(CURDIR)/$(BINDIR)/wayshard-tui$(EXE) bun run build.ts
+	cd clients/tui && WAYSHARD_TUI_VERSION=$(VERSION) WAYSHARD_TUI_COMMIT=$(COMMIT) TUI_OUTFILE=$(CURDIR)/$(BINDIR)/wayshard-tui$(EXE) bun run build.ts
 
 # Optional versioned copy for archival; it never replaces the runtime layout.
 build-tui-versioned: build-tui
@@ -128,6 +139,7 @@ release-scripts-test:
 	bash scripts/release/appimage_fix_diricon_test.sh
 	bash scripts/release/release_policy_test.sh
 	bash scripts/release/set_tauri_version_test.sh
+	bash scripts/release/install_sh_test.sh
 
 # Rendered smoke test for the production graphical client (builds the Web
 # client, then drives the installed Chrome over CDP). Skips if no Chrome.

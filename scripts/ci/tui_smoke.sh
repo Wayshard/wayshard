@@ -79,4 +79,22 @@ if ! grep -aq "Wayshard" tui.out; then
   echo "packaged TUI did not render" >&2
   exit 1
 fi
+
+# C: the compiled companion reports its release identity without rendering.
+expect_version="${WAYSHARD_TUI_EXPECT_VERSION:-}"
+expect_commit="${WAYSHARD_TUI_EXPECT_COMMIT:-}"
+if [[ -n "$expect_version" ]]; then
+  ver_out="$("$extract/wayshard-tui${ext}" --version 2>&1 || true)"
+  echo "wayshard-tui --version: $ver_out"
+  case "$ver_out" in
+    *"$expect_version"*) ;;
+    *) echo "wayshard-tui --version did not report $expect_version" >&2; exit 1 ;;
+  esac
+  if [[ -n "$expect_commit" ]]; then
+    case "$ver_out" in
+      *"$expect_commit"*) ;;
+      *) echo "wayshard-tui --version did not report commit $expect_commit" >&2; exit 1 ;;
+    esac
+  fi
+fi
 echo "tui smoke ok"

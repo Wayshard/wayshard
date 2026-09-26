@@ -15,10 +15,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Vet
@@ -37,10 +37,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Build the deterministic fake ACP harness
@@ -52,9 +52,9 @@ jobs:
 
   clients:
     name: Clients
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
@@ -84,9 +84,9 @@ jobs:
 
   tauri-android:
     name: Tauri Android target check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
@@ -96,14 +96,14 @@ jobs:
 
   android-keystore-r8:
     name: Android Keystore R8 keep rules
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: "platforms;android-35 build-tools;35.0.0"
           accept-android-sdk-licenses: true
@@ -115,10 +115,10 @@ jobs:
 
   tui:
     name: Interactive TUI (shipped path)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - uses: oven-sh/setup-bun@v2
@@ -131,17 +131,46 @@ jobs:
         run: bun run test
         working-directory: clients/tui
       - name: Build packaged TUI companion
+        env:
+          WAYSHARD_TUI_VERSION: v0.0.0-smoke
+          WAYSHARD_TUI_COMMIT: 0000000000000000000000000000000000000000
         run: TUI_OUTFILE="$PWD/wayshard-tui" bun run build.ts
         working-directory: clients/tui
       - name: Smoke shipped interactive path
+        env:
+          WAYSHARD_TUI_EXPECT_VERSION: v0.0.0-smoke
+          WAYSHARD_TUI_EXPECT_COMMIT: 0000000000000000000000000000000000000000
         run: bash scripts/ci/tui_smoke.sh
+
+  installers:
+    name: Installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            kind: sh
+          - os: macos-latest
+            kind: sh
+          - os: windows-latest
+            kind: ps1
+    steps:
+      - uses: actions/checkout@v7
+      - name: Installer test (bash, fixture-backed)
+        if: matrix.kind == 'sh'
+        run: bash scripts/release/install_sh_test.sh
+      - name: Installer test (PowerShell, fixture-backed)
+        if: matrix.kind == 'ps1'
+        shell: pwsh
+        run: ./scripts/release/install_ps1_test.ps1
 
   release-scripts:
     name: Release scripts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Install minisign and nsis (throwaway/self-test tooling only)
@@ -153,9 +182,9 @@ jobs:
 
   canonicals:
     name: Canonicals present
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Require six canonical documents
         run: |
           for f in AGENTS.md DESIGN.md SPEC.md ARCHITECTURE.md MEMORY.md README.md LICENSE NOTICE docs/release.md keys/README.md; do

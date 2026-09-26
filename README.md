@@ -56,6 +56,39 @@ Artifact-only tasks (brainstorming, research) can complete without integration.
 
 ## Quick start
 
+### Install a release
+
+Linux and macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Wayshard/wayshard/main/scripts/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Wayshard/wayshard/main/scripts/install.ps1 | iex"
+```
+
+The installer resolves the latest stable release, detects the OS/architecture,
+downloads the CLI+TUI archive and the matching server binary, verifies both
+against the release `SHA256SUMS.txt` (and the minisign signature when the
+`minisign` tool is available), and installs atomically into a user-owned bin
+directory (`~/.local/bin` on Linux/macOS, `%LOCALAPPDATA%\Wayshard\bin` on
+Windows), adding it to your `PATH` idempotently.
+
+Start the server, then the interactive client:
+
+```sh
+wayshard-server     # starts on 127.0.0.1:7420
+wayshard            # interactive terminal client (TUI)
+```
+
+`wayshard` is the full TUI client; scriptable subcommands such as
+`wayshard status` talk to the same server.
+
+### Build from source
+
 Prerequisites: Go 1.25+, `bun`, and `git`.
 
 ```sh

@@ -125,6 +125,11 @@ harness.
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
 | PR CI without secrets, paid models, or installed harnesses | `.github/workflows/ci.yml` | workflow | done |
+| Reproducible release builds: commit-derived build date, `-trimpath`, one shared flag set, single CLI build, standalone CLI == bundled CLI per platform plus same-commit rebuild proof | `Makefile`, `scripts/release/verify-reproducible.sh`, `.github/workflows/release.yml` (`reproducible`) | `scripts/release/verify-reproducible.sh` in the release `reproducible` job | done |
+| Compiled TUI reports its release identity | `clients/tui/build.ts`, `clients/tui/src/version.ts`, `clients/tui/src/index.tsx` | `clients/tui/src/version.test.ts`, `scripts/ci/tui_smoke.sh` (`--version` assertion) | done |
+| CycloneDX SBOM license metadata from real dependency license evidence; unknown licenses fail rather than fabricate | `scripts/release/sbom.sh` | `sbom.sh` post-generation validation (release `release` job) | done |
+| First-party installers (Linux/macOS `sh`, Windows `ps1`): latest-stable resolution, OS/arch detection, checksum + optional minisign verification, atomic user install, idempotent PATH | `scripts/install.sh`, `scripts/install.ps1` | `scripts/release/install_sh_test.sh`, `scripts/release/install_ps1_test.ps1`, `.github/workflows/ci.yml` (`installers` matrix) | done |
+| GitHub Actions on the current Node runtime; Linux runners pinned to `ubuntu-24.04` | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | `scripts/release/release_policy_test.sh`; workflow review | done |
 | Linux/macOS/Windows server + CLI | `ci` go job + `make build-cross` | workflow | done |
 | Native execution verification on Linux/macOS/Windows | `.github/workflows/ci.yml` `native-execution` job | fake ACP harness end-to-end | done |
 | Desktop Linux | `.github/workflows/release.yml` job `desktop` | checksums + minisign | done |
