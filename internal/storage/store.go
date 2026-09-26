@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,18 +75,13 @@ func ping(ctx context.Context, db *sql.DB) error {
 	return db.PingContext(ctx)
 }
 
-// sqliteDSN builds a file: DSN whose path is URI-escaped, so a data directory
-// containing URI-significant characters (for example '#' or '?') still opens
-// its own database.
+// sqliteDSN builds the file: DSN for the database. Only the characters that
+// would otherwise break the DSN (%, #, ?) are percent-escaped in the path, so
+// Windows drive paths and ordinary paths keep the raw form that the driver
+// expects.
 func sqliteDSN(dbPath string) string {
-	q := url.Values{}
-	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMS))
-	q.Add("_pragma", "foreign_keys(ON)")
-	q.Add("_pragma", "journal_mode(WAL)")
-	q.Add("_pragma", "synchronous(NORMAL)")
-	q.Add("_pragma", "wal_autocheckpoint(1000)")
-	u := url.URL{Scheme: "file", Path: dbPath, RawQuery: q.Encode()}
-	return u.String()
+	escaped := strings.NewReplacer("%", "%25", "#", "%23", "?", "%3F").Replace(dbPath)
+	return fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=wal_autocheckpoint(1000)", escaped, busyTimeoutMS)
 }
 
 func (s *Store) Close() error {
