@@ -26,7 +26,7 @@ type RestoreOptions struct {
 	// checkpoint. It is required.
 	ExpectedHash string
 	// StagingRoot is trusted Wayshard runtime state, not visible or writable to
-	// a harness, ACP Tool Sandbox, validation or project process.
+	// a harness, validation, or project process.
 	StagingRoot string
 	// AfterEntry, when set, is invoked after each checkpoint entry has been
 	// copied into staging but before verification. It is a deterministic test

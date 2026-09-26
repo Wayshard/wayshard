@@ -78,7 +78,8 @@ Operational requirements:
 - suitable busy timeout;
 - durability settings appropriate to local control-plane state;
 - Go server is the only database writer;
-- migrations are built into the server binary.
+- migrations are built into the server binary;
+- v0.2 is the baseline schema (version 1), squashed into a single `001_init.sql`; a database from a pre-v0.2 release is refused with guidance to remove the old data directory and start fresh, and post-v0.2 changes add numbered forward migrations.
 
 Representative tables/entities:
 

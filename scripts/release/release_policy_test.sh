@@ -12,8 +12,8 @@ fail() { echo "release_policy_test: $*" >&2; exit 1; }
 if grep -E 'secrets\.|environment:' "$CI"; then
   fail "ci.yml must not reference secrets or environments"
 fi
-if grep -E 'TYPESAFE_API_KEY|WAYSHARD_VAULT' "$CI"; then
-  fail "ci.yml must not reference runtime vault/Jev secrets"
+if grep -E 'TYPESAFE_API_KEY' "$CI"; then
+  fail "ci.yml must not reference runtime Jev secrets"
 fi
 
 # The Android-target Rust path (#[cfg(target_os = "android")] command bodies)

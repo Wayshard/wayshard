@@ -401,9 +401,6 @@ export class WayshardClient {
   backup(dest: string, includeSecrets = false) {
     return this.post("/v1/backups", { dest, includeSecrets });
   }
-  sandbox() {
-    return this.get("/v1/sandbox");
-  }
   devices() {
     return this.get("/v1/devices");
   }

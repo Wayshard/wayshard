@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,58 +9,6 @@ import (
 
 	"github.com/Wayshard/wayshard/internal/domain"
 )
-
-// TestUpgradeFromPriorVersions proves a database at schema 1, 2 or 3 upgrades
-// cleanly to the current schema, including the process ownership and checkpoint
-// material lifecycle additions.
-func TestUpgradeFromPriorVersions(t *testing.T) {
-	ctx := context.Background()
-	scripts := map[int]string{1: migration001, 2: migration002, 3: migration003, 4: migration004}
-	for _, target := range []int{1, 2, 3, 4} {
-		t.Run(fmt.Sprintf("v%d", target), func(t *testing.T) {
-			dir := t.TempDir()
-			raw, err := openRawDB(ctx, filepath.Join(dir, "app.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := raw.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
-				t.Fatal(err)
-			}
-			for v := 1; v <= target; v++ {
-				if err := execScript(ctx, raw, scripts[v]); err != nil {
-					t.Fatalf("apply migration %d: %v", v, err)
-				}
-				if _, err := raw.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)`, v, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-					t.Fatal(err)
-				}
-			}
-			_ = raw.Close()
-
-			s, err := Open(ctx, dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer s.Close()
-			var v int
-			if err := s.DB.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil {
-				t.Fatal(err)
-			}
-			if v != schemaVersion {
-				t.Fatalf("schema version after upgrade = %d, want %d", v, schemaVersion)
-			}
-			if _, err := s.DB.ExecContext(ctx, `SELECT material_state FROM workspace_checkpoints LIMIT 1`); err != nil {
-				t.Fatalf("material_state column missing: %v", err)
-			}
-			// Migration 008 dropped the containment-era ownership tables.
-			if _, err := s.DB.ExecContext(ctx, `SELECT token_hash FROM process_owners LIMIT 1`); err == nil {
-				t.Fatal("process_owners table should have been dropped")
-			}
-			if _, err := s.DB.ExecContext(ctx, `SELECT kind FROM probe_owners LIMIT 1`); err == nil {
-				t.Fatal("probe_owners table should have been dropped")
-			}
-		})
-	}
-}
 
 func setupCheckpointRun(t *testing.T, s *Store, runStatus domain.RunStatus, attemptStatus domain.StageAttemptStatus) (runID string, cp *domain.WorkspaceCheckpoint) {
 	t.Helper()
@@ -193,9 +140,8 @@ func TestReclaimTerminalCheckpoint(t *testing.T) {
 	}
 }
 
-// TestCleanupCheckpointDebris proves unreferenced checkpoint dirs, staging
-// leftovers and terminal sandbox dirs are removed while referenced material is
-// kept.
+// TestCleanupCheckpointDebris proves unreferenced checkpoint dirs and restore
+// staging leftovers are removed while referenced material is kept.
 func TestCleanupCheckpointDebris(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, t.TempDir())
@@ -203,7 +149,7 @@ func TestCleanupCheckpointDebris(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	runID, cp := setupCheckpointRun(t, s, domain.RunComplete, domain.AttemptSucceeded)
+	_, cp := setupCheckpointRun(t, s, domain.RunComplete, domain.AttemptSucceeded)
 
 	orphan := filepath.Join(filepath.Dir(cp.TreePath), "orphan-dir")
 	if err := os.MkdirAll(orphan, 0o755); err != nil {
@@ -211,10 +157,6 @@ func TestCleanupCheckpointDebris(t *testing.T) {
 	}
 	staging := filepath.Join(s.Root, "runtime", "restore-staging", "leftover")
 	if err := os.MkdirAll(staging, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sandbox := filepath.Join(s.Root, "runtime", "sandbox", runID, "attempt-1")
-	if err := os.MkdirAll(sandbox, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -226,9 +168,6 @@ func TestCleanupCheckpointDebris(t *testing.T) {
 	}
 	if _, err := os.Stat(staging); !os.IsNotExist(err) {
 		t.Fatalf("restore staging leftover survived: %v", err)
-	}
-	if _, err := os.Stat(sandbox); !os.IsNotExist(err) {
-		t.Fatalf("terminal sandbox dir survived: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(cp.TreePath, "tree", "tracked.txt")); err != nil {
 		t.Fatalf("referenced checkpoint material removed: %v", err)

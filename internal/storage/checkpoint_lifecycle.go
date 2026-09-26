@@ -61,9 +61,9 @@ func (s *Store) markCheckpointReclaimed(ctx context.Context, cp *domain.Workspac
 }
 
 // CleanupCheckpointDebris removes recovery debris that is provably unreferenced:
-// restore staging leftovers, checkpoint directories with no metadata row, and
-// sandbox directories for terminal runs. It is intended for startup, before any
-// process launch, so unreferenced directories cannot be in-flight checkpoints.
+// restore staging leftovers and checkpoint directories with no metadata row. It
+// is intended for startup, before any process launch, so unreferenced
+// directories cannot be in-flight checkpoints.
 func (s *Store) CleanupCheckpointDebris(ctx context.Context) (int, error) {
 	removed := 0
 	_ = os.RemoveAll(filepath.Join(s.Root, "runtime", "restore-staging"))
@@ -106,23 +106,6 @@ func (s *Store) CleanupCheckpointDebris(ctx context.Context) (int, error) {
 			}
 			if ents, _ := os.ReadDir(stagePath); len(ents) == 0 {
 				_ = os.Remove(stagePath)
-			}
-		}
-	}
-
-	// Sandbox directories for terminal runs are never reused.
-	sbRoot := filepath.Join(s.Root, "runtime", "sandbox")
-	sbRuns, err := os.ReadDir(sbRoot)
-	if err == nil {
-		for _, rd := range sbRuns {
-			if !rd.IsDir() {
-				continue
-			}
-			r, err := s.GetRun(ctx, rd.Name())
-			if err == nil && r.Status.Terminal() {
-				if err := os.RemoveAll(filepath.Join(sbRoot, rd.Name())); err == nil {
-					removed++
-				}
 			}
 		}
 	}

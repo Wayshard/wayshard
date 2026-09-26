@@ -244,7 +244,7 @@ func stageForStatus(s domain.RunStatus) domain.StageKind {
 // ensureBaseline runs the discovered mandatory checks once against the
 // untouched run workspace and persists the outcome as a baseline validation
 // artifact. Discovery stays passive; execution routes through the validation
-// runner (Tool Sandbox).
+// runner.
 func (e *Engine) ensureBaseline(ctx context.Context, run *domain.Run, task *domain.Task) {
 	if task.ArtifactOnly || run.Status != domain.RunExecuting {
 		return

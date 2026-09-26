@@ -3,7 +3,7 @@
 // Adapted from the imported OpenCode application project sidebar
 // (third_party/opencode-v1.18.31/packages/app/src/pages/layout/sidebar-project.tsx):
 // the project header (icon + name + actions) and its session list are retained.
-// OpenCode worktree/sandbox/notification state is replaced by Wayshard Projects
+// OpenCode worktree/notification state is replaced by Wayshard Projects
 // and Conversations.
 import { For, Show, createEffect, createMemo } from "solid-js"
 import type { Project } from "@wayshard/sdk"

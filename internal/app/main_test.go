@@ -12,9 +12,9 @@ import (
 
 // TestMain pins a deterministic harness catalog so app tests exercise only the
 // bundled fake ACP harness regardless of which real coding harnesses happen to
-// be installed on the machine running the tests. Wayshard now runs discovered
-// harnesses as the server OS user (no provider/sandbox gating), so ambient
-// harnesses would otherwise leak into routing.
+// be installed on the machine running the tests. Wayshard runs discovered
+// harnesses as the server OS user, so ambient harnesses would otherwise leak
+// into routing.
 func TestMain(m *testing.M) {
 	cat := harness.ShippedCatalog()
 	var b strings.Builder

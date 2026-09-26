@@ -12,8 +12,9 @@ import (
 //
 // The CLI stores its device credential in a restricted user config file
 // (directory 0700, file 0600 on Unix; the user-profile ACL on Windows), or the
-// credential is supplied through WAYSHARD_TOKEN, which takes precedence. No OS
-// keyring is required, so the CLI works on headless and minimal systems.
+// credential is supplied through WAYSHARD_TOKEN, which takes precedence. No
+// platform credential store is required, so the CLI works on headless and
+// minimal systems.
 //
 // WAYSHARD_CONFIG overrides the config directory (used by tests).
 

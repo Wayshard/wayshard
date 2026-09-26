@@ -319,18 +319,13 @@ export function HarnessesView() {
 export function RecoveryView() {
   const ws = useWayshard()
   const [storage] = createResource(() => ws.client().storage())
-  const [sandbox] = createResource(() => ws.client().sandbox())
   return (
-    <Panel title="Recovery & diagnostics" hint="Sandbox, provider networking, storage pressure and server health.">
-      <h3>Sandbox capability</h3>
-      <Show when={!sandbox.loading} fallback={<Loading />}>
-        <Structured value={sandbox()} />
-      </Show>
+    <Panel title="Recovery & diagnostics" hint="Storage pressure, retention and server health.">
       <h3>Storage</h3>
       <Show when={!storage.loading} fallback={<Loading />}>
         <Structured value={storage()} />
       </Show>
-      <DebugInspector value={{ sandbox: sandbox() ?? null, storage: storage() ?? null }} />
+      <DebugInspector value={{ storage: storage() ?? null }} />
     </Panel>
   )
 }

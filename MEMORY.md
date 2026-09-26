@@ -51,6 +51,12 @@ immutable content lives in a content-addressed object store rather than large
 rows. Postgres and microservices are rejected for this topology unless a future
 requirement materially changes it.
 
+The v0.2 control-plane schema is a single baseline migration (`001_init.sql`,
+schema version 1) squashed from the pre-v0.2 migration history. The migration
+framework remains for post-v0.2 changes. A database created before v0.2 is not
+upgraded: Wayshard refuses to open it and directs the operator to remove the old
+data directory and start fresh.
+
 ## Why Jev
 
 TypeSafe Jev/System One is a fast typed judgment layer for narrow questions such

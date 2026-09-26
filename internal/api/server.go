@@ -109,7 +109,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/storage", s.requireAuth(s.storageInfo))
 	mux.HandleFunc("POST /v1/storage/gc", s.requireAuth(s.storageGC))
 	mux.HandleFunc("POST /v1/backups", s.requireAuth(s.createBackup))
-	mux.HandleFunc("GET /v1/sandbox", s.requireAuth(s.runtimeInfo))
 	mux.HandleFunc("GET /v1/projects/{id}/terminals", s.requireAuth(s.listTerminals))
 	mux.HandleFunc("POST /v1/projects/{id}/terminals", s.requireAuth(s.startTerminal))
 	mux.HandleFunc("DELETE /v1/projects/{id}/terminals/{tid}", s.requireAuth(s.closeTerminal))

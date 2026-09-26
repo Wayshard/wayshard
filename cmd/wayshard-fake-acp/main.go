@@ -391,8 +391,8 @@ func (a *agent) maybeHangAfterWrite(req request, sessionID string, cancelCh chan
 }
 
 // runToolWrite asks Wayshard to run a command through the ACP terminal/tool
-// callback, so the mutation happens through the Tool Sandbox rather than the
-// harness process itself.
+// callback, so the mutation happens through the server's tool callback rather
+// than the harness process itself.
 func (a *agent) runToolWrite(sessionID, rel string) {
 	raw, err := a.callClient("terminal/create", map[string]any{
 		"sessionId": sessionID,

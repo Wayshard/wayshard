@@ -1,6 +1,6 @@
 // Package credentials stores Wayshard-owned secrets (the server identity
 // private key and other control-plane credentials) as restricted user config
-// files rather than an encrypted vault or OS keyring.
+// files.
 //
 // Wayshard trusts the server's own OS user, so these secrets live in the
 // server data directory (created 0700) with each file written 0600. Provider

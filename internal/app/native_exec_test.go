@@ -211,11 +211,11 @@ func TestNativeTrustedLocalExecution(t *testing.T) {
 	}
 }
 
-// TestNativeRoutingWithoutSandboxOrProvider proves route viability now depends
-// only on harness health/negotiated capability and policy: with the fake harness
+// TestNativeRoutingOnHealthAndCapability proves route viability depends on
+// harness health/negotiated capability and policy: with the fake harness
 // discovered and ready, candidate enumeration and routing succeed with a zero
-// routing config and no sandbox/provider capability of any kind.
-func TestNativeRoutingWithoutSandboxOrProvider(t *testing.T) {
+// routing config.
+func TestNativeRoutingOnHealthAndCapability(t *testing.T) {
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WAYSHARD_FAKE_SCENARIO", "success")
@@ -233,7 +233,7 @@ func TestNativeRoutingWithoutSandboxOrProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(cands) == 0 {
-		t.Fatal("no candidates: routing must not require sandbox/provider capability")
+		t.Fatal("no candidates: routing depends on harness health and capability")
 	}
 	var fake bool
 	for _, c := range cands {
@@ -247,7 +247,7 @@ func TestNativeRoutingWithoutSandboxOrProvider(t *testing.T) {
 
 	dec := (&routing.Router{}).Route(ctx, domain.StageExecute, routing.Config{}, cands, nil)
 	if dec.Blocked != "" {
-		t.Fatalf("routing blocked without sandbox/provider: %s %s", dec.Blocked, dec.Detail)
+		t.Fatalf("routing blocked for a ready harness: %s %s", dec.Blocked, dec.Detail)
 	}
 	if dec.Candidate.Harness.DefinitionID != "wayshard-fake-acp" {
 		t.Fatalf("routed to unexpected harness: %+v", dec.Candidate.Harness)

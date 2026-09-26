@@ -157,19 +157,6 @@ func (s *Server) createBackup(w http.ResponseWriter, r *http.Request, _ *auth.Pr
 	writeJSON(w, 200, map[string]any{"ok": true, "dest": body.Dest, "includesRepos": false, "includesSecrets": body.IncludeSecrets})
 }
 
-// runtimeInfo reports the Wayshard execution trust model. Discovered harnesses
-// and tools run as the Wayshard server OS user with their normal configuration,
-// environment, filesystem and network access; there is no OS-level sandbox.
-func (s *Server) runtimeInfo(w http.ResponseWriter, r *http.Request, _ *auth.Principal) {
-	_ = r
-	writeJSON(w, 200, map[string]any{
-		"trustModel":    "trusted_local",
-		"executionUser": "wayshard server OS user",
-		"sandboxing":    false,
-		"isolation":     "os_user",
-	})
-}
-
 // harnessDefinitions reports the effective harness catalog (shipped + user)
 // separately from discovered installations, so diagnostics can distinguish a
 // disabled/overridden definition from a missing installation.

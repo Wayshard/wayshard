@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,13 +18,19 @@ import (
 
 const (
 	busyTimeoutMS = 5000
-	schemaVersion = 8
+	// schemaVersion is the v0.2 baseline. Post-v0.2 schema changes add numbered
+	// migrations alongside 001_init.sql and raise this value.
+	schemaVersion = 1
+	// schemaBaseline marks a database created by the v0.2 baseline. It lets a
+	// pre-v0.2 database be rejected clearly instead of being mistaken for current.
+	schemaBaseline = "wayshard-v0.2"
 )
 
 var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
 var ErrLocked = errors.New("storage locked")
 var ErrCorrupt = errors.New("storage corrupt")
+var ErrIncompatibleSchema = errors.New("incompatible database schema")
 
 // Store is the control-plane persistence handle.
 type Store struct {
@@ -40,8 +47,7 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		return nil, err
 	}
 	dbPath := filepath.Join(root, "app.db")
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=foreign_keys(ON)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=wal_autocheckpoint(1000)", dbPath, busyTimeoutMS)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +76,20 @@ func ping(ctx context.Context, db *sql.DB) error {
 	return db.PingContext(ctx)
 }
 
+// sqliteDSN builds a file: DSN whose path is URI-escaped, so a data directory
+// containing URI-significant characters (for example '#' or '?') still opens
+// its own database.
+func sqliteDSN(dbPath string) string {
+	q := url.Values{}
+	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMS))
+	q.Add("_pragma", "foreign_keys(ON)")
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	q.Add("_pragma", "wal_autocheckpoint(1000)")
+	u := url.URL{Scheme: "file", Path: dbPath, RawQuery: q.Encode()}
+	return u.String()
+}
+
 func (s *Store) Close() error {
 	if s.DB == nil {
 		return nil
@@ -83,81 +103,39 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	var current int
 	_ = s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current)
+
+	// A database created before the v0.2 baseline has migration history but no
+	// v0.2 baseline marker. v0.2 does not upgrade pre-v0.2 databases.
+	if current > 0 {
+		if baseline, ok := s.schemaBaseline(ctx); !ok || baseline != schemaBaseline {
+			return fmt.Errorf("%w: this database predates the v0.2 baseline and cannot be upgraded; remove the Wayshard data directory and start fresh", ErrIncompatibleSchema)
+		}
+	}
 	if current > schemaVersion {
 		return fmt.Errorf("%w: database schema %d is newer than server %d; refusing unsafe downgrade", ErrCorrupt, current, schemaVersion)
 	}
+
+	// Baseline: fresh installations apply 001_init.sql and record version 1.
+	// Post-v0.2 changes add numbered migrations here and raise schemaVersion.
 	if current < 1 {
 		if err := execScript(ctx, s.DB, migration001); err != nil {
-			return fmt.Errorf("apply migration 001: %w", err)
+			return fmt.Errorf("apply schema baseline 001: %w", err)
 		}
 		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return err
 		}
-		current = 1
-	}
-	if current < 2 {
-		if err := execScript(ctx, s.DB, migration002); err != nil {
-			return fmt.Errorf("apply migration 002: %w", err)
-		}
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (2, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-		current = 2
-	}
-	if current < 3 {
-		if err := execScript(ctx, s.DB, migration003); err != nil {
-			return fmt.Errorf("apply migration 003: %w", err)
-		}
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (3, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-		current = 3
-	}
-	if current < 4 {
-		if err := execScript(ctx, s.DB, migration004); err != nil {
-			return fmt.Errorf("apply migration 004: %w", err)
-		}
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (4, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-		current = 4
-	}
-	if current < 5 {
-		if err := execScript(ctx, s.DB, migration005); err != nil {
-			return fmt.Errorf("apply migration 005: %w", err)
-		}
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (5, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-		current = 5
-	}
-	if current < 6 {
-		if err := execScript(ctx, s.DB, migration006); err != nil {
-			return fmt.Errorf("apply migration 006: %w", err)
-		}
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (6, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-		current = 6
-	}
-	if current < 7 {
-		if err := execScript(ctx, s.DB, migration007); err != nil {
-			return fmt.Errorf("apply migration 007: %w", err)
-		}
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (7, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
-		current = 7
-	}
-	if current < 8 {
-		if err := execScript(ctx, s.DB, migration008); err != nil {
-			return fmt.Errorf("apply migration 008: %w", err)
-		}
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (8, ?)`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
-		}
 	}
 	return nil
+}
+
+// schemaBaseline reads the v0.2 baseline marker from the operational metadata
+// table. It reports false when the table or marker is absent.
+func (s *Store) schemaBaseline(ctx context.Context) (string, bool) {
+	var v string
+	if err := s.DB.QueryRowContext(ctx, `SELECT value FROM operational WHERE key = 'schema_baseline'`).Scan(&v); err != nil {
+		return "", false
+	}
+	return v, true
 }
 
 func execScript(ctx context.Context, db *sql.DB, script string) error {

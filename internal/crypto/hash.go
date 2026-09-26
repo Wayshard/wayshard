@@ -1,4 +1,4 @@
-// Package crypto provides credential hashing and identity helpers used by auth and the vault.
+// Package crypto provides credential hashing and identity helpers used by auth and stored credentials.
 package crypto
 
 import (

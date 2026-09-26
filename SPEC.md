@@ -476,7 +476,7 @@ Wayshard-owned components share a release line while tolerating explicitly compa
 - Android official artifacts are signed with a maintainer-generated JKS/PKCS12 upload key and may be published through GitHub Releases. Wayshard does not require Google Play.
 - CLI is distributed as standalone native executables for supported desktop operating systems.
 
-Database migrations ship inside the Go server. Forward migration creates appropriate pre-migration recovery state. Unsupported downgrade does not attempt unsafe automatic reverse migration.
+Database migrations ship inside the Go server. v0.2 is the baseline schema (version 1): a fresh installation applies a single baseline, and post-v0.2 schema changes add numbered forward migrations. Wayshard does not upgrade pre-v0.2 databases; it refuses to open one and tells the operator to remove the old Wayshard data directory and start fresh. Downgrades are not attempted.
 
 Server backup covers control-plane SQLite state, object store, and relevant configuration. Source repositories are not included by default and the UI/documentation must say so clearly. Wayshard credentials live in restricted config files and are excluded from a control-plane backup by default.
 

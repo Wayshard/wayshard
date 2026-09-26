@@ -180,7 +180,7 @@ func TestInvalidDeclarationsFailClosed(t *testing.T) {
 		"traversal well_known": `well_known = ["../secret"]`,
 		"path executable":      `executables = ["/usr/bin/evil"]`,
 		"package runner":       `executables = ["npx"]`,
-		"unknown field":        `sandbox = false`,
+		"unknown field":        `unknown_option = true`,
 		"bad acp":              `acp = "unrestricted"`,
 	}
 	for name, body := range cases {

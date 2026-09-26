@@ -83,7 +83,7 @@ func initContamRepo(t *testing.T, dir string) {
 // second-audit failure: validation writes must not reach RunDelta or source.
 func TestValidationDoesNotContaminateWhenHarnessWritesNothing(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("validation sandbox execution is verified on Linux")
+		t.Skip("validation workspace symlink/mode isolation is verified on Linux")
 	}
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -125,7 +125,7 @@ func TestValidationDoesNotContaminateWhenHarnessWritesNothing(t *testing.T) {
 // may appear.
 func TestValidationDoesNotContaminateAgentDelta(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("validation sandbox execution is verified on Linux")
+		t.Skip("validation workspace symlink/mode isolation is verified on Linux")
 	}
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -180,7 +180,7 @@ func TestValidationDoesNotContaminateAgentDelta(t *testing.T) {
 // into RunDelta or source.
 func TestValidationFailureDoesNotContaminate(t *testing.T) {
 	if runtime.GOOS != "linux" {
-		t.Skip("validation sandbox execution is verified on Linux")
+		t.Skip("validation workspace symlink/mode isolation is verified on Linux")
 	}
 	bin := buildFakeACP(t)
 	t.Setenv("PATH", filepath.Dir(bin)+string(os.PathListSeparator)+os.Getenv("PATH"))

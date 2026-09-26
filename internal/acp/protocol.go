@@ -288,14 +288,6 @@ func (c AgentCapabilities) HasNativeResume() bool {
 	return false
 }
 
-func (c AgentCapabilities) NativeSandboxAdvertised() bool {
-	if len(c.Auth) == 0 && len(c.SessionCapabilities) == 0 {
-		return false
-	}
-	blob := string(c.SessionCapabilities) + string(c.Auth)
-	return strings.Contains(strings.ToLower(blob), "sandbox")
-}
-
 type AuthMethod struct {
 	ID          string `json:"id"`
 	Name        string `json:"name,omitempty"`

@@ -61,7 +61,7 @@ func TestToolRunsInWorkspace(t *testing.T) {
 
 // TestToolWritesWorkspace proves a tool command can write inside the run
 // workspace. Tool commands run as the server OS user; read-only stage intent is
-// enforced at the ACP file-callback layer, not by an OS sandbox.
+// enforced at the ACP file-callback layer.
 func TestToolWritesWorkspace(t *testing.T) {
 	rw, ws := newTestToolManager(t, domain.StageExecute)
 	runTool(t, rw, "/bin/sh", "-c", "echo x > allowed.txt")
