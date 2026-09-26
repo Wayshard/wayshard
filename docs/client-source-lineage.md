@@ -149,7 +149,7 @@ wrapper fails. No live client source may contain an `@opencode-ai/` import
 specifier. This makes it impossible to delete the adapted application/TUI
 foundation and replace it with a small fresh app while passing.
 
-## Signature surface ancestry (final Pass 1E)
+## Signature surface ancestry
 
 | OpenCode source | Wayshard live file | Mode | Production use |
 | --- | --- | --- | --- |
@@ -170,7 +170,7 @@ The lineage test additionally verifies production usage: each entry with a
 `usage` list must be referenced by the listed live file, so the adapted
 components cannot be present-but-unused.
 
-## Application-level descendants (Pass 1E port)
+## Application-level descendants
 
 The production graphical application composition now descends from the actual
 OpenCode application source, with Wayshard adapted into it:

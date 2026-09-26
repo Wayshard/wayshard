@@ -260,22 +260,13 @@ Device revocation invalidates future API/WebSocket access but does not cancel se
 
 Wayshard Server binds to `127.0.0.1` by default and serves HTTP/WebSocket locally.
 
-Wayshard deliberately does not implement:
-
-- certificate issuance/renewal;
-- private CA management;
-- VPN/tailnet operation;
-- DNS;
-- public remote exposure;
-- reverse-proxy management.
-
-Users expose the loopback service through infrastructure they control. An advertised pairing URL may differ from the local listening URL.
+Remote exposure, TLS certificates, private CAs, VPNs/tailnets, DNS, and reverse proxies belong to the user's networking layer. Users expose the loopback service through infrastructure they control. An advertised pairing URL may differ from the local listening URL.
 
 Tailscale Serve is a documented deployment example, not an architectural dependency.
 
 ## 12. Wayshard credentials
 
-Wayshard-owned credentials (the server identity private key, Jev/control-plane credentials, device material) are stored in restricted user config files, not in an encrypted vault and not in ordinary SQLite fields.
+Wayshard-owned credentials (the server identity private key, Jev/control-plane credentials, device material) are stored in restricted user config files, kept out of ordinary SQLite fields.
 
 ```text
 Credential store (server data dir)
@@ -285,7 +276,7 @@ Credential store (server data dir)
 
 - The credential directory is created `0700` and each file is written `0600` (the user-profile ACL on Windows).
 - Environment variables (for example `TYPESAFE_API_KEY` for Jev) are accepted and take precedence where applicable.
-- No OS keyring or vault unlock is required, so the server runs on headless, container, and minimal systems.
+- The server runs on headless, container, and minimal systems without an external credential service.
 - Normal APIs expose credential status/metadata, never plaintext values.
 - Plaintext secrets are never written to ordinary SQLite fields, logs, artifacts, or diagnostics.
 
@@ -313,7 +304,7 @@ HarnessInstallation (an actual discovered installation)
 
 A versioned TOML catalog ships embedded in the binaries (`internal/harness/harnesses.toml`, `schema_version = 1`). A user catalog at the platform config path (`$XDG_CONFIG_HOME/wayshard/harnesses.toml`, with the normal per-platform fallbacks) overrides or extends it. Merge is by stable `id`: user fields override shipped fields by key (arrays replace), `enabled = false` disables a shipped definition, deleting the override restores it, a user-only id creates a custom definition, and duplicate ids within one source are rejected. One invalid entry is isolated so it cannot destroy otherwise-valid definitions; malformed TOML and unsupported future schema versions are rejected with diagnostics. The catalog is loaded at server startup; a restart applies changes (there is no file-watcher subsystem).
 
-**The catalog is a discovery/launch declaration, not a containment policy.** Discovered harnesses run as the Wayshard server OS user with their normal configuration, authentication, environment, filesystem, and network access. There is no field to request a sandbox because there is no sandbox. Executable aliases must be bare names and never package-runner launchers (`npx`, `npm`, `bunx`, …); well-known discovery dirs must be home-relative with no traversal; unknown fields or unsupported enum values fail the entry closed. A generous, bounded limit caps catalog bytes, definition count, per-definition list/argument counts and glob matches.
+**The catalog is a discovery/launch declaration.** Discovered harnesses run as the Wayshard server OS user with their normal configuration, authentication, environment, filesystem, and network access. Executable aliases must be bare names and never package-runner launchers (`npx`, `npm`, `bunx`, …); well-known discovery dirs must be home-relative with no traversal; unknown fields or unsupported enum values fail the entry closed. A generous, bounded limit caps catalog bytes, definition count, per-definition list/argument counts and glob matches.
 
 **Installations are reconciled, not accumulated.** Each discovered installation persists the effective definition's *execution fingerprint* (a deterministic SHA-256 over the fields that materially change what is launched: executables, bridges, well-known discovery, version/ACP/bridge args, native-vs-bridge mode, command-interposition behavior, model selection, platforms). A discovered installation is only routable while the current effective catalog still has an enabled definition with that fingerprint. Refresh atomically replaces the persisted installation set with the latest discovery result, so a disabled, removed or materially changed definition (or a disappeared executable/bridge) cannot leave a stale routable candidate.
 
@@ -358,7 +349,7 @@ ACP stdout is protocol-only; stderr is diagnostic. Frame size, pending request c
 
 ACP terminal/tool callbacks (`terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release`) are interposed by Wayshard: a harness never executes model-generated commands directly. The Tool manager runs each command as the server OS user with the server environment, defaulting the working directory to the run workspace and owning the resulting process tree.
 
-The ACP process runs in its own process group so cancellation, timeout, and shutdown terminate the process tree best-effort (SIGTERM then SIGKILL on Unix; direct kill on Windows). Cleanup is executor hygiene, not a containment boundary: a hostile process that deliberately daemonizes can outlive a crash, and Wayshard does not build a service manager. Durable correctness never depends on killing a process.
+The ACP process runs in its own process group so cancellation, timeout, and shutdown terminate the process tree best-effort (SIGTERM then SIGKILL on Unix; direct kill on Windows). Cleanup is executor hygiene: durability lives in server state rather than process lifetime, so durable correctness never depends on killing a process.
 
 Unknown extension metadata/methods are tolerated according to ACP semantics. Known useful extensions may be adapter-specific but are not required by core orchestration.
 
@@ -547,7 +538,7 @@ Hard deterministic gates cannot be overridden by model prose.
 
 ### 27.1 Trust boundary
 
-Wayshard trusts the OS user running the server. Discovered ACP harnesses, the tools they request, validation commands, and discovery probes all run as that user with their normal configuration, authentication, environment, filesystem, and network access. There is no sandbox, no PID-namespace supervisor, no provider broker, and no fail-closed platform gate.
+Wayshard trusts the OS user running the server. Discovered ACP harnesses, the tools they request, validation commands, and discovery probes all run as that user with their normal configuration, authentication, environment, filesystem, and network access. Approvals, budgets, and routing gate which server operations proceed; they are policy, not OS containment.
 
 Model-generated actions, repository text, tool output, and external content remain untrusted *decision inputs*: the server owns approvals, validation, review, and completion policy. An agent saying it is done is never evidence of completion.
 
@@ -567,11 +558,9 @@ Approvals pause a requested server operation until a client resolves it. A denie
 
 Approved external files normally become immutable read-only snapshots inside the run workspace/object store. Direct external writes should be rare server-controlled publication operations.
 
-## 28. Network separation
+## 28. Network access
 
-Wayshard adds no network policy layer. A discovered harness uses the server OS user's normal network for model/provider control traffic. ACP-requested tool commands and validation commands run with the same network access as the server OS user.
-
-There is no provider broker, destination policy, or provider-only capability. Users who want to bound which hosts a harness or tool can reach do so with their own OS/network controls (firewall, container, Tailscale ACLs), not with a Wayshard feature.
+Harness, tool, and validation processes use the server OS user's normal network for all traffic, including model/provider control traffic. Wayshard adds no network policy layer; to bound which hosts a harness or tool can reach, use OS or network controls such as a firewall, a container, or Tailscale ACLs.
 
 ## 29. Recovery architecture
 
@@ -601,7 +590,7 @@ The scheduler starts only after this recovery completes. Harness discovery/probi
 
 Launched harness/tool/validation/probe processes run as the server OS user. On Unix they run in their own process group so the whole group can be terminated together; on Windows the direct child is terminated. Cancellation, timeout, and shutdown terminate processes best-effort.
 
-Cleanup is best-effort by design. A deliberately daemonizing process can outlive a server crash; Wayshard does not attempt to be a service manager, and durable correctness never depends on killing a process. Recovery reconciles durable state (attempts, checkpoints, runs, journals) rather than process trees.
+Cleanup is best-effort by design. Durability lives in server state rather than process lifetime, so durable correctness never depends on killing a process. Recovery reconciles durable state (attempts, checkpoints, runs, journals) rather than process trees.
 
 Run cancellation is centralized in `ProcessRun`: when the run context is canceled, or a cancellable operation reports a cancellation error (for example a status read or storage call that observes the canceled context), the engine performs the durable cancellation transition (run, running attempts/stages, pending approvals) before returning. A canceled run therefore always converges to a terminal CANCELLED state, independent of best-effort process cleanup.
 
@@ -683,7 +672,7 @@ Signing mechanics:
 
 Wayshard-signed is not the same as trusted by Apple or Microsoft platform PKI.
 
-## Client architecture (Pass 1E)
+## Client architecture
 
 ```text
 clients/
@@ -705,13 +694,13 @@ clients/
 ```
 
 The graphical client is one application whose application composition descends
-from the imported OpenCode application source (the previous custom Wayshard shell
-is retired); Web, Desktop and Android differ only by platform adapters (window
-chrome, clipboard, notifications, external open, mobile-safe layout). The TUI is
-a separate terminal-appropriate client built from the imported OpenCode terminal
-foundation. All clients speak only Wayshard domain HTTP/JSON and WebSocket APIs;
-none speaks ACP or OpenCode. Live updates use the durable event stream (`/v1/ws`)
-with reconnect and polling only as a narrow fallback.
+from the imported OpenCode application source; Web, Desktop and Android differ
+only by platform adapters (window chrome, clipboard, notifications, external
+open, mobile-safe layout). The TUI is a separate terminal-appropriate client
+built from the imported OpenCode terminal foundation. All clients speak only
+Wayshard domain HTTP/JSON and WebSocket APIs; none speaks ACP or OpenCode. Live
+updates use the durable event stream (`/v1/ws`) with reconnect and polling only
+as a narrow fallback.
 
 Application-icon assets have one repository-owned source of truth:
 `assets/branding/wayshard.png`. Committed desktop derivatives live in

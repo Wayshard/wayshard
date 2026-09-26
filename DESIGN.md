@@ -400,7 +400,7 @@ Jev appears as control-plane infrastructure with connection status, configured m
 
 ### 19.5 Security
 
-State the execution trust model plainly: discovered harnesses and their tools run as the server OS user with their normal configuration and network access; there is no sandbox. Expose policy Wayshard actually owns, such as workspace isolation, external file imports, approvals, budgets, and Git push/force-push behavior. Previously granted persistent permissions should be reviewable/revocable.
+State the execution model plainly: discovered harnesses and their tools run as the server OS user with their normal configuration and network access. Expose policy Wayshard actually owns, such as workspace isolation, external file imports, approvals, budgets, and Git push/force-push behavior. Previously granted persistent permissions should be reviewable/revocable.
 
 ### 19.6 Storage
 
@@ -489,7 +489,7 @@ Platform presentation may adapt the container without altering the mark: transpa
 - Do not hide meaningful recovery or conflicts.
 - Do not turn Wayshard into a Git client, IDE, networking appliance, model credential manager, or workflow-management suite beyond the product requirements.
 
-## 25. Client source lineage (Pass 1E)
+## 25. Client source lineage
 
 The live graphical client and TUI are adapted from the imported OpenCode 2
 application source, not recreated. The graphical **application composition** —

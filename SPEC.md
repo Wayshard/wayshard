@@ -252,7 +252,7 @@ If Jev is unavailable after bounded retry/backoff, Wayshard uses a deterministic
 
 Wayshard uses coding harnesses already installed and available to the OS account running the server.
 
-Wayshard ships a versioned TOML catalog of supported harness definitions and automatically discovers installed members of the effective catalog. Users add, override, disable, or remove definitions by editing the user catalog (the CRUD interface); there is no catalog CRUD API or UI editor. A definition describes how Wayshard recognizes, probes, and invokes a harness family; an installation is an actual discovered executable. The catalog is a discovery/launch declaration, not a containment policy: discovered harnesses run as the server OS user with their normal configuration, authentication, environment, filesystem, and network access. Adding an ordinary compatible ACP harness requires catalog TOML, not a code change. A route whose definition is missing from the effective catalog is not routable.
+Wayshard ships a versioned TOML catalog of supported harness definitions and automatically discovers installed members of the effective catalog. Users add, override, disable, or remove definitions by editing the user catalog (the CRUD interface); there is no catalog CRUD API or UI editor. A definition describes how Wayshard recognizes, probes, and invokes a harness family; an installation is an actual discovered executable. The catalog is a discovery/launch declaration: discovered harnesses run as the server OS user with their normal configuration, authentication, environment, filesystem, and network access. Adding an ordinary compatible ACP harness requires catalog TOML, not a code change. A route whose definition is missing from the effective catalog is not routable.
 
 Wayshard never performs harness or bridge installation through package managers, installers, `npx`, shell downloads, privilege escalation, or similar mechanisms.
 
@@ -390,13 +390,13 @@ External file access normally imports a read-only immutable input snapshot rathe
 
 ## 19. Credential storage
 
-Wayshard-owned credentials (for example the server identity private key, or a Jev control-plane credential) are stored in restricted user config files rather than an encrypted vault or OS keyring.
+Wayshard-owned credentials (for example the server identity private key, or a Jev control-plane credential) are stored in restricted user config files.
 
 - The server identity directory is created `0700` and each credential file is written `0600` (the user-profile ACL on Windows).
 - Credentials may also be supplied through environment variables (for example `TYPESAFE_API_KEY` for Jev), which take precedence where applicable.
-- No OS keyring or vault unlock is required, so the server runs on headless and minimal systems.
+- The server runs on headless and minimal systems without an external credential service.
 - Normal APIs reveal credential status/metadata, not plaintext values.
-- Plaintext secrets are never written to ordinary SQLite fields, logs, artifacts, or diagnostics.
+- Plaintext secrets stay out of ordinary SQLite fields, logs, artifacts, and diagnostics.
 
 Harness-owned provider credentials remain owned and stored by the harness; Wayshard does not read, scrape, or duplicate them.
 
@@ -508,7 +508,7 @@ Third-party coding harnesses and ACP bridges are never bundled or installed by W
 
 Desktop bundle configuration references committed PNG, ICNS, and ICO derivatives. The Web build publishes favicon, Apple touch, and installable Web-app icon derivatives plus a Web manifest. Because the generated Android project is created during release CI, its launcher and adaptive-icon resources are regenerated from the canonical source immediately after `tauri android init` and before the signed APK build.
 
-## 27. Client implementation foundation (Pass 1E)
+## 27. Client implementation foundation
 
 The Web, Desktop and Android clients are one shared graphical application adapted
 from the imported OpenCode 2 application source, mounted by Web and hosted by
