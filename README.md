@@ -284,7 +284,7 @@ Imported or bundled third-party MIT-licensed source remains subject to its requi
 
 ## Development
 
-Prerequisites: Go 1.24+, bun, git. Desktop also needs a Rust toolchain and Tauri WebKit libraries. Android needs JDK 17 and an Android SDK.
+Prerequisites: Go 1.25+, bun, git. Desktop also needs a Rust toolchain and Tauri WebKit libraries. Android needs JDK 17 and an Android SDK.
 
 ```sh
 make test

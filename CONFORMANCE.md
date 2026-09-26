@@ -143,6 +143,7 @@ cleanup, routing, and harness-owned credentials.
 | Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`desktop-macos-checksums`/`android`/`checksums` | `make release-scripts-test` (overlapping globs cannot duplicate server rows); `desktop_macos_checksums_test.sh` proves both macOS DMGs appear exactly once, order-independent | done |
 | CycloneDX SBOM (not `go version -m`) | `scripts/release/sbom.sh` | fails the release job on generator/validation error | done |
 | Frozen client lockfile on release (and PR client install) | `bun install --frozen-lockfile` in `ci.yml` + `release.yml` | lockfile `clients/bun.lock` | done |
+| Dependency-security triage of Dependabot findings (reachability, minimum safe version, upgrade risk) | `go.mod`, `clients/web/package.json`, `clients/bun.lock`, `clients/desktop/src-tauri/Cargo.lock`; record in `docs/dependency-security.md` | reachability via `go list -deps`/`go mod why`/`cargo tree`; upgrades validated by `make ci` + client typecheck/tests | done (accepted `glib` documented) |
 | Release credentials isolated | `environment: release` on publish jobs; `ci.yml` has no `secrets.*` | `release_policy_test.sh`; PR CI remains secret-free | done |
 | Web embedded in server | `internal/webembed` | embed dist before `make build-cross` | done |
 

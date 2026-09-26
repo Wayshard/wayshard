@@ -1,14 +1,14 @@
 module github.com/Wayshard/wayshard
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/BurntSushi/toml v1.4.0
 	github.com/coder/websocket v1.8.14
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
-	golang.org/x/crypto v0.45.0
-	golang.org/x/sys v0.38.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/sys v0.45.0
 	modernc.org/sqlite v1.40.0
 )
 
