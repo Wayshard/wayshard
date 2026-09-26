@@ -73,8 +73,20 @@ func TestNativeProcessEnvironmentAndQuoting(t *testing.T) {
 	}
 
 	rec := readLaunchRecord(t, record)
-	if filepath.Clean(rec.Cwd) != filepath.Clean(cwd) {
-		t.Fatalf("harness cwd = %q, want %q", rec.Cwd, cwd)
+	// Compare directory identity, not path strings: macOS resolves a requested
+	// /var/... temp dir to /private/var/..., and other platforms may also report
+	// an equivalent canonical path. os.Stat + os.SameFile compares the underlying
+	// directory across those aliases without special-casing any prefix.
+	wantInfo, err := os.Stat(cwd)
+	if err != nil {
+		t.Fatalf("stat requested cwd %q: %v", cwd, err)
+	}
+	gotInfo, err := os.Stat(rec.Cwd)
+	if err != nil {
+		t.Fatalf("stat harness cwd %q: %v", rec.Cwd, err)
+	}
+	if !os.SameFile(wantInfo, gotInfo) {
+		t.Fatalf("harness cwd = %q, want the same directory as %q", rec.Cwd, cwd)
 	}
 	if len(rec.Args) != 1 || rec.Args[0] != argValue {
 		t.Fatalf("harness args = %q, want [%q]", rec.Args, argValue)
