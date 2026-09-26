@@ -70,7 +70,47 @@ type Engine struct {
 
 func (e *Engine) budgets() Budgets { return e.Budget.withDefaults() }
 
+// processRunObserver, when non-nil, is invoked at cancellation-vulnerable points
+// inside processRun so tests can force cancellation deterministically instead of
+// relying on timing. Production leaves it nil; it never changes behavior beyond
+// invoking the callback.
+var processRunObserver func(step string)
+
+func observeProcessRun(step string) {
+	if processRunObserver != nil {
+		processRunObserver(step)
+	}
+}
+
+// ProcessRun drives a run until it reaches a terminal state.
+//
+// Cancellation is handled centrally: if the run context is canceled, or a
+// cancellable operation reports a cancellation error, ProcessRun performs the
+// same durable cancellation transition used by the in-loop checks before
+// returning. This closes the race where a canceled context escapes from a
+// storage or stage call (for example a status read right after a stage) and
+// leaves the run stuck in a non-terminal state. The transition updates durable
+// state only; it does not depend on best-effort descendant process cleanup.
+//
+// A genuine non-cancellation error is still returned to the caller even if
+// cancellation happened to coincide with it.
 func (e *Engine) ProcessRun(ctx context.Context, runID string) error {
+	err := e.processRun(ctx, runID)
+	if ctx.Err() == nil && !isContextCancellation(err) {
+		return err
+	}
+	markErr := e.markCancelled(ctx, runID)
+	if err == nil || isContextCancellation(err) {
+		return markErr
+	}
+	return err
+}
+
+func isContextCancellation(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func (e *Engine) processRun(ctx context.Context, runID string) error {
 	run, err := e.Store.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -90,6 +130,7 @@ func (e *Engine) ProcessRun(ctx context.Context, runID string) error {
 		if err := e.assess(ctx, run, task); err != nil {
 			return err
 		}
+		observeProcessRun("assess")
 		run, _ = e.Store.GetRun(ctx, run.ID)
 	}
 	for !run.Status.Terminal() {
@@ -117,6 +158,7 @@ func (e *Engine) ProcessRun(ctx context.Context, runID string) error {
 		default:
 			return nil
 		}
+		observeProcessRun("status")
 		run, err = e.Store.GetRun(ctx, run.ID)
 		if err != nil {
 			return err

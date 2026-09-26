@@ -603,6 +603,8 @@ Launched harness/tool/validation/probe processes run as the server OS user. On U
 
 Cleanup is best-effort by design. A deliberately daemonizing process can outlive a server crash; Wayshard does not attempt to be a service manager, and durable correctness never depends on killing a process. Recovery reconciles durable state (attempts, checkpoints, runs, journals) rather than process trees.
 
+Run cancellation is centralized in `ProcessRun`: when the run context is canceled, or a cancellable operation reports a cancellation error (for example a status read or storage call that observes the canceled context), the engine performs the durable cancellation transition (run, running attempts/stages, pending approvals) before returning. A canceled run therefore always converges to a terminal CANCELLED state, independent of best-effort process cleanup.
+
 Graceful shutdown stops new work, drains/checkpoints active runs where practical, marks interrupted attempts accurately, and then terminates managed processes best-effort.
 
 ## 31. Failure taxonomy
