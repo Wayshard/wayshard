@@ -1,7 +1,16 @@
 #!/usr/bin/env bun
-import "@opentui/solid/preload"
 // Wayshard TUI entry point. Interactive terminal client adapted from the
 // imported OpenCode 2 terminal UI foundation.
+//
+// The Solid JSX transform is supplied by `bunfig.toml` `preload` for `bun run`
+// and by `createSolidTransformPlugin()` in build.ts for the compiled release.
+//
+// Do NOT add a static `import "@opentui/solid/preload"` here. A compiled Bun
+// executable resolves such imports at runtime, so the packaged companion picked
+// up whatever `@opentui/solid` happened to be resolvable from the caller's
+// working directory and failed with `preload not found` when that copy did not
+// match the bundled one. Keeping the companion free of runtime module
+// resolution makes it cwd-independent; see scripts/ci/tui_cwd_smoke.sh.
 import { versionLine } from "./version"
 
 // Non-interactive introspection must work without initializing the renderer, so

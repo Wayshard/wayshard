@@ -180,6 +180,23 @@ jobs:
           WAYSHARD_REQUIRE_NSIS: "1"
         run: make release-scripts-test
 
+  reproducible:
+    name: Reproducible builds (local)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Builds the same cross-compiled server+CLI layout and CLI+TUI archives the
+      # release workflow produces, then runs the exact comparison the tagged
+      # release `reproducible` job runs (scripts/release/verify-reproducible.sh
+      # --assets). No tag and no publishing are involved.
+      - name: Build a local artifact set and run the shared verification
+        run: |
+          chmod +x scripts/release/verify-reproducible.sh
+          bash scripts/release/verify-reproducible.sh --build v0.0.0-ci "${GITHUB_SHA}" "$RUNNER_TEMP/wayshard-repro"
+
   canonicals:
     name: Canonicals present
     runs-on: ubuntu-24.04

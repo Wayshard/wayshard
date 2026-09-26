@@ -17,6 +17,23 @@ const target = process.env.TUI_TARGET
 // reports the release tag/commit without reading any external file.
 const version = process.env.WAYSHARD_TUI_VERSION ?? "0.0.0-dev"
 const commit = process.env.WAYSHARD_TUI_COMMIT ?? "unknown"
+
+// A packaged companion must be independent of the caller's working directory.
+// A compiled Bun executable otherwise autoloads bunfig.toml (and .env) from the
+// cwd at runtime, so launching the TUI from a directory containing a bunfig
+// `preload` — for example the TUI's own workspace source tree, or any unrelated
+// project — failed with `preload not found "@opentui/solid/preload"`. Disable
+// every runtime autoload so the shipped binary carries all of its own code.
+// Regression coverage: scripts/ci/tui_cwd_smoke.sh.
+const compile: Bun.Build.CompileBuildOptions = {
+  outfile,
+  autoloadBunfig: false,
+  autoloadDotenv: false,
+  autoloadTsconfig: false,
+  autoloadPackageJson: false,
+}
+if (target) compile.target = target
+
 const result = await Bun.build({
   entrypoints: ["./src/index.tsx"],
   target: "bun",
@@ -25,7 +42,7 @@ const result = await Bun.build({
     __WAYSHARD_TUI_VERSION__: JSON.stringify(version),
     __WAYSHARD_TUI_COMMIT__: JSON.stringify(commit),
   },
-  compile: target ? { outfile, target } : { outfile },
+  compile,
 })
 if (!result.success) {
   for (const log of result.logs) console.error(log)

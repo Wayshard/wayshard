@@ -116,6 +116,7 @@ harness.
 | Web mounts the shared graphical client | `clients/web/src/wayshard/main.tsx` → `@wayshard/gui` | vite build | done |
 | Desktop/Android Tauri 2 hosts the shared GUI | `clients/desktop` (`frontendDist ../../web/dist`), `ANDROID.md` | desktop `tsc` typecheck | done (packaging; on-device runtime unverified in CI) |
 | Real OpenTUI TUI | `clients/tui` (`@opentui/solid` + imported theme system) | `clients/tui/src/model.test.ts`; TUI launches and renders | done |
+| Packaged TUI is independent of the caller cwd/module resolution: the compiled companion carries all its code and does not autoload the caller's `bunfig.toml`/`.env` | `clients/tui/build.ts` (`autoloadBunfig/autoloadDotenv/autoloadTsconfig/autoloadPackageJson: false`) | `scripts/ci/tui_cwd_smoke.sh` via `scripts/ci/tui_smoke.sh`: launches the shipped companion from repo root, `clients/`, `clients/tui`, a clean temp dir, a temp dir with unrelated `node_modules`, and a temp dir with a `bunfig.toml` preload | done |
 | Shared SDK + live events | `clients/sdk` (HTTP/WS), `clients/gui/src/wayshard/state.tsx` | sdk unit test | done |
 | Live clients carry no OpenCode runtime/import specifier | `clients/{sdk,ui,gui,web,tui}` | `lineage.test.ts` asserts no `@opencode-ai/` in live source | done |
 | Source lineage is verifiable | `clients/lineage.manifest.json`, `docs/client-source-lineage.md` | `lineage.test.ts` (subtree sizes/markers) | done |
@@ -125,7 +126,7 @@ harness.
 | Requirement | Code | Tests | Status |
 |---|---|---|---|
 | PR CI without secrets, paid models, or installed harnesses | `.github/workflows/ci.yml` | workflow | done |
-| Reproducible release builds: commit-derived build date, `-trimpath`, one shared flag set, single CLI build, standalone CLI == bundled CLI per platform plus same-commit rebuild proof | `Makefile`, `scripts/release/verify-reproducible.sh`, `.github/workflows/release.yml` (`reproducible`) | `scripts/release/verify-reproducible.sh` in the release `reproducible` job | done |
+| Reproducible builds on one shared path: commit-derived build date, `-trimpath`, one shared flag set, single CLI build, standalone CLI == bundled CLI per platform plus same-commit rebuild proof. `verify-reproducible.sh --assets` (tagged release) and `--build` (normal CI) run the identical comparison | `Makefile`, `scripts/release/verify-reproducible.sh`, `.github/workflows/release.yml` (`reproducible`), `.github/workflows/ci.yml` (`reproducible`) | `reproducible` jobs in both workflows; local `scripts/release/verify-reproducible.sh --build` build/compare path | done |
 | Compiled TUI reports its release identity | `clients/tui/build.ts`, `clients/tui/src/version.ts`, `clients/tui/src/index.tsx` | `clients/tui/src/version.test.ts`, `scripts/ci/tui_smoke.sh` (`--version` assertion) | done |
 | CycloneDX SBOM license metadata from real dependency license evidence; unknown licenses fail rather than fabricate | `scripts/release/sbom.sh` | `sbom.sh` post-generation validation (release `release` job) | done |
 | First-party installers (Linux/macOS `sh`, Windows `ps1`): latest-stable resolution, OS/arch detection, checksum + optional minisign verification, atomic user install, idempotent PATH | `scripts/install.sh`, `scripts/install.ps1` | `scripts/release/install_sh_test.sh`, `scripts/release/install_ps1_test.ps1`, `.github/workflows/ci.yml` (`installers` matrix) | done |
@@ -145,7 +146,7 @@ harness.
 | Checksums once per file, all downloadable artifacts | `scripts/release/checksums.py`, jobs `release`/`desktop`/`desktop-macos-checksums`/`android`/`checksums` | `make release-scripts-test`; `desktop_macos_checksums_test.sh` proves both macOS DMGs appear exactly once, order-independent | done |
 | CycloneDX SBOM | `scripts/release/sbom.sh` | fails the release job on generator/validation error | done |
 | Frozen client lockfile on release and PR install | `bun install --frozen-lockfile` in `ci.yml` + `release.yml` | lockfile `clients/bun.lock` | done |
-| Dependency-security triage of Dependabot findings (reachability, minimum safe version, upgrade risk) | `go.mod`, `clients/web/package.json`, `clients/bun.lock`, `clients/desktop/src-tauri/Cargo.lock`; record in `docs/dependency-security.md` | reachability via `go list -deps`/`go mod why`/`cargo tree`; upgrades validated by `make ci` + client typecheck/tests | done (accepted `glib` documented) |
+| Dependency-security triage of Dependabot findings (reachability, minimum safe version, upgrade risk) | `go.mod`, `clients/web/package.json`, `clients/bun.lock`, `clients/desktop/src-tauri/Cargo.lock`; record in `docs/dependency-security.md` | reachability via `go list -deps`/`go mod why`/`cargo tree`; upgrades validated by `make ci` + client typecheck/tests | done (accepted `glib` re-triaged: no in-range fix; blocked by tauri/wry `gtk ^0.18`) |
 | Release credentials isolated | `environment: release` on publish jobs; `ci.yml` has no `secrets.*` | `release_policy_test.sh`; PR CI remains secret-free | done |
 | Web embedded in server | `internal/webembed` | embed dist before `make build-cross` | done |
 

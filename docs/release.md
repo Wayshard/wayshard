@@ -145,10 +145,13 @@ Release builds are reproducible and self-consistent:
 - The CLI is built exactly once, in the `release` job. The CLI+TUI bundles fetch
   that published artifact instead of rebuilding it, so the standalone CLI and
   the CLI inside every archive are byte-identical on every platform.
-- The `reproducible` job (`scripts/release/verify-reproducible.sh`) proves both
-  claims in CI: standalone `wayshard` equals the bundled `wayshard` for each
-  platform, and a fresh same-commit rebuild of the host CLI equals the published
-  standalone binary.
+- One verification script covers both the tagged and untagged paths:
+  `scripts/release/verify-reproducible.sh --assets <tag> <commit> <dir>` runs in
+  the tagged release `reproducible` job, and `--build <version> <commit> <dir>`
+  builds the same artifact layout locally and runs the *identical* comparison in
+  normal CI (the `reproducible` CI job) with no tag and no publishing. Both prove
+  standalone `wayshard` equals the bundled `wayshard` per platform, and that a
+  fresh same-commit rebuild of the host CLI equals the standalone binary.
 
 ## TUI version identity
 
@@ -157,6 +160,15 @@ compiled into the executable by `clients/tui/build.ts` (`WAYSHARD_TUI_VERSION`
 and `WAYSHARD_TUI_COMMIT`); a source build reports the `0.0.0-dev` fallback. The
 `tui` CI job builds with a fixture version and asserts the output, and the
 release `tui` job stamps the real tag and commit.
+
+The packaged companion is also independent of the caller's working directory and
+module resolution. The build disables runtime autoloading of
+`bunfig.toml`/`.env`/`tsconfig.json`/`package.json`, so a directory that happens
+to contain a `preload` (for example the TUI workspace itself) can no longer make
+the shipped binary fail with `preload not found`. `scripts/ci/tui_cwd_smoke.sh`
+(part of the shipped `tui` smoke) proves this from the repo root, `clients/`,
+`clients/tui`, a clean temp dir, a temp dir with unrelated `node_modules`, and a
+temp dir with a `bunfig.toml` preload.
 
 ## Installing a release
 

@@ -16,7 +16,7 @@ is decided from the real import/link graph (`go list -deps`, `go mod why`,
 |---|---|---|---|---|---|---|---|
 | `golang.org/x/crypto` | 13 | 7 critical, 2 high, 4 medium | `go.mod` (Server + CLI, runtime) | production runtime | No — all advisories are in `x/crypto/ssh*`; only `argon2`/`blake2b` are linked | 0.52.0 | upgraded 0.45.0 → 0.52.0 |
 | `vite` | 8 | 3 high, 5 medium/low | `clients/web/package.json` (Web build tool) | dev/build only | No — dev-server only; production serves static build output | 7.3.5 | upgraded 7.1.4 → 7.3.5 |
-| `glib` | 1 | medium | `clients/desktop/src-tauri/Cargo.lock` (Tauri/gtk, Linux desktop) | production runtime (transitive) | No — Wayshard Rust does not use `glib`/`VariantStrIter` | 0.20.0 (requires gtk-rs 0.20) | accepted, documented (no forced Tauri/gtk stack upgrade) |
+| `glib` | 1 | medium | `clients/desktop/src-tauri/Cargo.lock` (Tauri/gtk, Linux desktop) | production runtime (transitive, Linux desktop only) | No — Wayshard Rust does not use `glib`/`VariantStrIter` | 0.20.0 (needs gtk-rs ≥ 0.19) | accepted, documented (blocked: tauri/wry require `gtk ^0.18`; no in-range patched glib) |
 
 ## `golang.org/x/crypto` (Server / CLI)
 
@@ -81,23 +81,45 @@ is decided from the real import/link graph (`go list -deps`, `go mod why`,
 | #2 | low | GHSA-g4jq-h2w9-997c | dev middleware public-dir prefix |
 | #1 | low | GHSA-jqfw-vq24-v9c3 | dev `server.fs` HTML handling |
 
-## `glib` (Desktop, Linux) — accepted
+## `glib` (Desktop, Linux) — accepted (re-triaged)
 
 - Owning manifest: `clients/desktop/src-tauri/Cargo.lock`.
-- Dependency path: `tauri 2.11.6 → wry/tao/muda → gtk 0.18 → glib 0.18.5`
-  (also `webkit2gtk`, `gdk`, `atk`, `cairo-rs`).
-- Class: production runtime, but transitive and **Linux-desktop only**.
-- Reachability: the advisory (GHSA-wrw7-89jp-8q8g, unsound `Iterator` impls for
-  `glib::VariantStrIter`) requires calling that iterator. Wayshard's Rust shell
-  (`clients/desktop/src-tauri/src`) does not reference `glib` or
-  `VariantStrIter` (`grep` finds no use); the gtk stack is driven by Tauri/wry.
-- Minimum safe version: `glib 0.20.0`. This is part of the gtk-rs 0.20 stack, so
-  it cannot be bumped independently of `gtk 0.18` — it requires a whole
-  Tauri/wry/gtk-rs move.
-- Decision: **accepted and documented** rather than forcing churn. The vulnerable
-  API is not used by Wayshard code, the exposure is Linux-desktop-only, and the
-  fix is a broad GUI-stack upgrade with real regression risk. Revisit when a
-  Tauri release moves to gtk-rs 0.20.
+- Current chain (`cargo tree --locked -i glib`):
+  `wayshard-desktop → tauri 2.11.6 → {tauri-runtime-wry 2.11.4 → wry 0.55.1,
+  muda 0.19.3, tao 0.35.3, webkit2gtk 2.0.2, gtk 0.18.2} → gdk/atk/cairo-rs
+  0.18 → glib 0.18.5`.
+- Class: production runtime, transitive, **Linux-desktop only**.
+- Reachability: the advisory (`GHSA-wrw7-89jp-8q8g`, medium) is unsoundness in
+  the `Iterator`/`DoubleEndedIterator` impls for `glib::VariantStrIter`.
+  Wayshard's Rust shell does not reference `glib` or `VariantStrIter`
+  (`grep -rn "glib\|VariantStrIter" src` finds nothing); the GTK stack is driven
+  by Tauri/wry and Wayshard code never constructs the affected iterator.
+- Fix availability: patched in `glib 0.20.0`. There is **no patched 0.18.x**
+  (`0.18.5` is the newest 0.18 release). `gtk 0.19.0` is the first gtk-rs stack
+  that depends on `glib ^0.22`.
+- Blocking dependency (re-verified 2026-09-26 against the current graph):
+  - `tauri 2.11.6` requires `gtk ^0.18` directly, which pins `glib` to `0.18.x`.
+    Even `tauri 3.0.0-alpha.2` still requires `gtk ^0.18`.
+  - Both the locked `wry 0.55.1` and the latest `wry 0.57.0` require `gtk ^0.18`.
+  - `cargo update -p glib --precise 0.22.10 --dry-run` fails:
+    `failed to select a version for the requirement 'glib = "^0.18"' … required
+    by package 'gtk v0.18.2'`.
+  - `cargo update -p gtk --precise 0.19.0 --dry-run` fails:
+    `failed to select a version for the requirement 'gtk = "^0.18"' … required
+    by package 'tauri v2.11.6'`.
+- Smallest safe upgrade: **none available today**. A `[patch]` forcing
+  `glib >= 0.20` would violate `gtk 0.18`'s `glib ^0.18` requirement and mix
+  incompatible gtk-rs generations, so it is not safe.
+- Future upgrade path: adopt a `tauri`/`wry` release whose GTK dependency moves
+  from `^0.18` to `^0.19` or newer (which resolves `glib ^0.22`, patched). Then
+  bump `tauri` in `clients/desktop/src-tauri/Cargo.toml`, run `cargo update`,
+  confirm `cargo tree --locked -i glib` resolves to `>= 0.22`, and re-run the
+  desktop packaging jobs plus `icon_policy_test.sh`.
+- Decision: **accepted and documented**. The exposure is Linux-desktop-only,
+  the crate is transitive, the vulnerable iterator is never constructed by
+  Wayshard code, and no in-range patched `glib` exists. The open Dependabot
+  alert (#22) is expected until the gtk-rs 0.19 migration lands upstream in
+  Tauri/wry.
 
 ## Re-running the triage
 

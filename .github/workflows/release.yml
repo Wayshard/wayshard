@@ -416,7 +416,7 @@ jobs:
       - name: Standalone CLI == bundled CLI, and same-commit rebuild matches
         run: |
           chmod +x scripts/release/verify-reproducible.sh
-          bash scripts/release/verify-reproducible.sh "${GITHUB_REF_NAME}" "${GITHUB_SHA}" all-assets
+          bash scripts/release/verify-reproducible.sh --assets "${GITHUB_REF_NAME}" "${GITHUB_SHA}" all-assets
 
   checksums:
     name: Combined SHA256SUMS

@@ -97,4 +97,8 @@ if [[ -n "$expect_version" ]]; then
     esac
   fi
 fi
+
+# D: the packaged companion must not depend on the caller's cwd / module
+# resolution (workspace node_modules, an unrelated bunfig preload, ...).
+bash "$ROOT/scripts/ci/tui_cwd_smoke.sh" "$extract/wayshard-tui${ext}" "$expect_version"
 echo "tui smoke ok"
