@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -214,12 +215,17 @@ func TestDeviceRevokeDoesNotRequireRunCancel(t *testing.T) {
 	}
 }
 
-// TestOpenPathWithSpecialCharacters proves the DSN is URL-escaped so a data
-// directory containing URI-significant characters (for example '#') opens its
-// own database.
+// TestOpenPathWithSpecialCharacters proves the DSN escapes the characters that
+// would otherwise break it (for example '#' and '%'), so a data directory with
+// such characters opens its own database. '?' is exercised off Windows only,
+// because it is not a legal Windows path character.
 func TestOpenPathWithSpecialCharacters(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "a#b?c d")
+	name := "a#b%c d"
+	if runtime.GOOS != "windows" {
+		name = "a#b?c% d"
+	}
+	root := filepath.Join(t.TempDir(), name)
 	s, err := Open(ctx, root)
 	if err != nil {
 		t.Fatal(err)
